@@ -1,0 +1,13 @@
+{
+  "current_write_db": "brv_db_1",
+  "databases": [
+    "brv_db_1"
+  ],
+  "storage_usage": {
+    "brv_db_1": {
+      "total_gb": 20,
+      "used_gb": 0,
+      "last_checked": ""
+    }
+  }
+}
