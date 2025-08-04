@@ -1,0 +1,14 @@
+# GitHub Setup Instructions
+
+1. Create a GitHub Repository
+   - Go to https://github.com/new
+   - Enter "BRV1" as the Repository name
+   - Choose Public or Private visibility
+   - Click "Create repository"
+
+2. Connect Your Local Repository
+   - Run these commands (replace YOUR-USERNAME with your GitHub username):
+     git remote add origin https://github.com/YOUR-USERNAME/BRV1.git
+     git push -u origin master
+
+3. If prompted, enter your GitHub credentials
