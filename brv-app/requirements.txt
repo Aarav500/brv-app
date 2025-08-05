@@ -21,4 +21,4 @@ google-auth
 google-auth-httplib2
 google-auth-oauthlib
 # Removed dependencies (commented out for reference)
-# mysql-connector-python==8.0.33
+mysql-connector-python==8.0.33
