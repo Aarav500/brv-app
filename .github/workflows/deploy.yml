@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main  # or your deployment branch
+  workflow_dispatch:  # ← ADD THIS LINE to enable the manual Run button
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: ⬇️ Checkout Repo
         uses: actions/checkout@v3
