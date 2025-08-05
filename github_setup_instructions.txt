@@ -1,0 +1,18 @@
+GitHub Repository Setup Instructions:
+
+1. Go to https://github.com/Aarav500
+2. Click on the "+" icon in the top-right corner and select "New repository"
+3. Enter "brv-app" as the repository name
+4. Keep it as a public repository (or select private if you prefer)
+5. Do not initialize with README, .gitignore, or license as we already have our files ready
+6. Click "Create repository"
+
+After creating the repository, run the following commands in your terminal to add the remote repository and push your code:
+
+```
+git remote add origin https://github.com/Aarav500/brv-app.git
+git branch -M main
+git push -u origin main
+```
+
+You may be prompted to enter your GitHub username and password. For the password, you'll need to use a personal access token instead of your regular password. You can create one at https://github.com/settings/tokens.
