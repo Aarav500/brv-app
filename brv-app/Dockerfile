@@ -16,8 +16,6 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Step 3: Install mysql-connector-python explicitly with verbose logging
-RUN pip install --no-cache-dir --verbose mysql-connector-python==9.4.0
 
 # Copy the rest of your app
 COPY . .
