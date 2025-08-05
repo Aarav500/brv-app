@@ -1,4 +1,4 @@
-import mysql.connector
+import mysql.connector as mysql
 from mysql.connector import Error
 import json
 from datetime import datetime
@@ -49,7 +49,7 @@ def get_db_connection():
             connection_params['ssl_verify_cert'] = True
         
         # Connect to MySQL/Planetscale
-        connection = mysql.connector.connect(**connection_params)
+        connection = mysql.connect(**connection_params)
         USING_SQLITE = False
         return connection
     except Error as e:
