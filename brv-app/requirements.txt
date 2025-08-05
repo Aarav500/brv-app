@@ -1,4 +1,5 @@
 streamlit>=1.25.0
+mysql-connector-python==9.4.0
 pandas==1.5.3
 numpy==1.24.4
 qrcode==7.4.2
@@ -21,4 +22,4 @@ google-auth
 google-auth-httplib2
 google-auth-oauthlib
 # Removed dependencies (commented out for reference)
-mysql-connector-python==8.0.33
+
