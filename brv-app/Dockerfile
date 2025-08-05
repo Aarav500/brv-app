@@ -1,36 +1,24 @@
-# Use official Python 3.10 image
 FROM python:3.10
 
-# Set working directory inside the container
+# Required system packages for mysql-connector-python
+RUN apt-get update && apt-get install -y \
+    default-libmysqlclient-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
 WORKDIR /app
 
-# Install OS-level dependencies (required for mysql-connector and others)
-RUN apt-get update && apt-get install -y \
-    default-libmysqlclient-dev \
-    gcc \
-    build-essential \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install system packages needed for mysql-connector-python
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libssl-dev \
-    libffi-dev \
-    default-libmysqlclient-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install Python dependencies
+# Install Python dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-
-# Copy the rest of your app
+# Copy the app
 COPY . .
 
-# Expose Streamlit default port
+# Expose Streamlit port
 EXPOSE 8501
 
-# Start the Streamlit app
+# Start the app
 CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
