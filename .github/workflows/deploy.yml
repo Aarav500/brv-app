@@ -13,23 +13,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Docker
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Build Docker image (force fresh install)
-        run: docker build --no-cache -t brv-app .
-
-      - name: SSH into VM and deploy
+      - name: Copy files to VM and deploy
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.VM_HOST }}
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            cd /home/ubuntu/brv-app || git clone https://github.com/Aarav500/brv-app.git && cd brv-app
+            git pull origin main
             docker stop brv-app || true
             docker rm brv-app || true
             docker rmi brv-app || true
-            cd /home/ubuntu/brv
-            git pull origin main
             docker build --no-cache -t brv-app .
             docker run -d --name brv-app -p 8501:8501 brv-app
