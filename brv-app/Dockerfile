@@ -12,15 +12,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy and install dependencies
 COPY requirements.txt .
 
-# Force pip to upgrade and fail clearly on bad install
+# Log everything during pip install
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt || (echo "❌ Pip install failed" && exit 1)
+    pip install --no-cache-dir --verbose -r requirements.txt
 
-# Check if mysql-connector-python is really installed
-RUN python -c "import mysql.connector; print('✅ mysql-connector-python installed')"
+# ⛔ Fail early if mysql-connector-python was not installed
+RUN python -c "import mysql.connector; print('✅ mysql-connector-python version:', mysql.connector.__version__)" || (echo '❌ mysql-connector-python failed to import' && exit 1)
 
 COPY . .
 
