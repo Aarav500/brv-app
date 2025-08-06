@@ -18,14 +18,14 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      
+      - name: 🚀 Deploy via SSH
         run: |
           ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
-           cd ~/BRV1/brv-app
-           git pull origin main
-           docker-compose down
-           docker system prune -af
-           docker rmi $(docker images -q) -f || true
-           docker-compose build --no-cache  # Force full rebuild
-           docker-compose up -d
+            cd ~/BRV1/brv-app
+            git pull origin main
+            docker-compose down
+            docker system prune -af
+            docker rmi $(docker images -q) -f || true
+            docker-compose build --no-cache
+            docker-compose up -d
           EOF
