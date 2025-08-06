@@ -16,14 +16,13 @@ WORKDIR /app
 COPY requirements.txt .
 
 RUN pip install --upgrade pip
-
-# ❗ Remove mysql-connector-python from requirements.txt before this!
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 👇 Force install separately to catch install issues
+# ✅ Force install mysql-connector-python separately so it's NOT skipped
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-RUN python -c "import mysql.connector; print('✅ Installed:', mysql.connector.__version__)"
+# ✅ Confirm it’s actually there (fail early if not)
+RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
 
 COPY . .
 
