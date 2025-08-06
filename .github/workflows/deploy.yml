@@ -24,5 +24,6 @@ jobs:
             cd ~/BRV1/brv-app
             git pull origin main
             docker-compose down
+             docker system prune -af  # <--- This line is CRUCIAL
             docker-compose up -d --build
           EOF
