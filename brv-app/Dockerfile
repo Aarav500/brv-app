@@ -1,23 +1,26 @@
-FROM python:3.10
+FROM python:3.10-slim
 
-# Optional: Install system packages (if needed for other packages, not mysql-connector-python)
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Prevent interactive prompts during install
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install them (only ONCE)
+# 🧱 Install system dependencies needed for some Python packages
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libssl-dev \
+    default-libmysqlclient-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 🚀 Upgrade pip, setuptools, wheel to avoid silent install failures
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# 📦 Copy and install dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Now copy the rest of the app
+# 📁 Copy application code
 COPY . .
 
-# Expose Streamlit default port
-EXPOSE 8501
-
-# Run Streamlit
+# 🔥 Start the app
 CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
