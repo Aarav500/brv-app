@@ -6,19 +6,20 @@ RUN apt-get update && apt-get install -y \
     gcc \
     libssl-dev \
     libffi-dev \
-    default-libmysqlclient-dev \
     build-essential \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Copy and install dependencies
 COPY requirements.txt .
 
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Force pip to upgrade and fail clearly on bad install
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt || (echo "❌ Pip install failed" && exit 1)
 
-# Confirm mysql is installed — fail early if not
+# Check if mysql-connector-python is really installed
 RUN python -c "import mysql.connector; print('✅ mysql-connector-python installed')"
 
 COPY . .
