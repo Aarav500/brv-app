@@ -2,13 +2,13 @@ FROM python:3.10-buster
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Add all system dependencies first
+# Install system-level build dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     libssl-dev \
     libffi-dev \
-    default-libmysqlclient-dev \
     build-essential \
+    default-libmysqlclient-dev \
     python3-dev \
     libaio1 \
     curl \
@@ -16,18 +16,19 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy and install mysql-connector-python FIRST, explicitly
+# Copy only requirements first (caching layer)
 COPY requirements.txt .
 
-# First upgrade pip
+# Upgrade pip
 RUN pip install --upgrade pip
 
-# Install mysql-connector-python separately
-RUN pip install --no-cache-dir --prefer-binary mysql-connector-python==9.4.0
+# Install mysql-connector-python FIRST
+RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-# Install the rest of the requirements
-RUN pip install --no-cache-dir -r requirements.txt || true
+# Install rest of the packages
+RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy all app code
 COPY . .
 
 EXPOSE 8501
