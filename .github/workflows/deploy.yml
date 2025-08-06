@@ -1,28 +1,36 @@
-- name: 🚀 SSH Deploy to Oracle VM
-  run: |
-    ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
-      # Ensure .ssh directory exists
-      mkdir -p ~/.ssh
+name: 🚀 Deploy to Oracle VM
 
-      # Add GitHub.com to known_hosts (avoids host key prompt)
-      ssh-keyscan github.com >> ~/.ssh/known_hosts
+on:
+  push:
+    branches:
+      - main
 
-      # Clean previous build
-      rm -rf ~/BRV1/brv-app
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-      # Clone the repo
-      git clone git@github.com:Aarav500/brv-app.git ~/BRV1/brv-app
+    steps:
+      - name: ✅ Checkout Code
+        uses: actions/checkout@v3
 
-      cd ~/BRV1/brv-app
+      - name: 🔐 SSH Deploy to Oracle VM
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
+            mkdir -p ~/.ssh
+            ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      docker-compose down || true
-      docker system prune -af || true
+            # Remove old code and pull latest
+            rm -rf ~/BRV1/brv-app
+            git clone git@github.com:Aarav500/brv-app.git ~/BRV1/brv-app
+            cd ~/BRV1/brv-app
 
-      # Kill any container using the image to allow forced delete
-      docker ps -aq --filter ancestor=brv-app_brv-streamlit | xargs -r docker rm -f
+            # Kill and clean any running container
+            docker-compose down || true
+            docker system prune -af || true
+            docker ps -aq --filter ancestor=brv-app_brv-streamlit | xargs -r docker rm -f
+            docker rmi $(docker images -q) -f || true
 
-      docker rmi $(docker images -q) -f || true
-
-      docker-compose build --no-cache
-      docker-compose up -d
-    EOF
+            # Rebuild and relaunch
+            docker-compose build --no-cache
+            docker-compose up -d
+          EOF
