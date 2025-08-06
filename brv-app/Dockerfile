@@ -15,14 +15,13 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# Install everything *except* mysql-connector-python
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 🔥 Install mysql-connector-python *manually*
+# 🔥 Manual install of mysql-connector-python
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-# 🔍 Confirm it's installed INSIDE the container
+# ✅ Confirm inside Docker image
 RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
 
 COPY . .
