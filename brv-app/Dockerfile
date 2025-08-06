@@ -1,25 +1,23 @@
-# Use full Python image instead of slim
 FROM python:3.10
 
-# Install system dependencies required by mysql-connector
+# Install all likely dependencies for mysql-connector
 RUN apt-get update && apt-get install -y \
-    libssl-dev \
-    default-libmysqlclient-dev \
     gcc \
+    libssl-dev \
+    libffi-dev \
+    libaio1 \
+    default-libmysqlclient-dev \
+    python3-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy files
 COPY . .
 
-# Install Python dependencies
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Expose Streamlit port
 EXPOSE 8501
 
-# Start the app
 CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
