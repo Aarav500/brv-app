@@ -25,5 +25,6 @@ jobs:
             git pull origin main
             docker-compose down
              docker system prune -af  # <--- This line is CRUCIAL
+              docker rmi $(docker images -q) -f || true  # <--- This clears the old image cache
             docker-compose up -d --build
           EOF
