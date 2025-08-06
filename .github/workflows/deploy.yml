@@ -1,28 +1,35 @@
-name: 🚀 Auto Deploy to Oracle VM
+name: Deploy BRV App to Oracle VM
 
 on:
   push:
     branches:
-      - main  # or your deployment branch
-  workflow_dispatch:  # ← ADD THIS LINE to enable the manual Run button
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: ⬇️ Checkout Repo
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: 🛠️ Set up SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
 
-      - name: 🚀 Deploy to Oracle VM
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
-            cd ~/BRV1/brv-app
+      - name: Build Docker image (force fresh install)
+        run: docker build --no-cache -t brv-app .
+
+      - name: SSH into VM and deploy
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            docker stop brv-app || true
+            docker rm brv-app || true
+            docker rmi brv-app || true
+            cd /home/ubuntu/brv
             git pull origin main
-            docker-compose down
-            docker-compose up -d --build
-          EOF
+            docker build --no-cache -t brv-app .
+            docker run -d --name brv-app -p 8501:8501 brv-app
