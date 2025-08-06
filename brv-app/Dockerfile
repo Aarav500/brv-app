@@ -1,6 +1,6 @@
 FROM python:3.10
 
-# System dependencies for mysql-connector
+# System dependencies (optional for mysql-connector-python)
 RUN apt-get update && apt-get install -y \
     default-libmysqlclient-dev \
     gcc \
@@ -9,14 +9,16 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install
+# Copy and install Python dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the app
+# Copy app code after installing deps to avoid rebuilds
 COPY . .
 
-# Streamlit config
+# Expose Streamlit port
 EXPOSE 8501
-CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
 
+# Run Streamlit
+CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
