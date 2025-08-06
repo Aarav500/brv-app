@@ -2,7 +2,6 @@ FROM python:3.10-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     libssl-dev \
@@ -14,16 +13,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy and install general dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt || true
 
-# ⛑️ Force install mysql-connector-python (bypass silent failure in bulk install)
+RUN pip install --upgrade pip
+
+# ❗ Remove mysql-connector-python from requirements.txt before this!
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 👇 Force install separately to catch install issues
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-# Validate install
-RUN python -c "import mysql.connector; print('✅ mysql-connector-python installed:', mysql.connector.__version__)"
+RUN python -c "import mysql.connector; print('✅ Installed:', mysql.connector.__version__)"
 
 COPY . .
 
