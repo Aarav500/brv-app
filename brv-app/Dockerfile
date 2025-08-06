@@ -1,34 +1,36 @@
-FROM python:3.10-slim-buster
+FROM python:3.10-buster
 
-# Avoid interactive prompts during package install
+# Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies required for mysql-connector-python to compile
+# Install system dependencies needed to build mysql-connector-python
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    default-libmysqlclient-dev \
+    gcc \
     libssl-dev \
     libffi-dev \
+    default-libmysqlclient-dev \
+    build-essential \
     python3-dev \
-    gcc \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install them
-COPY requirements.txt requirements.txt
+# Copy and install Python requirements
+COPY requirements.txt .
 
-# Upgrade pip before install
+# Upgrade pip and install requirements
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app source
+# Verify mysql-connector-python is installed
+RUN python -c "import mysql.connector; print('✅ mysql-connector-python installed')"
+
+# Copy application code
 COPY . .
 
-# Streamlit runs on port 8501
+# Expose port
 EXPOSE 8501
 
-# Start Streamlit app
+# Run Streamlit app
 CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
