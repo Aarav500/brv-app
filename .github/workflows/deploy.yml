@@ -18,24 +18,21 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: 🚀 SSH into Oracle VM & Deploy
+      - name: 🚀 SSH Deploy to Oracle VM
         run: |
           ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
-            # Remove existing app directory
+            # Ensure full overwrite
             rm -rf ~/BRV1/brv-app
 
-            # Clone latest code from GitHub into the correct directory
-            git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git ~/BRV1/brv-app
+            # Clone via SSH — make sure SSH deploy key is added in GitHub settings
+            git clone git@github.com:Aarav500/brv-app.git ~/BRV1/brv-app
 
-            # Move into app folder
             cd ~/BRV1/brv-app
 
-            # Optional cleanup
             docker-compose down || true
             docker system prune -af || true
-            docker rmi \$(docker images -q) -f || true
+            docker rmi $(docker images -q) -f || true
 
-            # Rebuild and start containers
             docker-compose build --no-cache
             docker-compose up -d
           EOF
