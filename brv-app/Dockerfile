@@ -15,14 +15,15 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Install everything *except* mysql-connector-python
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# ✅ Install connector separately to avoid any pip resolution errors
+# 🔥 Install mysql-connector-python *manually*
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-# ✅ Check it's installed inside container (debug log in build)
-RUN python -c "import mysql.connector; print('✅ mysql-connector:', mysql.connector.__version__)"
+# 🔍 Confirm it's installed INSIDE the container
+RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
 
 COPY . .
 
