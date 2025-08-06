@@ -18,11 +18,11 @@ COPY requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ✅ Force install mysql-connector-python separately so it's NOT skipped
+# ✅ Install connector separately to avoid any pip resolution errors
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-# ✅ Confirm it’s actually there (fail early if not)
-RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
+# ✅ Check it's installed inside container (debug log in build)
+RUN python -c "import mysql.connector; print('✅ mysql-connector:', mysql.connector.__version__)"
 
 COPY . .
 
