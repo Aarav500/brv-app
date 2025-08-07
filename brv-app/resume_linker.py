@@ -3,7 +3,8 @@ import shutil
 import uuid
 from datetime import datetime
 import logging
-from cloud_storage import upload_cv, get_candidate_by_id, update_candidate_data
+from cloud_storage import upload_cv
+from mysql_db import get_candidate_by_id, update_candidate as update_candidate_data
 
 # Set up logging
 logging.basicConfig(
