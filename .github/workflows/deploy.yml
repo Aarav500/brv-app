@@ -13,24 +13,29 @@ jobs:
       - name: ✅ Checkout Code
         uses: actions/checkout@v3
 
-      - name: 🔐 SSH Deploy to Oracle VM
+      - name: 🔐 Setup SSH Access
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
-            mkdir -p ~/.ssh
-            ssh-keyscan github.com >> ~/.ssh/known_hosts
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 140.245.27.38 >> ~/.ssh/known_hosts
 
-            # Remove old code and pull latest
+      - name: 🚀 Deploy to Oracle VM
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
+            set -e
+            echo "🔄 Cloning updated repo"
             rm -rf ~/BRV1/brv-app
-            git clone git@github.com:Aarav500/brv-app.git ~/BRV1/brv-app
+            git clone https://github.com/Aarav500/brv-app.git ~/BRV1/brv-app
             cd ~/BRV1/brv-app
 
-            # Kill and clean any running container
+            echo "🧼 Cleaning up old Docker containers and cache"
             docker-compose down || true
             docker system prune -af || true
-            docker ps -aq --filter ancestor=brv-app_brv-streamlit | xargs -r docker rm -f
-            docker rmi $(docker images -q) -f || true
 
-            # Rebuild and relaunch
+            echo "🐳 Building Docker images"
             docker-compose build --no-cache
+
+            echo "🚀 Launching containers"
             docker-compose up -d
           EOF
