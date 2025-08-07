@@ -13,7 +13,7 @@ import hashlib
 import re
 
 # Define valid roles for the application
-VALID_ROLES = ["receptionist", "interviewer", "ceo", "admin", "hr"]
+VALID_ROLES = ["receptionist", "interviewer", "ceo", "admin", "hr", "candidate"]
 
 def normalize_column_name(col):
     """
