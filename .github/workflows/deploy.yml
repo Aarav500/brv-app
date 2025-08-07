@@ -1,4 +1,4 @@
-- name: 🚀 Deploy to Oracle VM
+name: 🚀 Deploy to Oracle VM
   run: |
     ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
       echo "🔄 Pulling latest changes"
