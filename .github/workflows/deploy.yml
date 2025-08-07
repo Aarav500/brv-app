@@ -25,7 +25,7 @@ jobs:
 
             echo "📁 Cloning or pulling latest repo"
             mkdir -p ~/BRV1
-            cd ~/BRV1
+            cd /home/ubuntu/BRV1
             if [ -d "brv-app" ]; then
               cd brv-app
               git reset --hard
