@@ -1,41 +1,20 @@
-name: 🚀 Deploy to Oracle VM
+- name: 🚀 Deploy to Oracle VM
+  run: |
+    ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
+      echo "🔄 Pulling latest changes"
+      cd ~/BRV1/brv-app || mkdir -p ~/BRV1/brv-app && cd ~/BRV1/brv-app
+      if [ -d ".git" ]; then
+        git pull origin main
+      else
+        git clone https://github.com/Aarav500/brv-app.git .
+      fi
 
-on:
-  push:
-    branches:
-      - main
+      echo "🧼 Cleaning up old Docker containers and images"
+      docker-compose -f brv-app/docker-compose.yml down
+      docker system prune -af || true
+      docker rmi \$(docker images -q) -f || true
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: ✅ Checkout Code
-        uses: actions/checkout@v3
-
-      - name: 🔐 Setup SSH Access
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H 140.245.27.38 >> ~/.ssh/known_hosts
-
-      - name: 🚀 Deploy to Oracle VM
-        run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
-            set -e
-            echo "🔄 Cloning updated repo"
-            rm -rf ~/BRV1/brv-app
-            git clone https://github.com/Aarav500/brv-app.git ~/BRV1/brv-app
-            cd ~/BRV1/brv-app
-
-            echo "🧼 Cleaning up old Docker containers and cache"
-            docker-compose down || true
-            docker system prune -af || true
-
-            echo "🐳 Building Docker images"
-            docker-compose build --no-cache
-
-            echo "🚀 Launching containers"
-            docker-compose up -d
-          EOF
+      echo "🐳 Rebuilding Docker"
+      docker-compose -f brv-app/docker-compose.yml build --no-cache
+      docker-compose -f brv-app/docker-compose.yml up -d
+    EOF
