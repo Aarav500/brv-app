@@ -6,6 +6,7 @@ from receptionist import receptionist_view
 from session_manager import get_user_session
 from database import init_db, init_users
 from utils import VALID_ROLES
+from candidate_view import candidate_form_view
 
 # Set page configuration
 st.set_page_config(
@@ -62,6 +63,8 @@ def main():
         interviewer_view()
     elif role == "admin":
         show_admin_panel()  # Admin uses same panel as CEO
+    elif role == "candidate":
+        candidate_form_view()
     else:
         st.info(f"Role '{role}' is recognized but no specific view is implemented yet.")
 
