@@ -18,6 +18,12 @@ COPY requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy Instant Client from VM into container
+COPY oracle/instantclient_23_9 /opt/oracle/instantclient_23_9
+
+# Set library path for Oracle Client
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_9:$LD_LIBRARY_PATH
+
 # 🔥 Critical: install mysql-connector-python directly
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
