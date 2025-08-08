@@ -15,9 +15,24 @@ DB_USER = os.getenv("ORACLE_USER")
 DB_PASSWORD = os.getenv("ORACLE_PASSWORD")
 DB_DSN = os.getenv("ORACLE_DSN")
 WALLET_PATH = os.getenv("ORACLE_WALLET_LOCATION")
+LIB_DIR = os.getenv("ORACLE_CLIENT_LIB_DIR")
 
 # Required by oracledb to find tnsnames.ora
-os.environ["TNS_ADMIN"] = WALLET_PATH
+if WALLET_PATH:
+    os.environ["TNS_ADMIN"] = WALLET_PATH
+
+# Initialize Oracle Client early with env-driven configuration
+print(f"🔍 Using Oracle Wallet Path: {WALLET_PATH}")
+print(f"🔍 Using Oracle Client Lib Dir: {LIB_DIR}")
+try:
+    oracledb.init_oracle_client(lib_dir=LIB_DIR, config_dir=WALLET_PATH)
+except Exception as e:
+    # Avoid crashing import if already initialized or libs are not present.
+    # In such cases, operations may still proceed in Thin mode where supported.
+    if "already called" in str(e).lower():
+        print("ℹ️ Oracle client already initialized.")
+    else:
+        print(f"⚠️ Could not initialize Oracle client: {e}")
 
 # Import configuration from env_config.py
 from env_config import (
@@ -52,19 +67,25 @@ def get_oracle_connection():
 
 def init_oracle_client():
     """
-    Initialize the Oracle client in thin mode.
-    This must be called before any database operations.
+    Initialize the Oracle client using environment variables.
+    Safe to call multiple times. This will not force thin mode.
     """
     try:
-        # TNS_ADMIN is already set at module level
-        print(f"TNS_ADMIN set to: {os.environ['TNS_ADMIN']}")
-        
-        # Force the use of Thin mode (which doesn't need an external Oracle Client)
-        oracledb.thin = True
-        print("✅ Oracle client initialized successfully (thin mode)")
+        wallet_dir = WALLET_PATH
+        lib_dir = LIB_DIR
+        print(f"🔍 Using Oracle Wallet Path: {wallet_dir}")
+        print(f"🔍 Using Oracle Client Lib Dir: {lib_dir}")
+        if wallet_dir:
+            os.environ["TNS_ADMIN"] = wallet_dir
+            print(f"TNS_ADMIN set to: {os.environ['TNS_ADMIN']}")
+        oracledb.init_oracle_client(lib_dir=lib_dir, config_dir=wallet_dir)
+        print("✅ Oracle client initialized successfully")
         return True
     except Exception as e:
-        print(f"❌ Error initializing Oracle client: {e}")
+        if "already called" in str(e).lower():
+            print("ℹ️ Oracle client already initialized.")
+            return True
+        print(f"⚠️ Could not initialize Oracle client: {e}")
         return False
 
 def get_db_config():
@@ -128,7 +149,7 @@ def get_connection_pool(db_name=None):
         return connection_pool
     
     try:
-        # Initialize Oracle client in thin mode if not already initialized
+        # Initialize Oracle client if not already initialized (env-driven)
         init_oracle_client()
         
         # If no db_name is provided, use the current write database
