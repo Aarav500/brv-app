@@ -436,7 +436,8 @@ def add_default_users():
             default_users = [
                 ("ceo", "ceo@bluematrixit.com", "password123", "ceo", 0),
                 ("interviewer", "interviewer@bluematrixit.com", "password123", "interviewer", 1),
-                ("receptionist", "receptionist@bluematrixit.com", "password123", "receptionist", 1)
+                ("receptionist", "receptionist@bluematrixit.com", "password123", "receptionist", 1),
+                ("candidate", "candidate@example.com", "password123", "candidate", 0)
             ]
             
             # Add default users

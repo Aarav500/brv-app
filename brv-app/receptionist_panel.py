@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 import time
 import os
-from mysql_db import get_all_candidates, get_candidate_by_id, search_candidates, update_candidate
+from oracle_candidates import get_all_candidates, get_candidate_by_id, search_candidates, update_candidate
 from cloud_storage import download_cv
 
 def check_cv_status(candidate_id):
     """
     Check if a CV exists for the given Candidate ID.
-    Checks if the candidate has a resume_url in the MySQL database.
+    Checks if the candidate has a resume_url in the Oracle database.
     
     Args:
         candidate_id (int): The Candidate ID to check
@@ -24,7 +24,7 @@ def check_cv_status(candidate_id):
         if isinstance(candidate_id, str):
             candidate_id = int(candidate_id)
         
-        # Get candidate from MySQL database
+        # Get candidate from Oracle database
         candidate = get_candidate_by_id(candidate_id)
         
         # Check if candidate has a resume_url

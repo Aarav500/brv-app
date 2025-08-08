@@ -1,10 +1,10 @@
 {
-  "current_write_db": "brv_db_1",
+  "current_write_db": "brvdb1_low",
   "databases": [
-    "brv_db_1"
+    "brvdb1_low"
   ],
   "storage_usage": {
-    "brv_db_1": {
+    "brvdb1_low": {
       "total_gb": 20,
       "used_gb": 0,
       "last_checked": ""

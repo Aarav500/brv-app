@@ -82,8 +82,8 @@ def get_db_config():
         else:
             # Create default config
             config = {
-                "current_write_db": "brv_db_1",
-                "databases": ["brv_db_1"]
+                "current_write_db": "brvdb1_low",
+                "databases": ["brvdb1_low"]
             }
             with open(DB_CONFIG_FILE, 'w') as f:
                 json.dump(config, f, indent=2)
@@ -92,8 +92,8 @@ def get_db_config():
         print(f"❌ Error reading/writing DB config: {e}")
         # Return default config if there's an error
         return {
-            "current_write_db": "brv_db_1",
-            "databases": ["brv_db_1"]
+            "current_write_db": "brvdb1_low",
+            "databases": ["brvdb1_low"]
         }
 
 def update_db_config(config):
@@ -141,6 +141,9 @@ def get_connection_pool(db_name=None):
             user=DB_USER,
             password=DB_PASSWORD,
             dsn=db_name,
+            config_dir=WALLET_PATH,
+            wallet_location=WALLET_PATH,
+            wallet_password=None,  # Only needed if wallet is password-protected
             min=2,
             max=5,
             increment=1

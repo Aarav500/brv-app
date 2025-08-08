@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta
 import uuid
 
-from mysql_db import get_all_candidates, get_candidate_by_id, update_candidate
+from oracle_candidates import get_all_candidates, get_candidate_by_id, update_candidate
 from cloud_storage import download_cv
 
 def interviewer_view():

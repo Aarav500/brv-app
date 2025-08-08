@@ -4,7 +4,7 @@ import os
 import json
 from datetime import datetime
 
-from mysql_db import get_all_candidates, get_candidate_by_id, get_all_users
+from oracle_candidates import get_all_candidates, get_candidate_by_id, get_all_users
 
 def ceo_view():
     st.sidebar.title("Navigation")
@@ -22,7 +22,7 @@ def ceo_view():
 def ceo_dashboard_page():
     st.title("📊 CEO Dashboard - BRV")
     
-    # Get all candidates from MySQL database
+    # Get all candidates from Oracle database
     candidates = get_all_candidates()
     
     if not candidates:

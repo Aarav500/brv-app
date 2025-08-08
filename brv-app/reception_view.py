@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 
-from mysql_db import get_candidate_by_id, get_candidate_by_name_and_id, get_all_candidates, search_candidates
+from oracle_candidates import get_candidate_by_id, get_candidate_by_name_and_id, get_all_candidates, search_candidates
 from candidate_view import edit_candidate_form
 from cloud_storage import download_cv
 
@@ -80,7 +80,7 @@ def view_all_candidates():
     """
     st.header("All Candidates")
     
-    # Get all candidates from MySQL database
+    # Get all candidates from Oracle database
     candidates = get_all_candidates()
     
     if not candidates:
@@ -114,7 +114,7 @@ def view_all_candidates():
     # Search by name or email
     search_term = st.text_input("Search by Name or Email")
     if search_term:
-        # Use the search_candidates function from mysql_db.py
+        # Use the search_candidates function from oracle_candidates.py
         search_results = search_candidates(search_term)
         if search_results:
             filtered_df = pd.DataFrame(search_results)
