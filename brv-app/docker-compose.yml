@@ -5,4 +5,8 @@ services:
     build: .
     ports:
       - "8501:8501"
+    env_file:
+      - /home/ubuntu/BRV1/.env   # ✅ Load env file into container
+    volumes:
+      - /home/ubuntu/BRV1/Wallet_brvdb1:/home/ubuntu/BRV1/Wallet_brvdb1:ro  # ✅ Mount wallet folder read-only
     restart: always
