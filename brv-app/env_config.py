@@ -37,10 +37,10 @@ def get_db_config():
         else:
             # Create default config
             config = {
-                "current_write_db": "brv_db_1",
-                "databases": ["brv_db_1"],
+                "current_write_db": "brvdb1_low",
+                "databases": ["brvdb1_low"],
                 "storage_usage": {
-                    "brv_db_1": {
+                    "brvdb1_low": {
                         "total_gb": 20,
                         "used_gb": 0,
                         "last_checked": ""
@@ -54,10 +54,10 @@ def get_db_config():
         print(f"❌ Error reading/writing DB config: {e}")
         # Return default config if there's an error
         return {
-            "current_write_db": "brv_db_1",
-            "databases": ["brv_db_1"],
+            "current_write_db": "brvdb1_low",
+            "databases": ["brvdb1_low"],
             "storage_usage": {
-                "brv_db_1": {
+                "brvdb1_low": {
                     "total_gb": 20,
                     "used_gb": 0,
                     "last_checked": ""

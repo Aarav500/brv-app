@@ -588,3 +588,60 @@ def count_candidates_by_status() -> Dict[str, int]:
         counts[result["interview_status"] or "unknown"] = result["count"]
     
     return counts
+
+def get_candidate_by_user_id(user_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Get a candidate by user ID.
+    
+    Args:
+        user_id (int): The user's ID
+        
+    Returns:
+        Optional[Dict[str, Any]]: Candidate data or None if not found
+    """
+    # Get all candidates
+    candidates = get_all_candidates(limit=1000)
+    
+    # Find the candidate with the matching user_id in form_data
+    for candidate in candidates:
+        if candidate.get('user_id') == user_id:
+            return candidate
+    
+    return None
+
+def get_candidate_by_name_and_id(candidate_id: str, name: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a candidate by ID and name.
+    
+    Args:
+        candidate_id (str): The candidate's ID
+        name (str): The candidate's name
+        
+    Returns:
+        Optional[Dict[str, Any]]: Candidate data or None if not found or name doesn't match
+    """
+    candidate = get_candidate_by_id(candidate_id)
+    
+    if candidate and candidate.get('full_name', '').lower() == name.lower():
+        return candidate
+    
+    return None
+
+def get_all_users() -> List[Dict[str, Any]]:
+    """
+    Get all users.
+    
+    Returns:
+        List[Dict[str, Any]]: List of all users
+    """
+    query = """
+    SELECT 
+        user_id as id,
+        email,
+        role,
+        TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at
+    FROM users
+    """
+    
+    users = execute_across_all_dbs(query) or []
+    return users

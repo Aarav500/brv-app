@@ -5,7 +5,7 @@ import pandas as pd
 
 from cloud_storage import upload_cv
 from resume_linker import save_temp_cv
-from mysql_db import create_candidate, update_candidate, get_candidate_by_id, get_candidate_by_user_id
+from oracle_candidates import create_candidate, update_candidate, get_candidate_by_id, get_candidate_by_user_id
 from candidate_auth import candidate_auth_view
 
 def candidate_form_view():
@@ -215,7 +215,7 @@ def unauthenticated_candidate_view():
                 }
                 
                 try:
-                    # Store candidate data in MySQL database
+                    # Store candidate data in Oracle database
                     candidate_id = create_candidate(candidate_data)
                     
                     if not candidate_id:
@@ -271,7 +271,7 @@ def unauthenticated_candidate_view():
                       - CV Uploaded: {'Yes → ' + cv_url if cv_url else 'No'}
                       - Interview Status: Not Scheduled
                     
-                    🔁 Stored in MySQL database
+                    🔁 Stored in Oracle database
                     """)
                     
                 except Exception as e:
@@ -353,7 +353,7 @@ def edit_candidate_form(candidate_data):
                     return False
             
             try:
-                # Update candidate data in MySQL database
+                # Update candidate data in Oracle database
                 success = update_candidate(candidate_data['id'], updated_data)
                 
                 if not success:
@@ -378,7 +378,7 @@ def edit_candidate_form(candidate_data):
                   - Email: {updated_data['email']}
                   - CV Uploaded: {'Yes' if updated_data.get('cv_status', candidate_data.get('cv_status')) == 'Uploaded' else 'No'}
                 
-                🔁 Updated in MySQL database
+                🔁 Updated in Oracle database
                 """)
                 
                 return True
