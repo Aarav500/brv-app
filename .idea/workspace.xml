@@ -5,8 +5,6 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="180f3012-0d66-4045-bac5-ff8268702845" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/Dockerfile" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/candidate_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/candidate_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/ceo.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/ceo.py" afterDir="false" />
@@ -150,7 +148,7 @@
       <workItem from="1754539453306" duration="4233000" />
       <workItem from="1754582556415" duration="9074000" />
       <workItem from="1754626334144" duration="211000" />
-      <workItem from="1754626591299" duration="7197000" />
+      <workItem from="1754626591299" duration="8048000" />
     </task>
     <servers />
   </component>
