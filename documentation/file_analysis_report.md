@@ -1,5 +1,19 @@
 # BRV Applicant Management Application - Audit Report
 
+This document provides a detailed audit of the BRV Applicant Management Application, focusing on its features, database integration, user roles, and environment configuration. The goal is to ensure the application functions correctly in production with Oracle DB.
+
+## Table of Contents
+
+1. [Executive Summary](#executive-summary)
+2. [Top Priority Fixes](#top-priority-fixes)
+3. [Feature Status Table](#feature-status-table)
+4. [Database Integration Analysis](#database-integration-analysis)
+5. [Test Accounts](#test-accounts)
+6. [Google Drive CV Integration](#google-drive-cv-integration)
+7. [Environment Variables Analysis](#environment-variables-analysis)
+8. [Role-Based Access Control (RBAC) Analysis](#role-based-access-control-rbac-analysis)
+9. [Recommendations](#recommendations)
+
 ## Executive Summary
 
 This audit report provides a comprehensive analysis of the BRV Applicant Management Application, examining its features, database integration, user roles, and environment configuration. The audit reveals several critical issues that need to be addressed to ensure the application functions correctly in production with Oracle DB.
