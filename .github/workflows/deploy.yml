@@ -30,7 +30,7 @@ jobs:
 
       - name: 🚀 Deploy via SSH
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
+          ssh -A -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
             set -e
 
             echo "🔑 Adding GitHub to known hosts"
