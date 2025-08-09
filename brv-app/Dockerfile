@@ -32,9 +32,7 @@ RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mys
 # 🔹 Copy main application code
 COPY . .
 
-# 🔹 Copy oracle_db.py from BRV-app-OracleDB into the container
-# (This works because we’ll set build context to /home/ubuntu/BRV1 in deploy script)
-COPY BRV-app-OracleDB/oracle_db.py /app/oracle_db.py
+
 
 EXPOSE 8501
 
