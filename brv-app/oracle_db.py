@@ -45,3 +45,57 @@ from env_config import (
     get_db_config as env_get_db_config,
     update_db_config as env_update_db_config
 )
+
+
+# -------------------------------
+# Execute a query on the primary DB
+# -------------------------------
+def execute_query(query: str, params: Optional[Tuple[Any, ...]] = None, commit: bool = False) -> List[Tuple[Any]]:
+    """Run a SQL query on the main Oracle DB."""
+    try:
+        with oracledb.connect(user=DB_USER, password=DB_PASSWORD, dsn=DB_DSN) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params or [])
+                if commit:
+                    conn.commit()
+                    return []
+                try:
+                    return cursor.fetchall()
+                except oracledb.InterfaceError:
+                    return []
+    except Exception as e:
+        print(f"❌ execute_query failed: {e}")
+        return []
+
+
+# -------------------------------
+# Execute a query across ALL DBs from env_config
+# -------------------------------
+def execute_across_all_dbs(query: str, params: Optional[Tuple[Any, ...]] = None, commit: bool = False) -> Dict[
+    str, List[Tuple[Any]]]:
+    """Run a SQL query across all DBs defined in env_config."""
+    results = {}
+    db_config_list = env_get_db_config()
+
+    for db_info in db_config_list:
+        db_name = db_info.get("name", "unknown")
+        try:
+            with oracledb.connect(
+                    user=db_info["user"],
+                    password=db_info["password"],
+                    dsn=db_info["dsn"]
+            ) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, params or [])
+                    if commit:
+                        conn.commit()
+                        results[db_name] = []
+                    else:
+                        try:
+                            results[db_name] = cursor.fetchall()
+                        except oracledb.InterfaceError:
+                            results[db_name] = []
+        except Exception as e:
+            print(f"❌ Query failed for {db_name}: {e}")
+            results[db_name] = []
+    return results
