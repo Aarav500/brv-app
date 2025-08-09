@@ -33,6 +33,10 @@ jobs:
           ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
             set -e
 
+            echo "🔑 Adding GitHub to known hosts"
+            mkdir -p ~/.ssh
+            ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
             echo "📁 Cloning or pulling latest brv-app repo"
             mkdir -p ~/BRV1
             cd /home/ubuntu/BRV1
@@ -70,4 +74,5 @@ jobs:
             echo "🚀 Starting Docker containers"
             docker-compose -f brv-app/docker-compose.yml up -d
 
-            echo "✅ Dep
+            echo "✅ Deployment finished"
+          EOF
