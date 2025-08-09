@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 
 # Import from oracle_db.py
 from oracle_db import execute_query, execute_across_all_dbs

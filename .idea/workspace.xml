@@ -5,10 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="180f3012-0d66-4045-bac5-ff8268702845" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/oracle_db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/Dockerfile" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/candidate_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/candidate_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/ceo.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/ceo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/db_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/db_config.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/docker-compose.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/env_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/env_config.py" afterDir="false" />
@@ -16,11 +18,12 @@
       <change beforePath="$PROJECT_DIR$/brv-app/interviewer.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/interviewer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/oracle_candidates.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/oracle_candidates.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/oracle_db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/oracle_db.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/oracle_db.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/reception_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/reception_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/receptionist_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/receptionist_panel.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/resume_linker.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/resume_linker.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/user_auth.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/user_auth.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -48,7 +51,20 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/brv-app" />
+    <option name="ROOT_SYNC" value="DONT_SYNC" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "Aarav500"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/Aarav500/brv-app.git",
+    "accountId": "91fa1d57-8a80-4e4d-a2bc-5bf1e55aa49c"
+  }
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -85,8 +101,8 @@
 }</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\aarav\Desktop\BRV1\brv-app" />
       <recent name="C:\Users\aarav\Desktop\BRV1" />
+      <recent name="C:\Users\aarav\Desktop\BRV1\brv-app" />
       <recent name="C:\Users\aarav\Desktop\BRV1\.venv" />
     </key>
   </component>
@@ -161,7 +177,7 @@
       <workItem from="1754653882211" duration="5920000" />
       <workItem from="1754684567808" duration="29000" />
       <workItem from="1754684623077" duration="18000" />
-      <workItem from="1754717116295" duration="4112000" />
+      <workItem from="1754717116295" duration="5348000" />
     </task>
     <servers />
   </component>
