@@ -2,7 +2,7 @@ FROM python:3.10-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies + unzip + wget
+# Install required packages
 RUN apt-get update && apt-get install -y \
     gcc \
     libssl-dev \
@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
     unzip \
-    wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,22 +22,22 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 🔽 Download and install Oracle Instant Client
-RUN wget --progress=bar:force -O /tmp/instantclient.zip \
-    --header "Cookie: oraclelicense=accept-securebackup-cookie" \
-    https://download.oracle.com/otn_software/linux/instantclient/2390000/instantclient-basic-linux.x64-23.9.0.0.0dbru.zip \
+RUN curl -o /tmp/instantclient.zip https://download.oracle.com/otn_software/linux/instantclient/2390000/instantclient-basic-linux.x64-23.9.0.0.0dbru.zip \
     && unzip /tmp/instantclient.zip -d /opt/oracle \
     && rm /tmp/instantclient.zip
 
-# Set library path for Oracle Client
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_9
+# 🔽 Copy Oracle Wallet from VM absolute path into the image
+RUN mkdir -p /opt/oracle/wallet && \
+    cp -r /home/ubuntu/BRV1/Wallet_brvdb1/* /opt/oracle/wallet/
 
-# 🔽 Copy Oracle Wallet from VM into the image
-COPY Wallet_brvdb1 /opt/oracle/wallet
+# Set environment variables for Oracle client
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_9:$LD_LIBRARY_PATH
+ENV TNS_ADMIN=/opt/oracle/wallet
 
 # 🔥 Install mysql-connector-python directly
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
 
-# ✅ Confirm it's installed
+# ✅ Confirm mysql-connector installed
 RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
 
 COPY . .
