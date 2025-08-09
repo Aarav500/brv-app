@@ -10,8 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📂 Checkout Repo (for GitHub Context, not used in SSH)
+      - name: 📂 Checkout Repo
         uses: actions/checkout@v3
+        with:
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: 🔐 Set up SSH
         uses: webfactory/ssh-agent@v0.7.0
@@ -33,28 +35,18 @@ jobs:
           ssh -A -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
             set -e
 
-            echo "🔑 Adding GitHub to known hosts"
-            mkdir -p ~/.ssh
-            ssh-keyscan -H github.com >> ~/.ssh/known_hosts
-
-            echo "📁 Cloning or pulling latest brv-app repo"
+            echo "📁 Cloning/Updating brv-app"
             mkdir -p ~/BRV1
             cd /home/ubuntu/BRV1
             if [ -d "brv-app" ]; then
-              cd brv-app
-              git reset --hard
-              git pull origin main
-              cd ..
+              cd brv-app && git reset --hard && git pull origin main && cd ..
             else
               git clone git@github.com:Aarav500/brv-app.git
             fi
 
-            echo "📁 Cloning or pulling BRV-app-OracleDB repo"
+            echo "📁 Cloning/Updating BRV-app-OracleDB"
             if [ -d "BRV-app-OracleDB" ]; then
-              cd BRV-app-OracleDB
-              git reset --hard
-              git pull origin main
-              cd ..
+              cd BRV-app-OracleDB && git reset --hard && git pull origin main && cd ..
             else
               git clone git@github.com:Aarav500/BRV-app-OracleDB.git
             fi
@@ -62,13 +54,13 @@ jobs:
             echo "📦 Copying oracle_db.py into Docker build context"
             cp /home/ubuntu/BRV1/BRV-app-OracleDB/oracle_db.py /home/ubuntu/BRV1/brv-app/oracle_db.py
 
-            echo "🧼 Stopping and removing old containers"
+            echo "🧼 Stopping old containers"
             docker-compose -f brv-app/docker-compose.yml down || true
 
             echo "♻️ Cleaning Docker cache"
             docker system prune -af || true
 
-            echo "🐳 Building Docker containers from scratch"
+            echo "🐳 Building Docker containers"
             docker-compose -f brv-app/docker-compose.yml build --no-cache
 
             echo "🚀 Starting Docker containers"
