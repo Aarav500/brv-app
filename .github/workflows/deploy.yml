@@ -33,7 +33,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
             set -e
 
-            echo "📁 Cloning or pulling latest repo"
+            echo "📁 Cloning or pulling latest brv-app repo"
             mkdir -p ~/BRV1
             cd /home/ubuntu/BRV1
             if [ -d "brv-app" ]; then
@@ -42,31 +42,32 @@ jobs:
               git pull origin main
               cd ..
             else
-              git clone https://github.com/Aarav500/brv-app.git
+              git clone git@github.com:Aarav500/brv-app.git
             fi
 
-            if [ ! -d "BRV-app-OracleDB" ]; then
-              echo "📥 Cloning BRV-app-OracleDB repo"
-              git clone https://github.com/Aarav500/BRV-app-OracleDB.git
-            else
-              echo "🔄 Pulling latest BRV-app-OracleDB repo"
+            echo "📁 Cloning or pulling BRV-app-OracleDB repo"
+            if [ -d "BRV-app-OracleDB" ]; then
               cd BRV-app-OracleDB
               git reset --hard
               git pull origin main
               cd ..
+            else
+              git clone git@github.com:Aarav500/BRV-app-OracleDB.git
             fi
 
+            echo "📦 Copying oracle_db.py into Docker build context"
+            cp /home/ubuntu/BRV1/BRV-app-OracleDB/oracle_db.py /home/ubuntu/BRV1/brv-app/oracle_db.py
+
             echo "🧼 Stopping and removing old containers"
-            docker compose -f brv-app/docker-compose.yml down || true
+            docker-compose -f brv-app/docker-compose.yml down || true
 
             echo "♻️ Cleaning Docker cache"
             docker system prune -af || true
 
-            echo "🐳 Building Docker containers from scratch (context = /home/ubuntu/BRV1)"
-            docker compose -f brv-app/docker-compose.yml build --no-cache
+            echo "🐳 Building Docker containers from scratch"
+            docker-compose -f brv-app/docker-compose.yml build --no-cache
 
             echo "🚀 Starting Docker containers"
-            docker compose -f brv-app/docker-compose.yml up -d
+            docker-compose -f brv-app/docker-compose.yml up -d
 
-            echo "✅ Deployment finished"
-          EOF
+            echo "✅ Dep
