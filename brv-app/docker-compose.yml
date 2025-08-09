@@ -2,11 +2,14 @@ version: "3.8"
 
 services:
   brv-streamlit:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     env_file:
-      - /home/ubuntu/BRV1/.env   # ✅ Load env file into container
+      - /home/ubuntu/BRV1/.env
     volumes:
-      - /home/ubuntu/BRV1/Wallet_brvdb1:/home/ubuntu/BRV1/Wallet_brvdb1:ro  # ✅ Mount wallet folder read-only
+      # ✅ Mount wallet directly from VM into container's wallet folder
+      - /home/ubuntu/BRV1/Wallet_brvdb1:/opt/oracle/wallet:ro
     restart: always
