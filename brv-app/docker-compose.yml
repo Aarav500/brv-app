@@ -10,6 +10,8 @@ services:
     env_file:
       - /home/ubuntu/BRV1/.env
     volumes:
-      # ✅ Mount wallet directly from VM into container's wallet folder
+      # ✅ Mount wallet
       - /home/ubuntu/BRV1/Wallet_brvdb1:/opt/oracle/wallet:ro
+      # ✅ Mount pre-downloaded Instant Client from VM
+      - /home/ubuntu/BRV1/instantclient_23_9:/opt/oracle/instantclient_23_9:ro
     restart: always
