@@ -2,7 +2,7 @@ FROM python:3.10-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install required packages
+# Install required system packages
 RUN apt-get update && apt-get install -y \
     gcc \
     libssl-dev \
@@ -15,26 +15,26 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Copy Python dependencies first (better caching)
 COPY requirements.txt .
 
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Set environment variables
+# Set environment variables for Oracle
 ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_9
 ENV TNS_ADMIN=/opt/oracle/wallet
 
-# 🔥 Install mysql-connector-python directly
+# Install MySQL connector
 RUN pip install --no-cache-dir mysql-connector-python==9.4.0
-
-# ✅ Confirm mysql-connector installed
 RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
 
-# Copy everything first
+# 🔹 Copy main application code
 COPY . .
 
-# Ensure oracle_db.py from the correct folder is placed in /app
-COPY BRV1/BRV-app-OracleDB/oracle_db.py /app/oracle_db.py
+# 🔹 Copy oracle_db.py from BRV-app-OracleDB into the container
+# (This works because we’ll set build context to /home/ubuntu/BRV1 in deploy script)
+COPY BRV-app-OracleDB/oracle_db.py /app/oracle_db.py
 
 EXPOSE 8501
 

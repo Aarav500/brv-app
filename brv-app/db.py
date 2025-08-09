@@ -9,10 +9,8 @@ All database operations should go through this module to ensure consistency
 and to make future database migrations easier.
 """
 
-import os
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple, Union
 
 # Import from oracle_db.py
 from oracle_db import (
@@ -29,49 +27,15 @@ from oracle_db import (
 
 # Import from user_auth.py
 from user_auth import (
-    hash_password,
-    verify_password,
-    get_user_by_email,
-    get_user_by_username,
-    authenticate_user,
-    create_user,
-    update_password,
-    update_force_password_reset,
-    force_password_reset_all,
-    get_all_users,
-    delete_user,
-    update_user_role,
-    update_user_email,
-    update_user_username
+    authenticate_user
 )
 
 # Import from oracle_candidates.py
 from oracle_candidates import (
-    create_candidate,
-    get_candidate_by_id,
-    get_candidate_by_email,
-    search_candidates_by_name,
-    get_all_candidates,
-    update_candidate,
-    delete_candidate,
-    update_interview_status,
-    update_resume_link,
-    search_candidates,
-    get_candidates_by_status,
-    count_candidates_by_status
+    update_interview_status
 )
 
 # Import from db_auto_scaling.py
-from db_auto_scaling import (
-    update_storage_usage,
-    check_storage_threshold,
-    auto_scale_database,
-    get_current_write_db,
-    get_all_db_names,
-    write_to_latest_db,
-    read_from_all_dbs,
-    monitor_database_usage
-)
 
 # Re-export all imported functions to provide a unified interface
 
