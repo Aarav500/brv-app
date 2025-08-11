@@ -5,8 +5,17 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="180f3012-0d66-4045-bac5-ff8268702845" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/oracle_db.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/README" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/cwallet.sso" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/ewallet.p12" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/ewallet.pem" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/keystore.jks" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/ojdbc.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/sqlnet.ora" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/tnsnames.ora" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/truststore.jks" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/Dockerfile" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/candidate_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/candidate_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/ceo.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/ceo.py" afterDir="false" />
@@ -18,7 +27,7 @@
       <change beforePath="$PROJECT_DIR$/brv-app/interviewer.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/interviewer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/oracle_candidates.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/oracle_candidates.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/oracle_db.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/oracle_db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/oracle_db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/reception_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/reception_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/receptionist_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/receptionist_panel.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/requirements.txt" afterDir="false" />
@@ -53,18 +62,18 @@
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/brv-app" />
     <option name="ROOT_SYNC" value="DONT_SYNC" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "Aarav500"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;Aarav500&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/Aarav500/brv-app.git",
-    "accountId": "91fa1d57-8a80-4e4d-a2bc-5bf1e55aa49c"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/Aarav500/brv-app.git&quot;,
+    &quot;accountId&quot;: &quot;91fa1d57-8a80-4e4d-a2bc-5bf1e55aa49c&quot;
   }
-}]]></component>
+}</component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -73,36 +82,36 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.add_test_users.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_conn.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/aarav/Desktop/BRV1&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
-    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.add_test_users.executor": "Run",
+    "Python.test_conn.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "master",
+    "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "C:/Users/aarav/Desktop/BRV1",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "preferences.pluginManager",
+    "to.speed.mode.migration.done": "true",
+    "vue.rearranger.settings.migration": "true"
   },
-  &quot;keyToStringList&quot;: {
-    &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
-      &quot;DotEnv&quot;
+  "keyToStringList": {
+    "com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File": [
+      "DotEnv"
     ]
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\aarav\Desktop\BRV1" />
       <recent name="C:\Users\aarav\Desktop\BRV1\brv-app" />
+      <recent name="C:\Users\aarav\Desktop\BRV1" />
       <recent name="C:\Users\aarav\Desktop\BRV1\.venv" />
     </key>
   </component>
@@ -177,7 +186,9 @@
       <workItem from="1754653882211" duration="5920000" />
       <workItem from="1754684567808" duration="29000" />
       <workItem from="1754684623077" duration="18000" />
-      <workItem from="1754717116295" duration="5348000" />
+      <workItem from="1754717116295" duration="16563000" />
+      <workItem from="1754818099016" duration="3488000" />
+      <workItem from="1754890506625" duration="225000" />
     </task>
     <servers />
   </component>

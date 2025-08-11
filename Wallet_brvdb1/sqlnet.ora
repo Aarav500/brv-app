@@ -1,2 +1,0 @@
-WALLET_LOCATION = (SOURCE = (METHOD = file) (METHOD_DATA = (DIRECTORY=/home/ubuntu/BRV1/Wallet_brvdb1)))
-SSL_SERVER_DN_MATCH = yes
