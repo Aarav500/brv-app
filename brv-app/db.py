@@ -1,465 +1,300 @@
-"""
-Centralized Database Module for BRV Applicant Management System
-
-This module serves as the main entry point for all database operations,
-using Oracle Autonomous Database for storage. It imports and re-exports
-functions from oracle_db.py, user_auth.py, and oracle_candidates.py.
-
-All database operations should go through this module to ensure consistency
-and to make future database migrations easier.
-"""
-
+# db.py
+import os
+import asyncio
 import uuid
 from datetime import datetime
+from typing import Optional, List, Dict, Any
 
-# Import from oracle_db.py
-from oracle_db import (
-    init_oracle_client,
-    get_connection_pool,
-    get_db_connection,
-    close_connection,
-    execute_query,
-    execute_across_all_dbs,
-    get_db_config,
-    update_db_config,
-    test_connection
-)
+import asyncpg
+from dotenv import load_dotenv
 
-# Import from user_auth.py
-from user_auth import (
-    authenticate_user
-)
+load_dotenv()
 
-# Import from oracle_candidates.py
-from oracle_candidates import (
-    update_interview_status
-)
+PGHOST = os.getenv("PGHOST", "localhost")
+PGPORT = int(os.getenv("PGPORT", 5432))
+PGUSER = os.getenv("PGUSER", "postgres")
+PGPASSWORD = os.getenv("PGPASSWORD", "")
+PGDATABASE = os.getenv("PGDATABASE", "postgres")
 
-# Import from db_auto_scaling.py
+DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
 
-# Re-export all imported functions to provide a unified interface
+# connection pool
+pool: Optional[asyncpg.pool.Pool] = None
 
-# Initialize the database connection
-def init_db():
+# -------------------------
+# Initialization / helpers
+# -------------------------
+async def init_db(min_size: int = 1, max_size: int = 10):
+    """Initialize asyncpg connection pool."""
+    global pool
+    if pool is None:
+        pool = await asyncpg.create_pool(DATABASE_URL, min_size=min_size, max_size=max_size, statement_cache_size=0, command_timeout=60)
+        # Optional: ensure required tables exist (migrations are preferred)
+        # await _ensure_schema()
+        print("✅ PostgreSQL pool initialized")
+
+
+async def close_db():
+    """Close pool."""
+    global pool
+    if pool:
+        await pool.close()
+    pool = None
+    print("🔌 PostgreSQL pool closed")
+
+
+async def fetch(query: str, *args) -> List[asyncpg.Record]:
+    """Run SELECT returning multiple rows."""
+    async with pool.acquire() as conn:
+        return await conn.fetch(query, *args)
+
+
+async def fetchrow(query: str, *args) -> Optional[asyncpg.Record]:
+    """Run SELECT returning single row."""
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(query, *args)
+
+
+async def execute(query: str, *args) -> str:
+    """Run INSERT/UPDATE/DELETE. Returns status string e.g. 'INSERT 0 1' or 'UPDATE 1'."""
+    async with pool.acquire() as conn:
+        return await conn.execute(query, *args)
+
+
+# -------------------------
+# Authentication wrapper
+# -------------------------
+async def authenticate(username_or_email: str, password: str) -> Optional[Dict[str, Any]]:
     """
-    Initialize the database connection.
-    
-    Returns:
-        bool: True if successful, False otherwise
+    Authenticate a user. Returns user dict on success, otherwise None.
+    Expects users table to have: id, email, username, password (hashed), role, force_password_reset, last_password_change
     """
-    return init_oracle_client()
+    # fetch user by email or username
+    query = "SELECT id, email, username, password, role, force_password_reset, last_password_change FROM users WHERE email = $1 OR username = $1"
+    user = await fetchrow(query, username_or_email)
+    if not user:
+        return None
 
-# Authentication wrapper functions
-def authenticate(username_or_email, password):
-    """
-    Authenticate a user.
-    
-    Args:
-        username_or_email (str): The username or email
-        password (str): The password
-        
-    Returns:
-        tuple: (success, user_data, message)
-    """
-    return authenticate_user(username_or_email, password)
+    hashed = user.get("password")
+    # Try to verify using security.verify_password if available
+    try:
+        from security import verify_password
+        ok = verify_password(hashed, password)
+    except Exception:
+        # Fallback — NOT RECOMMENDED: plain compare
+        ok = (hashed == password)
 
-# Log activity to the activity_log table
-def log_activity(user_id, action, details=None):
+    if not ok:
+        return None
+
+    # convert Record -> dict
+    return dict(user)
+
+
+# -------------------------
+# Activity log functions
+# -------------------------
+async def log_activity(user_id: str, action: str, details: Optional[str] = None) -> bool:
     """
-    Log an activity to the activity_log table.
-    
-    Args:
-        user_id (str): The ID of the user performing the action
-        action (str): The action being performed
-        details (str, optional): Additional details about the action
-        
-    Returns:
-        bool: True if successful, False otherwise
+    Log an activity to activity_log.
+    Creates log_id UUID and inserts timestamp.
     """
+    log_id = str(uuid.uuid4())
     query = """
-    INSERT INTO activity_log (
-        log_id,
-        user_id,
-        action,
-        details,
-        timestamp
-    ) VALUES (
-        :log_id,
-        :user_id,
-        :action,
-        :details,
-        :timestamp
-    )
+    INSERT INTO activity_log (log_id, user_id, action, details, timestamp)
+    VALUES ($1, $2, $3, $4, NOW())
     """
-    
-    params = {
-        "log_id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "action": action,
-        "details": details,
-        "timestamp": datetime.now()
-    }
-    
-    result = execute_query(query, params, commit=True)
-    return result is not None
+    try:
+        await execute(query, log_id, user_id, action, details)
+        return True
+    except Exception as e:
+        # Optionally log error
+        print("log_activity error:", e)
+        return False
 
-# Get activity logs
-def get_activity_logs(limit=100, offset=0, user_id=None, action=None, start_date=None, end_date=None):
+
+async def get_activity_logs(limit: int = 100, offset: int = 0,
+                            user_id: Optional[str] = None, action: Optional[str] = None,
+                            start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Get activity logs with optional filtering.
-    
-    Args:
-        limit (int, optional): Maximum number of logs to return. Defaults to 100.
-        offset (int, optional): Number of logs to skip. Defaults to 0.
-        user_id (str, optional): Filter by user ID. Defaults to None.
-        action (str, optional): Filter by action. Defaults to None.
-        start_date (str, optional): Filter by start date (YYYY-MM-DD). Defaults to None.
-        end_date (str, optional): Filter by end date (YYYY-MM-DD). Defaults to None.
-        
-    Returns:
-        list: List of activity logs
+    Retrieve activity logs with filtering.
+    start_date and end_date expected as 'YYYY-MM-DD' strings.
     """
-    # Build the WHERE clause and parameters dynamically
     where_clauses = []
-    params = {}
-    
+    params = []
+    idx = 1
+
     if user_id:
-        where_clauses.append("user_id = :user_id")
-        params["user_id"] = user_id
-    
+        where_clauses.append(f"user_id = ${idx}"); params.append(user_id); idx += 1
     if action:
-        where_clauses.append("action = :action")
-        params["action"] = action
-    
+        where_clauses.append(f"action = ${idx}"); params.append(action); idx += 1
     if start_date:
-        where_clauses.append("timestamp >= TO_TIMESTAMP(:start_date, 'YYYY-MM-DD')")
-        params["start_date"] = start_date
-    
+        where_clauses.append(f"timestamp >= to_timestamp(${idx}, 'YYYY-MM-DD')"); params.append(start_date); idx += 1
     if end_date:
-        where_clauses.append("timestamp <= TO_TIMESTAMP(:end_date, 'YYYY-MM-DD') + INTERVAL '1' DAY")
-        params["end_date"] = end_date
-    
-    # Build the query
-    query = """
-    SELECT 
-        log_id,
-        user_id,
-        action,
-        details,
-        TO_CHAR(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp
-    FROM activity_log 
-    """
-    
-    if where_clauses:
-        query += f"WHERE {' AND '.join(where_clauses)} "
-    
-    query += "ORDER BY timestamp DESC"
-    
-    # Execute the query
-    all_logs = execute_across_all_dbs(query, params) or []
-    
-    # Apply pagination
-    paginated_logs = all_logs[offset:offset+limit] if all_logs else []
-    
-    return paginated_logs
+        where_clauses.append(f"timestamp <= (to_timestamp(${idx}, 'YYYY-MM-DD') + interval '1 day')"); params.append(end_date); idx += 1
 
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    query = f"""
+    SELECT log_id, user_id, action, details, to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp
+    FROM activity_log
+    {where_sql}
+    ORDER BY timestamp DESC
+    LIMIT ${idx} OFFSET ${idx+1}
+    """
+    params.extend([limit, offset])
+    rows = await fetch(query, *params)
+    return [dict(r) for r in rows]
+
+
+# -------------------------
 # Resume metadata functions
-def add_resume_metadata(resume_id, candidate_id, filename, file_size, mime_type, upload_date, resume_link):
-    """
-    Add metadata for a resume.
-    
-    Args:
-        resume_id (str): The ID of the resume
-        candidate_id (str): The ID of the candidate
-        filename (str): The original filename
-        file_size (int): The file size in bytes
-        mime_type (str): The MIME type of the file
-        upload_date (datetime): The upload date
-        resume_link (str): The link to the resume in Google Drive
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
+# -------------------------
+async def add_resume_metadata(resume_id: str, candidate_id: int, filename: str,
+                              file_size: int, mime_type: str, upload_date: datetime, resume_link: str) -> bool:
     query = """
-    INSERT INTO resumes_metadata (
-        resume_id,
-        candidate_id,
-        filename,
-        file_size,
-        mime_type,
-        upload_date,
-        resume_link
-    ) VALUES (
-        :resume_id,
-        :candidate_id,
-        :filename,
-        :file_size,
-        :mime_type,
-        :upload_date,
-        :resume_link
-    )
+    INSERT INTO resumes_metadata (resume_id, candidate_id, filename, file_size, mime_type, upload_date, resume_link)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     """
-    
-    params = {
-        "resume_id": resume_id,
-        "candidate_id": candidate_id,
-        "filename": filename,
-        "file_size": file_size,
-        "mime_type": mime_type,
-        "upload_date": upload_date,
-        "resume_link": resume_link
-    }
-    
-    result = execute_query(query, params, commit=True)
-    return result is not None
+    try:
+        await execute(query, resume_id, candidate_id, filename, file_size, mime_type, upload_date, resume_link)
+        return True
+    except Exception as e:
+        print("add_resume_metadata error:", e)
+        return False
 
-def get_resume_metadata(resume_id=None, candidate_id=None):
-    """
-    Get metadata for a resume.
-    
-    Args:
-        resume_id (str, optional): The ID of the resume. Defaults to None.
-        candidate_id (str, optional): The ID of the candidate. Defaults to None.
-        
-    Returns:
-        dict or list: Resume metadata
-    """
+
+async def get_resume_metadata(resume_id: Optional[str] = None, candidate_id: Optional[int] = None):
     if resume_id:
-        # Get a specific resume
         query = """
-        SELECT 
-            resume_id,
-            candidate_id,
-            filename,
-            file_size,
-            mime_type,
-            TO_CHAR(upload_date, 'YYYY-MM-DD HH24:MI:SS') as upload_date,
-            resume_link
-        FROM resumes_metadata 
-        WHERE resume_id = :resume_id
+        SELECT resume_id, candidate_id, filename, file_size, mime_type,
+               to_char(upload_date, 'YYYY-MM-DD HH24:MI:SS') as upload_date, resume_link
+        FROM resumes_metadata
+        WHERE resume_id = $1
         """
-        
-        return execute_across_all_dbs(query, {"resume_id": resume_id}, fetchone=True)
-    
+        return dict(await fetchrow(query, resume_id))
     elif candidate_id:
-        # Get all resumes for a candidate
         query = """
-        SELECT 
-            resume_id,
-            candidate_id,
-            filename,
-            file_size,
-            mime_type,
-            TO_CHAR(upload_date, 'YYYY-MM-DD HH24:MI:SS') as upload_date,
-            resume_link
-        FROM resumes_metadata 
-        WHERE candidate_id = :candidate_id
+        SELECT resume_id, candidate_id, filename, file_size, mime_type,
+               to_char(upload_date, 'YYYY-MM-DD HH24:MI:SS') as upload_date, resume_link
+        FROM resumes_metadata
+        WHERE candidate_id = $1
         ORDER BY upload_date DESC
         """
-        
-        return execute_across_all_dbs(query, {"candidate_id": candidate_id}) or []
-    
+        rows = await fetch(query, candidate_id)
+        return [dict(r) for r in rows]
     else:
-        # Get all resumes
         query = """
-        SELECT 
-            resume_id,
-            candidate_id,
-            filename,
-            file_size,
-            mime_type,
-            TO_CHAR(upload_date, 'YYYY-MM-DD HH24:MI:SS') as upload_date,
-            resume_link
-        FROM resumes_metadata 
+        SELECT resume_id, candidate_id, filename, file_size, mime_type,
+               to_char(upload_date, 'YYYY-MM-DD HH24:MI:SS') as upload_date, resume_link
+        FROM resumes_metadata
         ORDER BY upload_date DESC
         """
-        
-        return execute_across_all_dbs(query) or []
+        rows = await fetch(query)
+        return [dict(r) for r in rows]
 
-def delete_resume_metadata(resume_id):
-    """
-    Delete metadata for a resume.
-    
-    Args:
-        resume_id (str): The ID of the resume
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    query = """
-    DELETE FROM resumes_metadata 
-    WHERE resume_id = :resume_id
-    """
-    
-    result = execute_query(query, {"resume_id": resume_id}, commit=True)
-    return result is not None
 
-# Interview management functions
-def create_interview(candidate_id, interviewer_id, scheduled_time, notes=None):
+async def delete_resume_metadata(resume_id: str) -> bool:
+    query = "DELETE FROM resumes_metadata WHERE resume_id = $1"
+    try:
+        await execute(query, resume_id)
+        return True
+    except Exception as e:
+        print("delete_resume_metadata error:", e)
+        return False
+
+
+# -------------------------
+# Interview management
+# -------------------------
+async def create_interview(candidate_id: int, interviewer_id: str, scheduled_time: str, notes: Optional[str] = None):
     """
-    Create a new interview.
-    
-    Args:
-        candidate_id (str): The ID of the candidate
-        interviewer_id (str): The ID of the interviewer
-        scheduled_time (str): The scheduled time (YYYY-MM-DD HH:MM:SS)
-        notes (str, optional): Additional notes. Defaults to None.
-        
-    Returns:
-        tuple: (success, interview_id, message)
+    Insert a new interview row. scheduled_time expected in 'YYYY-MM-DD HH24:MI:SS' format.
+    Returns (success, interview_id, message)
     """
-    # Generate a UUID for the interview
     interview_id = str(uuid.uuid4())
-    
     query = """
-    INSERT INTO interviews (
-        interview_id,
-        candidate_id,
-        interviewer_id,
-        scheduled_time,
-        feedback,
-        status,
-        created_at,
-        updated_at
-    ) VALUES (
-        :interview_id,
-        :candidate_id,
-        :interviewer_id,
-        TO_TIMESTAMP(:scheduled_time, 'YYYY-MM-DD HH24:MI:SS'),
-        :feedback,
-        :status,
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
-    )
+    INSERT INTO interviews (interview_id, candidate_id, interviewer_id, scheduled_time, feedback, status, created_at, updated_at)
+    VALUES ($1, $2, $3, to_timestamp($4, 'YYYY-MM-DD HH24:MI:SS'), $5, $6, NOW(), NOW())
     """
-    
-    params = {
-        "interview_id": interview_id,
-        "candidate_id": candidate_id,
-        "interviewer_id": interviewer_id,
-        "scheduled_time": scheduled_time,
-        "feedback": notes,
-        "status": "scheduled"
-    }
-    
-    result = execute_query(query, params, commit=True)
-    
-    if result is not None:
-        # Update candidate status
-        update_interview_status(candidate_id, "Interview Scheduled")
+    try:
+        await execute(query, interview_id, candidate_id, interviewer_id, scheduled_time, notes, "scheduled")
+        # update candidate status if you have such function or table
+        await update_interview_status(candidate_id, "Interview Scheduled")
         return True, interview_id, "Interview scheduled successfully"
-    else:
+    except Exception as e:
+        print("create_interview error:", e)
         return False, None, "Failed to schedule interview"
 
-def get_interviews_by_candidate(candidate_id):
-    """
-    Get all interviews for a candidate.
-    
-    Args:
-        candidate_id (str): The ID of the candidate
-        
-    Returns:
-        list: List of interviews
-    """
+
+async def get_interviews_by_candidate(candidate_id: int):
     query = """
-    SELECT 
-        i.interview_id,
-        i.candidate_id,
-        i.interviewer_id,
-        u.username as interviewer_name,
-        TO_CHAR(i.scheduled_time, 'YYYY-MM-DD HH24:MI:SS') as scheduled_time,
-        i.feedback,
-        i.status,
-        i.result,
-        TO_CHAR(i.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
-        TO_CHAR(i.updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
+    SELECT i.interview_id, i.candidate_id, i.interviewer_id, u.username as interviewer_name,
+           to_char(i.scheduled_time, 'YYYY-MM-DD HH24:MI:SS') as scheduled_time,
+           i.feedback, i.status, i.result,
+           to_char(i.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+           to_char(i.updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
     FROM interviews i
-    LEFT JOIN users u ON i.interviewer_id = u.user_id
-    WHERE i.candidate_id = :candidate_id
+    LEFT JOIN users u ON i.interviewer_id = u.id
+    WHERE i.candidate_id = $1
     ORDER BY i.scheduled_time DESC
     """
-    
-    return execute_across_all_dbs(query, {"candidate_id": candidate_id}) or []
+    rows = await fetch(query, candidate_id)
+    return [dict(r) for r in rows]
 
-def get_interviews_by_interviewer(interviewer_id):
-    """
-    Get all interviews for an interviewer.
-    
-    Args:
-        interviewer_id (str): The ID of the interviewer
-        
-    Returns:
-        list: List of interviews
-    """
+
+async def get_interviews_by_interviewer(interviewer_id: str):
     query = """
-    SELECT 
-        i.interview_id,
-        i.candidate_id,
-        c.full_name as candidate_name,
-        i.interviewer_id,
-        TO_CHAR(i.scheduled_time, 'YYYY-MM-DD HH24:MI:SS') as scheduled_time,
-        i.feedback,
-        i.status,
-        i.result,
-        TO_CHAR(i.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
-        TO_CHAR(i.updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
+    SELECT i.interview_id, i.candidate_id, c.name as candidate_name, i.interviewer_id,
+           to_char(i.scheduled_time, 'YYYY-MM-DD HH24:MI:SS') as scheduled_time,
+           i.feedback, i.status, i.result,
+           to_char(i.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+           to_char(i.updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
     FROM interviews i
-    LEFT JOIN candidates c ON i.candidate_id = c.candidate_id
-    WHERE i.interviewer_id = :interviewer_id
+    LEFT JOIN candidates c ON i.candidate_id = c.id
+    WHERE i.interviewer_id = $1
     ORDER BY i.scheduled_time DESC
     """
-    
-    return execute_across_all_dbs(query, {"interviewer_id": interviewer_id}) or []
+    rows = await fetch(query, interviewer_id)
+    return [dict(r) for r in rows]
 
-def update_interview_feedback(interview_id, feedback, result):
-    """
-    Update interview feedback and result.
-    
-    Args:
-        interview_id (str): The ID of the interview
-        feedback (str): The feedback
-        result (str): The result (e.g., "pass", "fail")
-        
-    Returns:
-        tuple: (success, message)
-    """
+
+async def update_interview_feedback(interview_id: str, feedback: str, result: str):
     query = """
-    UPDATE interviews 
-    SET 
-        feedback = :feedback,
-        result = :result,
-        status = :status,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE interview_id = :interview_id
+    UPDATE interviews
+    SET feedback = $1,
+        result = $2,
+        status = $3,
+        updated_at = NOW()
+    WHERE interview_id = $4
     """
-    
-    params = {
-        "feedback": feedback,
-        "result": result,
-        "status": result,  # Use result as status
-        "interview_id": interview_id
-    }
-    
-    result_update = execute_query(query, params, commit=True)
-    
-    if result_update is not None:
-        # Get the candidate ID
-        query = "SELECT candidate_id FROM interviews WHERE interview_id = :interview_id"
-        interview = execute_across_all_dbs(query, {"interview_id": interview_id}, fetchone=True)
-        
-        if interview:
-            # Update candidate status
-            update_interview_status(interview["candidate_id"], result)
+    try:
+        await execute(query, feedback, result, result, interview_id)
+        # fetch candidate_id to update candidate status
+        row = await fetchrow("SELECT candidate_id FROM interviews WHERE interview_id = $1", interview_id)
+        if row:
+            candidate_id = row["candidate_id"]
+            await update_interview_status(candidate_id, result)
             return True, "Interview feedback updated successfully"
-        else:
-            return False, "Interview found but failed to update candidate status"
-    else:
+        return False, "Interview updated but failed to find candidate"
+    except Exception as e:
+        print("update_interview_feedback error:", e)
         return False, "Failed to update interview feedback"
 
-# Test the database connection
-if __name__ == "__main__":
-    print("Testing database connection...")
-    if test_connection():
-        print("Database connection successful!")
-    else:
-        print("Database connection failed!")
+
+# -------------------------
+# Candidate status helper
+# -------------------------
+async def update_interview_status(candidate_id: int, status: str):
+    """Update candidate status field"""
+    try:
+        await execute("UPDATE candidates SET status = $1, updated_at = NOW() WHERE id = $2", status, candidate_id)
+    except Exception as e:
+        print("update_interview_status error:", e)
+
+
+# -------------------------
+# Optional convenience: sync runner for one-off scripts
+# -------------------------
+def run_sync(coro):
+    """Run an async coroutine from sync code (small helper)."""
+    return asyncio.get_event_loop().run_until_complete(coro)

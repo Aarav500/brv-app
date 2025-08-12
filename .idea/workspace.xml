@@ -5,35 +5,64 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="180f3012-0d66-4045-bac5-ff8268702845" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/README" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/cwallet.sso" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/ewallet.p12" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/ewallet.pem" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/keystore.jks" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/ojdbc.properties" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/sqlnet.ora" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/tnsnames.ora" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_brvdb1/truststore.jks" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/README" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/cwallet.sso" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/ewallet.p12" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/ewallet.pem" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/keystore.jks" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/ojdbc.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/sqlnet.ora" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/tnsnames.ora" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/truststore.jks" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/add_salt_column.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/admin_cli.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/build_exe.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/candidate_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/candidate_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/ceo.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/ceo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/check_sqlite_users.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/check_storage.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/check_storage.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/database.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/db_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/db_config.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/docker-compose.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/env_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/env_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/fix_missing_user_fields.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/init_db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/init_db.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/install.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/install_packages.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/interviewer.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/interviewer.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/mysql_db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/mysql_db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/oracle_candidates.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/oracle_candidates.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/oracle_db.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/oracle_db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/reception_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/reception_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/receptionist_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/receptionist_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/recreate_db.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/resume_linker.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/resume_linker.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/schedule_interview.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/schedule_interview.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/security.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/seed_test_users.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_conn.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_cv_id_and_edit_link.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_cv_matching.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_google_sheet.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_header_validation.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_header_validation_simple.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_import.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_login.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_login_fix.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_login_sqlite.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_receptionist.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_receptionist_fix.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_simple_conn.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_system.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/test_venv.bat" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/user_auth.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/user_auth.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ssh-key-2025-08-02.key" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -86,6 +115,8 @@
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "Python.add_test_users.executor": "Run",
+    "Python.check_storage.executor": "Run",
+    "Python.mysql_db.executor": "Run",
     "Python.test_conn.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
@@ -139,6 +170,8 @@
       <command value="pip install oracledb" />
       <command value="pip install python-dotenv" />
       <command value="pip install python-dotenv " />
+      <command value="pip install asyncpg python-dotenv" />
+      <command value="pip install asyncpg python-dotenv " />
     </option>
   </component>
   <component name="SharedIndexes">
@@ -188,7 +221,10 @@
       <workItem from="1754684623077" duration="18000" />
       <workItem from="1754717116295" duration="16563000" />
       <workItem from="1754818099016" duration="3488000" />
-      <workItem from="1754890506625" duration="225000" />
+      <workItem from="1754890506625" duration="1573000" />
+      <workItem from="1754930055865" duration="677000" />
+      <workItem from="1754974857829" duration="578000" />
+      <workItem from="1754985392042" duration="7113000" />
     </task>
     <servers />
   </component>
@@ -198,8 +234,32 @@
   <component name="UnknownFeatures">
     <option featureType="com.intellij.fileTypeFactory" implementationName="*.ora" />
   </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/brv-app/interviewer_cv_view.py</url>
+          <option name="timeStamp" value="2" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/brv-app/new_applicant.py</url>
+          <option name="timeStamp" value="3" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/brv-app/reception_view.py</url>
+          <option name="timeStamp" value="4" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/brv-app/receptionist.py</url>
+          <option name="timeStamp" value="5" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/BRV1$add_test_users.coverage" NAME="add_test_users Coverage Results" MODIFIED="1754655229441" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/BRV1$mysql_db.coverage" NAME="mysql_db Coverage Results" MODIFIED="1754986348701" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/brv-app" />
     <SUITE FILE_PATH="coverage/BRV1$test_conn.coverage" NAME="test_conn Coverage Results" MODIFIED="1754118777751" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/BRV1$check_storage.coverage" NAME="check_storage Coverage Results" MODIFIED="1754989222929" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/brv-app" />
   </component>
 </project>

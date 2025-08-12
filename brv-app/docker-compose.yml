@@ -9,9 +9,4 @@ services:
       - "8501:8501"
     env_file:
       - /home/ubuntu/BRV1/.env
-    volumes:
-      # ✅ Use new wallet
-      - /home/ubuntu/Wallet_BRV1:/opt/oracle/wallet:ro
-      # ✅ Instant Client
-      - /home/ubuntu/BRV1/instantclient_23_9:/opt/oracle/instantclient_23_9:ro
     restart: always

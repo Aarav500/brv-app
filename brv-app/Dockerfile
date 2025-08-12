@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     libssl-dev \
     libffi-dev \
-    default-libmysqlclient-dev \
+    libpq-dev \
     build-essential \
     python3-dev \
     unzip \
@@ -21,18 +21,11 @@ COPY requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Set environment variables for Oracle
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_9
-ENV TNS_ADMIN=/opt/oracle/wallet
+# Install PostgreSQL driver
+RUN pip install --no-cache-dir psycopg2-binary==2.9.9
 
-# Install MySQL connector
-RUN pip install --no-cache-dir mysql-connector-python==9.4.0
-RUN python -c "import mysql.connector; print('✅ mysql-connector version:', mysql.connector.__version__)"
-
-# 🔹 Copy main application code
+# Copy main application code
 COPY . .
-
-
 
 EXPOSE 8501
 

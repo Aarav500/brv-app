@@ -1,101 +1,86 @@
 import streamlit as st
-import sqlite3
+import asyncio
 import pandas as pd
-from datetime import datetime, timedelta
-import uuid
+from datetime import datetime
+from postgres_db import get_connection  # Your asyncpg connection helper
 
-def schedule_interview_page():
-    st.title("Schedule New Interview")
+# Fetch list of candidates without scheduled interview
+async def fetch_candidates():
+    query = """
+        SELECT id, name, email
+        FROM candidates
+        WHERE status != 'Interview Scheduled'
+        ORDER BY created_at DESC
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(query)
+    return [dict(r) for r in rows]
 
-    # Fetch available interviewers
-    conn = sqlite3.connect('data/brv_applicants.db')
-    interviewers = pd.read_sql_query(
-        "SELECT id, email FROM users WHERE role = 'interviewer'",
-        conn
-    )
+# Fetch list of interviewers (users table with role='interviewer')
+async def fetch_interviewers():
+    query = """
+        SELECT id, name, email
+        FROM users
+        WHERE role = 'interviewer'
+        ORDER BY name
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(query)
+    return [dict(r) for r in rows]
 
-    # Fetch applicants who don't have scheduled interviews
-    applicants = pd.read_sql_query(
-        """
-        SELECT a.id, a.name, a.email 
-        FROM applicants a
-        WHERE a.status = 'new' OR a.status = 'in_process'
-        """,
-        conn
-    )
-    conn.close()
+# Insert a new interview record and update candidate status
+async def schedule_interview(candidate_id, interviewer_id, interview_date):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO interviews (candidate_id, interviewer_id, interview_date, status, created_at)
+                VALUES ($1, $2, $3, 'Scheduled', NOW())
+                """,
+                candidate_id, interviewer_id, interview_date
+            )
+            await conn.execute(
+                """
+                UPDATE candidates
+                SET status = 'Interview Scheduled'
+                WHERE id = $1
+                """,
+                candidate_id
+            )
 
-    if interviewers.empty:
-        st.error("No interviewers available in the system.")
+def main():
+    st.title("📅 Schedule Interview")
+
+    # Role-based access control
+    if st.session_state.get("user_role") not in ["ceo", "interviewer"]:
+        st.error("You do not have permission to access this page.")
         return
 
-    if applicants.empty:
-        st.error("No applicants available for scheduling interviews.")
+    # Load data
+    with st.spinner("Loading data..."):
+        candidates = asyncio.run(fetch_candidates())
+        interviewers = asyncio.run(fetch_interviewers())
+
+    if not candidates:
+        st.info("No candidates available for scheduling.")
         return
 
-    with st.form("schedule_interview_form"):
-        # Select applicant
-        applicant_options = [f"{row['name']} ({row['email']})" for _, row in applicants.iterrows()]
-        selected_applicant = st.selectbox("Select Applicant", applicant_options)
+    # Form
+    candidate_names = [f"{c['name']} ({c['email']})" for c in candidates]
+    interviewer_names = [f"{i['name']} ({i['email']})" for i in interviewers]
 
-        # Select interviewer
-        interviewer_options = interviewers['email'].tolist()
-        selected_interviewer = st.selectbox("Select Interviewer", interviewer_options)
-
-        # Select date and time
-        interview_date = st.date_input("Interview Date", datetime.now() + timedelta(days=1))
-        interview_time = st.time_input("Interview Time", datetime.now().time())
-
-        # Combine date and time
-        interview_datetime = datetime.combine(interview_date, interview_time)
-
-        # Additional notes
-        notes = st.text_area("Notes (Optional)")
-
+    with st.form("schedule_form"):
+        selected_candidate = st.selectbox("Select Candidate", candidate_names)
+        selected_interviewer = st.selectbox("Select Interviewer", interviewer_names)
+        interview_date = st.date_input("Interview Date", datetime.today())
         submit = st.form_submit_button("Schedule Interview")
 
         if submit:
-            # Get applicant and interviewer IDs
-            applicant_name = selected_applicant.split(" (")[0]
-            applicant_email = selected_applicant.split("(")[1].replace(")", "")
+            cand_id = candidates[candidate_names.index(selected_candidate)]['id']
+            int_id = interviewers[interviewer_names.index(selected_interviewer)]['id']
 
-            conn = sqlite3.connect('data/brv_applicants.db')
-            c = conn.cursor()
-
-            # Get applicant ID
-            c.execute("SELECT id FROM applicants WHERE name = ? AND email = ?", (applicant_name, applicant_email))
-            applicant_id = c.fetchone()[0]
-
-            # Get interviewer ID
-            c.execute("SELECT id FROM users WHERE email = ? AND role = 'interviewer'", (selected_interviewer,))
-            interviewer_id = c.fetchone()[0]
-
-            # Create interview record
-            interview_id = str(uuid.uuid4())
-            c.execute(
-                """
-                INSERT INTO interviews 
-                (id, applicant_id, interviewer_id, scheduled_time, notes, status) 
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (interview_id, applicant_id, interviewer_id, interview_datetime, notes, "scheduled")
-            )
-
-            # Update applicant status
-            c.execute(
-                "UPDATE applicants SET status = 'interview_scheduled', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (applicant_id,)
-            )
-
-            conn.commit()
-            conn.close()
-
-            st.success(f"Interview scheduled successfully for {applicant_name} with {selected_interviewer} on {interview_datetime.strftime('%Y-%m-%d %H:%M')}")
+            asyncio.run(schedule_interview(cand_id, int_id, interview_date))
+            st.success("✅ Interview scheduled successfully!")
 
 if __name__ == "__main__":
-    st.set_page_config(
-        page_title="Schedule Interview - BRV Applicant System",
-        page_icon="📋",
-        layout="wide"
-    )
-    schedule_interview_page()
+    main()

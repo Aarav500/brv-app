@@ -1,27 +1,128 @@
 import streamlit as st
 import pandas as pd
-from mysql_db import get_all_users, create_user, add_user, remove_user, update_user_password, update_user_role
-from mysql_db import get_password_expiry_policy, update_password_expiry_policy, force_password_reset_all
-from utils import VALID_ROLES
+import uuid
+from datetime import datetime
 
+from mysql_db import get_db_connection
+from utils import VALID_ROLES
+from security import hash_password  # existing helper that returns (hashed, salt)
+
+# ---------- DB helper ----------
+def _query_fetchall(query, params=()):
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            cols = [d[0] for d in cur.description] if cur.description else []
+            rows = cur.fetchall()
+            return [dict(zip(cols, r)) for r in rows]
+    finally:
+        conn.close()
+
+def _query_execute(query, params=()):
+    conn = get_db_connection()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            conn.commit()
+            return True
+    except Exception as e:
+        st.error(f"DB error: {e}")
+        return False
+    finally:
+        conn.close()
+
+# ---------- Business functions ----------
+def get_all_users():
+    query = "SELECT user_id AS id, username, email, role, force_password_reset, last_password_change FROM users ORDER BY created_at DESC"
+    return _query_fetchall(query)
+
+def add_user(email, password, role):
+    role = role.lower()
+    if role not in VALID_ROLES:
+        return False, f"Invalid role: {role}"
+    # Validate email basic
+    if "@" not in email:
+        return False, "Invalid email address"
+
+    # Hash password
+    password_hash, salt = hash_password(password)
+    user_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    query = """
+        INSERT INTO users (user_id, username, email, password_hash, role, last_password_change, force_password_reset)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+    ok = _query_execute(query, (user_id, email, email, password_hash, role, now, True))
+    if ok:
+        return True, user_id
+    else:
+        return False, "Failed to add user"
+
+def remove_user(user_id):
+    # Prevent deleting last CEO or CEO itself handled by UI; here just attempt delete
+    query = "DELETE FROM users WHERE user_id = %s"
+    ok = _query_execute(query, (user_id,))
+    return ok, ("User removed" if ok else "Failed to remove user")
+
+def update_user_password(user_id, new_password):
+    password_hash, salt = hash_password(new_password)
+    query = "UPDATE users SET password_hash = %s, last_password_change = %s, force_password_reset = %s WHERE user_id = %s"
+    ok = _query_execute(query, (password_hash, datetime.utcnow(), True, user_id))
+    return ok
+
+def update_user_role(user_id, new_role, new_email=None):
+    new_role = new_role.lower()
+    if new_role not in VALID_ROLES:
+        return False, f"Invalid role: {new_role}"
+    if new_email:
+        query = "UPDATE users SET role = %s, email = %s, username = %s WHERE user_id = %s"
+        ok = _query_execute(query, (new_role, new_email, new_email, user_id))
+    else:
+        query = "UPDATE users SET role = %s WHERE user_id = %s"
+        ok = _query_execute(query, (new_role, user_id))
+    return (ok, "Updated" if ok else "Failed to update")
+
+def get_password_expiry_policy():
+    query = "SELECT value FROM settings WHERE key = %s"
+    rows = _query_fetchall(query, ("password_expiry_days",))
+    if rows:
+        try:
+            return int(rows[0]["value"])
+        except:
+            return 30
+    return 30
+
+def update_password_expiry_policy(days):
+    try:
+        days = int(days)
+    except:
+        return False, "Invalid days value"
+    query = """
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+    """
+    ok = _query_execute(query, ("password_expiry_days", str(days)))
+    return (ok, f"Password expiry set to {days} days" if ok else "Failed to update")
+
+def force_password_reset_all():
+    query = "UPDATE users SET force_password_reset = TRUE"
+    ok = _query_execute(query)
+    return ok
+
+# ---------- Streamlit UI ----------
 def show_admin_panel():
-    """
-    Wrapper function for the admin dashboard.
-    This is called from main.py.
-    """
     st.header("👤 CEO Control Panel")
     st.subheader("User Management")
-
-    # Call the existing admin view function
     admin_view()
 
 def admin_view():
-    """
-    Main view for the admin/CEO dashboard.
-    """
     st.title("👑 Admin Dashboard")
-
-    # Sidebar navigation
     st.sidebar.title("Navigation")
     page = st.sidebar.radio("Go to", ["User Management", "System Overview", "Candidate Statistics"])
 
@@ -33,327 +134,132 @@ def admin_view():
         candidate_statistics_page()
 
 def user_management_page():
-    """
-    Page for managing users (add, remove, reset password, assign roles).
-    """
     st.header("👥 User Management")
-
-    # Tabs for different user management functions
     tab1, tab2, tab3, tab4 = st.tabs(["View Users", "Add User", "Modify User", "Password Policy"])
 
     with tab1:
         st.subheader("Current Users")
         users = get_all_users()
-
         if users:
-            # Create a DataFrame for display
-            users_df = pd.DataFrame([
-                {
-                    "Email": user.get("email", "N/A"),
-                    "Role": user.get("role", ""),
-                    "Password Reset Required": "Yes" if user.get("force_password_reset", True) else "No",
-                    "Last Password Change": user.get("last_password_change", "") or "Never"
-                }
-                for user in users
-            ])
-
+            users_df = pd.DataFrame([{
+                "Email": u.get("email"),
+                "Role": u.get("role"),
+                "Password Reset Required": "Yes" if u.get("force_password_reset") else "No",
+                "Last Password Change": u.get("last_password_change") or "Never"
+            } for u in users])
             st.dataframe(users_df)
         else:
-            st.info("No users found in the system.")
+            st.info("No users found.")
 
     with tab2:
         st.subheader("Add New User")
-
         with st.form("add_user_form"):
-            username = st.text_input("Email", placeholder="john.doe@bluematrixit.com")
+            email = st.text_input("Email")
             password = st.text_input("Initial Password", type="password")
             role = st.selectbox("Role", VALID_ROLES)
-
             submit = st.form_submit_button("Add User")
-
             if submit:
-                if not username or not password:
-                    st.error("Username and password are required.")
+                ok, message = add_user(email, password, role)
+                if ok:
+                    st.success("User added")
                 else:
-                    try:
-                        # Add user to both database and YAML
-                        success, message = add_user(username, password, role)
-                        create_user(username, password, role)
-
-                        if success:
-                            st.success(f"✅ User {username} added successfully.")
-                        else:
-                            st.error(f"❌ {message}")
-                    except Exception as e:
-                        st.error(f"❌ Error adding user: {str(e)}")
+                    st.error(message)
 
     with tab3:
         st.subheader("Modify Existing User")
-
         users = get_all_users()
         if not users:
-            st.info("No users found in the system.")
+            st.info("No users found.")
             return
-
-        # Create a selection box with emails
-        user_options = [f"{user.get('email', '[no-email]')} ({user.get('role', '[no-role]')})" for user in users]
-        selected_user = st.selectbox("Select User", user_options)
-
-        if selected_user:
-            # Extract email from selection
-            selected_email = selected_user.split(" (")[0]
-
-            # Find the user in the list
-            user = next((u for u in users if u.get("email", "") == selected_email), None)
-
+        user_options = [f"{u['email']} ({u['role']})" for u in users]
+        selected = st.selectbox("Select User", user_options)
+        if selected:
+            email = selected.split(" (")[0]
+            user = next((u for u in users if u["email"] == email), None)
             if user:
-                st.write(f"**User ID:** {user.get('id', '[no-id]')}")
-                new_email = st.text_input("Change Email", value=user.get("email", ""))
-                st.write(f"**Current Role:** {user.get('role', '')}")
-                st.write(f"**Password Reset Required:** {'Yes' if user.get('force_password_reset', True) else 'No'}")
-                st.write(f"**Last Password Change:** {user.get('last_password_change', '') or 'Never'}")
-
-                # Actions
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    if st.button("Reset Password"):
-                        # Generate a random password
-                        import random
-                        import string
-                        new_password = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=12))
-
-                        # Reset password in database
-                        success = update_user_password(user.get("id", ""), new_password)
-
-                        if success:
-                            success = True
-                            message = "Password reset successfully"
-                            st.success(f"✅ Password reset to: **{new_password}**")
-                            st.info("The user will be required to change this password on next login.")
+                st.write(f"User ID: {user['id']}")
+                new_email = st.text_input("New Email", value=user["email"])
+                new_role = st.selectbox("New Role", VALID_ROLES, index = VALID_ROLES.index(user.get("role", VALID_ROLES[0])))
+                if st.button("Change Role / Email"):
+                    ok, msg = update_user_role(user["id"], new_role, new_email)
+                    if ok:
+                        st.success("Updated")
+                    else:
+                        st.error(msg)
+                if st.button("Reset Password"):
+                    import random, string
+                    new_pass = ''.join(random.choices(string.ascii_letters+string.digits, k=12))
+                    if update_user_password(user["id"], new_pass):
+                        st.success(f"Password reset — new password: {new_pass}")
+                    else:
+                        st.error("Failed to reset password")
+                if st.button("Remove User"):
+                    if user.get("role","").lower() == "ceo":
+                        st.error("Cannot delete CEO account")
+                    else:
+                        ok, msg = remove_user(user["id"])
+                        if ok:
+                            st.success("User removed")
                         else:
-                            st.error(f"❌ {message}")
-
-                with col2:
-                    # Find the index of the current role in VALID_ROLES, defaulting to 0 if not found
-                    try:
-                        current_role_index = VALID_ROLES.index(user.get("role", "").lower())
-                    except ValueError:
-                        current_role_index = 0
-
-                    new_role = st.selectbox("New Role", VALID_ROLES, index=current_role_index)
-                    if st.button("Change Role"):
-                        # Update role and email in database
-                        success, message = update_user_role(user.get("id", ""), new_role, new_email)
-
-                        if success:
-                            if new_email != user.get("email", ""):
-                                st.success(f"✅ Role updated to {new_role} and email updated to {new_email}")
-                            else:
-                                st.success(f"✅ Role updated to {new_role}")
-                            # Refresh the page to show updated information
-                            st.rerun()
-                        else:
-                            st.error(f"❌ {message}")
-
-                with col3:
-                    if st.button("Remove User"):
-                        # Check if user is CEO
-                        if user.get("role", "").lower() == "ceo":
-                            st.error("❌ Cannot delete CEO account!")
-                        else:
-                            # Confirm deletion
-                            if st.session_state.get('confirm_delete') != user.get("id", ""):
-                                st.session_state['confirm_delete'] = user.get("id", "")
-                                st.warning(f"Are you sure you want to remove {user.get('email', '')}? Click again to confirm.")
-                            else:
-                                # Delete from database
-                                success, message = remove_user(user.get("id", ""))
-
-                                if success:
-                                    st.success(f"✅ User {user.get('email', '')} removed successfully.")
-                                    st.session_state['confirm_delete'] = None
-                                    st.rerun()  # Refresh the page
-                                else:
-                                    st.error(f"❌ {message}")
+                            st.error(msg)
 
     with tab4:
-        st.subheader("Password Policy Settings")
-
-        # Get current policy
-        current_policy = get_password_expiry_policy()
-
-        st.write("Set how often users must change their passwords.")
-        st.write(f"Current setting: **{current_policy} days**")
-
-        with st.form("password_policy_form"):
-            new_policy = st.number_input(
-                "Password expiry (days)", 
-                min_value=1, 
-                max_value=365, 
-                value=current_policy,
-                help="Number of days after which passwords expire and must be changed."
-            )
-
-            submit = st.form_submit_button("Update Policy")
-
+        st.subheader("Password Policy")
+        current = get_password_expiry_policy()
+        with st.form("policy"):
+            days = st.number_input("Password expiry (days)", min_value=1, max_value=365, value=current)
+            submit = st.form_submit_button("Update")
             if submit:
-                success, message = update_password_expiry_policy(new_policy)
-                if success:
-                    st.success(f"✅ {message}")
+                ok, msg = update_password_expiry_policy(days)
+                if ok:
+                    st.success(msg)
                 else:
-                    st.error(f"❌ {message}")
-
-        # Add option to force password reset for all users
-        st.subheader("Force Password Reset")
-        st.write("You can force all users to reset their passwords on next login.")
-
-        if st.button("Force All Users to Reset Passwords"):
-            users = get_all_users()
-            if not users:
-                st.info("No users found in the system.")
-            else:
-                # Force password reset for all users
-                if force_password_reset_all():
-                    st.success("✅ All users will be required to reset their passwords on next login.")
-                else:
-                    st.error("❌ Failed to force password reset for all users.")
-
-        # Add a section for password security information
-        st.subheader("Password Security Information")
-        st.write("""
-        **Password Requirements:**
-        - At least 8 characters long
-        - At least one uppercase letter
-        - At least one lowercase letter
-        - At least one digit
-        - At least one special character
-
-        **Password Security Best Practices:**
-        - Use unique passwords for different accounts
-        - Avoid using personal information in passwords
-        - Change passwords regularly
-        - Use a password manager to store complex passwords
-        """)
-
+                    st.error(msg)
 
 def system_overview_page():
-    """
-    Page showing system overview statistics.
-    """
     st.header("📊 System Overview")
-
-    # Get user statistics
     users = get_all_users()
     total_users = len(users)
-    roles = {}
-    for user in users:
-        role = user.get("role", "unknown").lower()  # Standardize role to lowercase
-        roles[role] = roles.get(role, 0) + 1
-
-    # Display user statistics
-    st.subheader("User Statistics")
     st.write(f"**Total Users:** {total_users}")
-
-    # Create a DataFrame for role distribution
-    role_df = pd.DataFrame({
-        "Role": list(roles.keys()),
-        "Count": list(roles.values())
-    })
-
-    # Display role distribution
-    st.bar_chart(role_df.set_index("Role"))
-
-    # System health checks
-    st.subheader("System Health")
-
-    # Check for users with password resets required
-    reset_required = sum(1 for user in users if user.get("force_password_reset", False))
-    if reset_required > 0:
-        st.warning(f"⚠️ {reset_required} users have password resets pending.")
-    else:
-        st.success("✅ All users have updated passwords.")
-
-    # Check database connection
-    try:
-        import sqlite3
-        conn = sqlite3.connect('data/brv_applicants.db')
-        conn.cursor()
-        conn.close()
-        st.success("✅ Database connection is working.")
-    except Exception as e:
-        st.error(f"❌ Database connection error: {str(e)}")
+    # roles chart
+    roles = {}
+    for u in users:
+        r = u.get("role","unknown")
+        roles[r] = roles.get(r, 0) + 1
+    role_df = pd.DataFrame({"Role": list(roles.keys()), "Count": list(roles.values())})
+    if not role_df.empty:
+        st.bar_chart(role_df.set_index("Role"))
 
 def candidate_statistics_page():
-    """
-    Page showing candidate statistics.
-    """
     st.header("👨‍💼 Candidate Statistics")
-
-    # Get candidate statistics from database
+    conn = get_db_connection()
+    if not conn:
+        st.error("DB connection failed")
+        return
     try:
-        import sqlite3
-        conn = sqlite3.connect('data/brv_applicants.db')
-        c = conn.cursor()
-
-        # Total candidates
-        c.execute("SELECT COUNT(*) FROM candidates")
-        total_candidates = c.fetchone()[0]
-
-        # Candidates by status
-        c.execute("SELECT status, COUNT(*) FROM candidates GROUP BY status")
-        status_counts = c.fetchall()
-
-        # Recent interviews
-        c.execute("""
-            SELECT c.name, i.interviewer_name, i.scheduled_time, i.result
-            FROM interviews i
-            JOIN candidates c ON i.candidate_id = c.id
-            ORDER BY i.scheduled_time DESC
-            LIMIT 5
-        """)
-        recent_interviews = c.fetchall()
-
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM candidates")
+            total = cur.fetchone()[0]
+            cur.execute("SELECT interview_status, COUNT(*) FROM candidates GROUP BY interview_status")
+            status_counts = cur.fetchall()
+            cur.execute("""
+                SELECT c.full_name, r.interviewer_name, r.scheduled_time, r.result
+                FROM interviews r
+                JOIN candidates c ON r.candidate_id = c.candidate_id
+                ORDER BY r.scheduled_time DESC
+                LIMIT 5
+            """)
+            recents = cur.fetchall()
+    except Exception as e:
+        st.error(f"Error: {e}")
+        return
+    finally:
         conn.close()
 
-        # Display statistics
-        st.subheader("Candidate Overview")
-        st.write(f"**Total Candidates:** {total_candidates}")
-
-        # Display status distribution
-        if status_counts:
-            status_df = pd.DataFrame(status_counts, columns=["Status", "Count"])
-            st.write("**Candidates by Status:**")
-            st.bar_chart(status_df.set_index("Status"))
-
-        # Display recent interviews
-        if recent_interviews:
-            st.subheader("Recent Interviews")
-            interviews_df = pd.DataFrame(
-                recent_interviews, 
-                columns=["Candidate", "Interviewer", "Date", "Result"]
-            )
-            st.dataframe(interviews_df)
-        else:
-            st.info("No interviews recorded yet.")
-
-    except Exception as e:
-        st.error(f"Error fetching candidate statistics: {str(e)}")
-
-# For testing the admin view directly
-if __name__ == "__main__":
-    st.set_page_config(
-        page_title="Admin Dashboard - BRV Applicant System",
-        page_icon="👑",
-        layout="wide"
-    )
-
-    # Initialize session state for testing
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = True
-    if 'user_id' not in st.session_state:
-        st.session_state.user_id = "test_admin_id"
-    if 'user_role' not in st.session_state:
-        st.session_state.user_role = "admin"
-
-    admin_view()
+    st.write(f"**Total Candidates:** {total}")
+    if status_counts:
+        df = pd.DataFrame(status_counts, columns=["Status","Count"])
+        st.bar_chart(df.set_index("Status"))
+    if recents:
+        df2 = pd.DataFrame(recents, columns=["Candidate","Interviewer","Date","Result"])
+        st.dataframe(df2)

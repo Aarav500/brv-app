@@ -7,6 +7,8 @@ from session_manager import get_user_session
 from database import init_db, init_users
 from utils import VALID_ROLES
 from candidate_view import candidate_form_view
+import asyncio
+from mysql_db import get_db_connection
 
 # Set page configuration
 st.set_page_config(
@@ -17,8 +19,30 @@ st.set_page_config(
 )
 
 # Initialize the database
-init_db()
-init_users()
+from database import init_db
+asyncio.run(init_db())
+
+# Function to check DB size
+def get_db_size_gb():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT pg_database_size(current_database());")
+        size_bytes = cur.fetchone()[0]
+        conn.close()
+        return size_bytes / (1024 * 1024 * 1024)  # Convert to GB
+    except Exception as e:
+        st.error(f"Error checking DB size: {e}")
+        return None
+
+# Call this early in your main()
+def maybe_show_storage_warning():
+    if st.session_state.get("user_role") == "ceo":
+        db_size = get_db_size_gb()
+        if db_size is not None and db_size >= 5:
+            st.warning(f"⚠ Database usage is at {db_size:.2f} GB. "
+                       f"Please free space or archive old data before hitting the 10 GB limit.")
+
 
 # Main application
 def main():
