@@ -5,18 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="180f3012-0d66-4045-bac5-ff8268702845" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/README" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/cwallet.sso" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/ewallet.p12" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/ewallet.pem" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/keystore.jks" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/ojdbc.properties" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/sqlnet.ora" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/tnsnames.ora" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Wallet_BRV1/truststore.jks" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/Dockerfile" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/add_salt_column.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/brv-app/admin.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/admin.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/admin_cli.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/build_exe.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/candidate_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/candidate_view.py" afterDir="false" />
@@ -62,7 +53,6 @@
       <change beforePath="$PROJECT_DIR$/brv-app/test_venv.bat" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/user_auth.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/user_auth.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/brv-app/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/brv-app/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ssh-key-2025-08-02.key" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -224,7 +214,7 @@
       <workItem from="1754890506625" duration="1573000" />
       <workItem from="1754930055865" duration="677000" />
       <workItem from="1754974857829" duration="578000" />
-      <workItem from="1754985392042" duration="7113000" />
+      <workItem from="1754985392042" duration="7490000" />
     </task>
     <servers />
   </component>
