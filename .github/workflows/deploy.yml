@@ -46,6 +46,7 @@ jobs:
             fi
 
             echo "🧼 Stopping and removing old containers"
+            cd ..
             docker-compose down || true
 
             echo "♻️ Cleaning Docker cache"

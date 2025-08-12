@@ -1,0 +1,24 @@
+version: "3.8"
+services:
+  app:
+    build: .
+    env_file: .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+      - ./secrets:/run/secrets:ro
+    depends_on:
+      - db
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: brvdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:

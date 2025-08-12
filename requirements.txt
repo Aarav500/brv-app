@@ -1,0 +1,7 @@
+streamlit
+psycopg2-binary
+google-api-python-client
+oauth2client
+pyjwt
+bcrypt
+python-dotenv
