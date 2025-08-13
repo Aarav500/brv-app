@@ -1,160 +1,53 @@
-"""
-drive_and_cv_views.py
-Single-file Google Drive + CV Streamlit views + Postgres candidate helpers.
-
-Requirements:
-  pip install streamlit psycopg2-binary google-api-python-client oauth2client python-dotenv
-
-Env vars:
-  DATABASE_URL - Postgres full URL, e.g. postgres://user:pass@host:5432/dbname
-  GOOGLE_SERVICE_ACCOUNT_FILE - path to service account json
-  GOOGLE_DRIVE_FOLDER_ID - (optional) existing folder id to use for CVs
-"""
-
+# google_drive.py
 import os
 import io
-import json
-import uuid
 import traceback
 from datetime import datetime
-
-import streamlit as st
 from dotenv import load_dotenv
+import streamlit as st
 
-# DB
-import psycopg2
-from psycopg2.extras import RealDictCursor, Json
+# Google Drive imports
+try:
+    from oauth2client.service_account import ServiceAccountCredentials
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseUpload
 
-# Google
-from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+    GOOGLE_IMPORTS_AVAILABLE = True
+except ImportError:
+    GOOGLE_IMPORTS_AVAILABLE = False
 
 load_dotenv()
 
-# ---------- Configuration ----------
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Configuration
 GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
-GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")  # optional
+GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 
-# Safe checks
-if not DATABASE_URL:
-    st.warning("DATABASE_URL not set — DB functions will fail until set.")
-if not GOOGLE_SERVICE_ACCOUNT_FILE:
-    st.warning("GOOGLE_SERVICE_ACCOUNT_FILE not set — Drive functions will fail until set.")
 
-# ---------- Postgres helpers (candidates table uses form_data JSON to hold 'allowed_edit') ----------
+def check_google_drive_config():
+    """Check if Google Drive is properly configured"""
+    if not GOOGLE_IMPORTS_AVAILABLE:
+        return False, "Google API libraries not installed. Run: pip install google-api-python-client oauth2client"
 
-def get_conn():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL environment variable not set")
-    return psycopg2.connect(DATABASE_URL, sslmode=os.getenv("PGSSLMODE", "require"))
+    if not GOOGLE_SERVICE_ACCOUNT_FILE:
+        return False, "GOOGLE_SERVICE_ACCOUNT_FILE environment variable not set"
 
-def init_candidates_table():
-    """Create candidates table if it doesn't exist. form_data is JSONB and will store 'allowed_edit'."""
-    sql = """
-    CREATE TABLE IF NOT EXISTS candidates (
-        id SERIAL PRIMARY KEY,
-        candidate_id TEXT UNIQUE NOT NULL,
-        name TEXT,
-        email TEXT,
-        phone TEXT,
-        form_data JSONB DEFAULT '{}'::jsonb,
-        resume_link TEXT,
-        created_by TEXT,
-        created_at TIMESTAMP DEFAULT now(),
-        updated_at TIMESTAMP DEFAULT now()
-    );
-    """
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(sql)
-    finally:
-        conn.close()
+    if not os.path.exists(GOOGLE_SERVICE_ACCOUNT_FILE):
+        return False, f"Service account file not found: {GOOGLE_SERVICE_ACCOUNT_FILE}"
 
-def create_candidate(candidate_id: str, name: str, email: str, phone: str, form_data: dict, created_by: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    INSERT INTO candidates (candidate_id, name, email, phone, form_data, created_by)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING *;
-                    """,
-                    (candidate_id, name, email, phone, Json(form_data), created_by)
-                )
-                return cur.fetchone()
-    except psycopg2.errors.UniqueViolation:
-        # candidate_id exists
-        conn.rollback()
-        return None
-    finally:
-        conn.close()
+    return True, "Google Drive configuration OK"
 
-def find_candidates_by_name(name: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT * FROM candidates WHERE LOWER(name) LIKE %s ORDER BY updated_at DESC",
-                    (f"%{name.lower()}%",)
-                )
-                return cur.fetchall()
-    finally:
-        conn.close()
-
-def get_candidate_by_id(candidate_id: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM candidates WHERE candidate_id = %s", (candidate_id,))
-                return cur.fetchone()
-    finally:
-        conn.close()
-
-def update_candidate_form_data(candidate_id: str, new_form_data: dict):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE candidates SET form_data = %s, updated_at = now() WHERE candidate_id = %s",
-                    (Json(new_form_data), candidate_id)
-                )
-                return cur.rowcount > 0
-    finally:
-        conn.close()
-
-def update_candidate_resume_link(candidate_id: str, resume_link: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE candidates SET resume_link = %s, updated_at = now() WHERE candidate_id = %s",
-                    (resume_link, candidate_id)
-                )
-                return cur.rowcount > 0
-    finally:
-        conn.close()
-
-# ---------- Google Drive helpers ----------
 
 def get_drive_service():
     """Return an authenticated Drive v3 service for the service account JSON path."""
-    if not GOOGLE_SERVICE_ACCOUNT_FILE:
-        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_FILE not configured")
+    is_ok, message = check_google_drive_config()
+    if not is_ok:
+        raise RuntimeError(message)
 
     scopes = ['https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SERVICE_ACCOUNT_FILE, scopes)
     service = build('drive', 'v3', credentials=creds, cache_discovery=False)
     return service
+
 
 def ensure_drive_folder(folder_name="BRV_CVs"):
     """
@@ -176,6 +69,7 @@ def ensure_drive_folder(folder_name="BRV_CVs"):
             GOOGLE_DRIVE_FOLDER_ID = files[0]['id']
             print("Using existing Drive folder id:", GOOGLE_DRIVE_FOLDER_ID)
             return GOOGLE_DRIVE_FOLDER_ID
+
         # create folder
         metadata = {"name": folder_name, "mimeType": "application/vnd.google-apps.folder"}
         newf = svc.files().create(body=metadata, fields='id').execute()
@@ -187,285 +81,261 @@ def ensure_drive_folder(folder_name="BRV_CVs"):
         traceback.print_exc()
         raise
 
+
 def upload_resume_to_drive(candidate_id: str, file_bytes: bytes, filename: str):
     """
     Upload file bytes to Drive into the configured folder.
     Returns (True, webViewLink, message) or (False, None, error_message)
     """
     try:
+        # Check configuration
+        is_ok, message = check_google_drive_config()
+        if not is_ok:
+            return False, None, f"Google Drive not configured: {message}"
+
         svc = get_drive_service()
         folder_id = ensure_drive_folder()
-        # build a unique name to avoid collisions
-        safe_name = f"{candidate_id}_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}_{filename}"
+
+        # Build a unique name to avoid collisions
+        timestamp = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+        safe_name = f"{candidate_id}_{timestamp}_{filename}"
+
+        # Determine MIME type based on file extension
+        file_ext = os.path.splitext(filename)[1].lower()
+        mime_type = "application/pdf"  # default
+        if file_ext == ".doc":
+            mime_type = "application/msword"
+        elif file_ext == ".docx":
+            mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif file_ext == ".pdf":
+            mime_type = "application/pdf"
+
+        # Upload file
         fh = io.BytesIO(file_bytes)
-        media = MediaIoBaseUpload(fh, mimetype="application/pdf", resumable=False)
+        media = MediaIoBaseUpload(fh, mimetype=mime_type, resumable=False)
         metadata = {
             'name': safe_name,
             'parents': [folder_id],
         }
-        file = svc.files().create(body=metadata, media_body=media, fields='id,webViewLink,webContentLink').execute()
+
+        file = svc.files().create(
+            body=metadata,
+            media_body=media,
+            fields='id,webViewLink,webContentLink'
+        ).execute()
+
         file_id = file.get('id')
-        # make file readable by anyone with the link (optional — if you prefer more restricted access, change below)
-        svc.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+
+        # Make file readable by anyone with the link (optional security setting)
+        svc.permissions().create(
+            fileId=file_id,
+            body={"role": "reader", "type": "anyone"}
+        ).execute()
+
         webview = file.get('webViewLink') or f"https://drive.google.com/file/d/{file_id}/view"
-        return True, webview, "Uploaded"
+
+        return True, webview, "Successfully uploaded to Google Drive"
+
     except Exception as e:
         print("Drive upload error:", e)
         traceback.print_exc()
         return False, None, str(e)
 
+
 def download_resume_bytes_from_drive(file_id: str):
-    svc = get_drive_service()
-    request = svc.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = None
+    """Download file bytes from Google Drive"""
     try:
+        svc = get_drive_service()
+        request = svc.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+
         from googleapiclient.http import MediaIoBaseDownload
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done:
             status, done = downloader.next_chunk()
+
         fh.seek(0)
         return fh.read()
+
     except Exception as e:
         print("Download error:", e)
         traceback.print_exc()
         return None
 
+
 def extract_drive_file_id_from_link(link: str):
     """
-    Accept typical Drive link forms and extract fileId if possible.
+    Extract file ID from various Google Drive link formats
     """
     if not link:
         return None
-    # patterns:
-    # https://drive.google.com/file/d/<id>/view?usp=sharing
-    # https://drive.google.com/open?id=<id>
+
     try:
         if "drive.google.com" in link:
-            # simple heuristics
+            # Format: https://drive.google.com/file/d/<id>/view?usp=sharing
             if "/d/" in link:
                 parts = link.split("/d/")
                 after = parts[1]
                 file_id = after.split("/")[0]
                 return file_id
+            # Format: https://drive.google.com/open?id=<id>
             if "id=" in link:
                 parts = link.split("id=")
                 return parts[1].split("&")[0]
     except Exception:
         pass
+
     return None
 
-# ---------- Streamlit UI: Candidate view & Receptionist view ----------
 
-st.set_page_config(page_title="CV Upload (Drive) — Candidate / Receptionist", layout="wide")
+def test_google_drive_connection():
+    """Test Google Drive connection and return status"""
+    try:
+        is_ok, message = check_google_drive_config()
+        if not is_ok:
+            return False, message
 
-# Initialize DB table (idempotent)
-try:
-    init_candidates_table()
-except Exception as e:
-    st.error(f"Failed to init DB table: {e}")
+        svc = get_drive_service()
 
-# small helper UI utils
-def show_candidate_card(candidate):
-    st.write("**Candidate ID:**", candidate['candidate_id'])
-    st.write("**Name:**", candidate.get('name'))
-    st.write("**Email:**", candidate.get('email'))
-    st.write("**Phone:**", candidate.get('phone'))
-    st.write("**Created By:**", candidate.get('created_by'))
-    st.write("**Updated At:**", candidate.get('updated_at'))
-    st.write("**Allowed to Edit (by receptionist)?**", candidate.get('form_data', {}).get('allowed_edit', False))
-    if candidate.get('resume_link'):
-        st.markdown(f"[Open Resume]({candidate['resume_link']})")
-    st.markdown("---")
+        # Test by listing files in the root (limited)
+        result = svc.files().list(pageSize=1, fields="files(id, name)").execute()
 
-# Candidate flow
-def candidate_form_view():
-    st.header("Candidate — Submit / Edit Application")
+        # Try to ensure folder exists
+        folder_id = ensure_drive_folder()
 
-    # Candidate either provides candidate_id (to edit) or leaves blank to create
-    candidate_id = st.text_input("Candidate ID (leave blank to create new)")
-    name = st.text_input("Full name")
-    email = st.text_input("Email")
-    phone = st.text_input("Phone")
-    st.markdown("Upload your CV (PDF preferred). If editing, receptionist must have allowed edit for your name.")
-    uploaded_file = st.file_uploader("Upload CV", type=["pdf"], help="PDF recommended")
+        return True, f"Google Drive connection successful. Folder ID: {folder_id}"
 
-    # If editing existing
-    if candidate_id:
-        existing = get_candidate_by_id(candidate_id)
-        if not existing:
-            st.warning("Candidate ID not found. Leave Candidate ID blank to create a new record.")
-        else:
-            st.info("Found record — you may edit if receptionist granted permission to your name.")
-            show_candidate_card(existing)
+    except Exception as e:
+        return False, f"Google Drive connection failed: {str(e)}"
 
-    if st.button("Submit"):
-        # Validation
-        if not name or not email:
-            st.warning("Please provide name & email.")
-            return
 
-        if not candidate_id:
-            # create
-            candidate_id = str(uuid.uuid4())[:8]
-            form_data = {"allowed_edit": False, "history": [{"action": "created", "at": datetime.utcnow().isoformat()}]}
-            created = create_candidate(candidate_id, name, email, phone, form_data, "candidate_portal")
-            if not created:
-                st.error("Failed to create candidate. Candidate ID collision (rare); please try again.")
-                return
-            st.success(f"Application created. Candidate ID: {candidate_id}")
-        else:
-            # editing attempt
-            existing = get_candidate_by_id(candidate_id)
-            if not existing:
-                st.error("Candidate ID not found.")
-                return
-            # Check permission by comparing names (case-insensitive) and allowed_edit flag in form_data
-            allowed = False
-            fd = existing.get('form_data') or {}
-            if fd.get('allowed_edit') and existing.get('name') and existing.get('name').strip().lower() == name.strip().lower():
-                allowed = True
-            if not allowed:
-                st.error("You don't have permission to edit this application. Please ask the receptionist to grant edit permission for your name.")
-                return
-            # update form_data history
-            fd.setdefault('history', []).append({"action": "edited_by_candidate", "at": datetime.utcnow().isoformat()})
-            # write updates
-            ok = update_candidate_form_data(candidate_id, fd)
-            if ok:
-                # also update basic fields (name/email/phone)
-                # read-modify-write via create/update functions; to keep simple, update resume and form only
-                conn = get_conn()
-                try:
-                    with conn:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                "UPDATE candidates SET name=%s, email=%s, phone=%s, updated_at=now() WHERE candidate_id=%s",
-                                (name, email, phone, candidate_id)
-                            )
-                    st.success("Application updated.")
-                finally:
-                    conn.close()
-            else:
-                st.error("Failed to update application.")
-
-        # handle file upload if provided
-        if uploaded_file:
-            # read bytes and call drive upload
-            file_bytes = uploaded_file.read()
-            filename = uploaded_file.name
-            st.info("Uploading resume to Google Drive...")
-            success, webview, msg = upload_resume_to_drive(candidate_id, file_bytes, filename)
-            if success:
-                update_candidate_resume_link(candidate_id, webview)
-                st.success("Resume uploaded and linked.")
-                st.markdown(f"[Open Resume]({webview})")
-            else:
-                st.error(f"Resume upload failed: {msg}")
-
-# Receptionist flow
-def receptionist_view():
-    st.header("Receptionist — Manage Candidates & Grant Edit Permission (by name)")
-
-    st.markdown("**Search candidates by name (partial match).** You can grant permission to edit to a candidate by matching their name.")
-
-    search_name = st.text_input("Search name (partial)")
-    if st.button("Search"):
-        if not search_name:
-            st.warning("Type a name to search.")
-        else:
-            results = find_candidates_by_name(search_name)
-            if not results:
-                st.info("No candidates found with that name.")
-            else:
-                st.success(f"{len(results)} candidate(s) found")
-                for c in results:
-                    with st.expander(f"{c['candidate_id']} — {c.get('name')}"):
-                        show_candidate_card(c)
-                        st.write("Set permission for this candidate:")
-                        allow = st.checkbox("Allow this candidate to edit their application", value=c.get('form_data', {}).get('allowed_edit', False), key=f"allow_{c['candidate_id']}")
-                        if st.button("Apply permission", key=f"applyperm_{c['candidate_id']}"):
-                            fd = c.get('form_data') or {}
-                            fd['allowed_edit'] = bool(allow)
-                            fd.setdefault('history', []).append({"action": ("granted" if allow else "revoked"), "by": "receptionist", "at": datetime.utcnow().isoformat()})
-                            ok = update_candidate_form_data(c['candidate_id'], fd)
-                            if ok:
-                                st.success(f"Permission {'granted' if allow else 'revoked'} for {c['candidate_id']}")
-                            else:
-                                st.error("Failed to update permission.")
-
-                        st.markdown("**Upload / replace resume for this candidate**")
-                        up = st.file_uploader(f"Upload resume for {c['candidate_id']}", key=f"up_{c['candidate_id']}", type=["pdf"])
-                        if up:
-                            bytes_ = up.read()
-                            st.info("Uploading resume to Drive...")
-                            success, webview, msg = upload_resume_to_drive(c['candidate_id'], bytes_, up.name)
-                            if success:
-                                update_candidate_resume_link(c['candidate_id'], webview)
-                                st.success("Resume uploaded and linked.")
-                                st.markdown(f"[Open Resume]({webview})")
-                            else:
-                                st.error("Upload failed: " + str(msg))
-
-    st.markdown("---")
-    st.subheader("Quick create candidate (walk-in)")
-    name = st.text_input("Name (new)", key="walkin_name")
-    email = st.text_input("Email (new)", key="walkin_email")
-    phone = st.text_input("Phone (new)", key="walkin_phone")
-    walkin_file = st.file_uploader("Optional CV for walk-in", key="walkin_cv", type=["pdf"])
-    if st.button("Create walk-in"):
-        if not name:
-            st.warning("Name required")
-        else:
-            new_id = str(uuid.uuid4())[:8]
-            form_data = {"allowed_edit": True, "history": [{"action": "created_by_receptionist", "at": datetime.utcnow().isoformat()}]}
-            rec = create_candidate(new_id, name, email, phone, form_data, "receptionist")
-            if rec:
-                st.success(f"Created candidate {new_id}")
-                if walkin_file:
-                    b = walkin_file.read()
-                    ok, link, m = upload_resume_to_drive(new_id, b, walkin_file.name)
-                    if ok:
-                        update_candidate_resume_link(new_id, link)
-                        st.success("Resume uploaded for walk-in candidate.")
-                        st.markdown(f"[Open Resume]({link})")
-                    else:
-                        st.error("Resume upload failed: " + str(m))
-            else:
-                st.error("Failed to create candidate (duplicate id?), try again.")
-
-# ---------- Main routing in Streamlit ----------
-st.sidebar.title("Role")
-role = st.sidebar.selectbox("Open as", ["Candidate", "Receptionist", "Debug"])
-if role == "Candidate":
-    candidate_form_view()
-elif role == "Receptionist":
-    receptionist_view()
-else:
-    st.header("Debug / Tools")
-    st.write("Use this panel to inspect DB and Drive connection status.")
-    st.subheader("Drive")
+def get_drive_usage_info():
+    """Get Google Drive usage information"""
     try:
         svc = get_drive_service()
-        st.success("Drive service initialized")
-        fid = ensure_drive_folder()
-        st.write("Drive folder id:", fid)
-    except Exception as e:
-        st.error(f"Drive init error: {e}")
-    st.subheader("DB")
-    try:
-        conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT count(*) FROM candidates;")
-                cnt = cur.fetchone()[0]
-        st.success("DB reachable. Candidates count: " + str(cnt))
-    except Exception as e:
-        st.error("DB error: " + str(e))
-    finally:
-        try:
-            conn.close()
-        except:
-            pass
+        about = svc.about().get(fields="storageQuota").execute()
+        quota = about.get('storageQuota', {})
 
+        limit = int(quota.get('limit', 0))
+        usage = int(quota.get('usage', 0))
+
+        if limit > 0:
+            usage_percent = (usage / limit) * 100
+            return {
+                'limit_gb': round(limit / (1024 ** 3), 2),
+                'used_gb': round(usage / (1024 ** 3), 2),
+                'usage_percent': round(usage_percent, 1)
+            }
+        else:
+            return {
+                'limit_gb': 'Unlimited',
+                'used_gb': round(usage / (1024 ** 3), 2),
+                'usage_percent': 0
+            }
+
+    except Exception as e:
+        print(f"Error getting drive usage: {e}")
+        return None
+
+
+# Streamlit UI components for Google Drive management
+def show_drive_config_status():
+    """Show Google Drive configuration status in Streamlit"""
+    st.subheader("🔧 Google Drive Configuration")
+
+    is_ok, message = check_google_drive_config()
+
+    if is_ok:
+        st.success(f"✅ {message}")
+
+        # Test connection
+        if st.button("Test Drive Connection"):
+            with st.spinner("Testing connection..."):
+                test_ok, test_message = test_google_drive_connection()
+                if test_ok:
+                    st.success(f"✅ {test_message}")
+
+                    # Show usage info
+                    usage_info = get_drive_usage_info()
+                    if usage_info:
+                        st.info(
+                            f"📊 Drive Usage: {usage_info['used_gb']} GB used of {usage_info['limit_gb']} GB ({usage_info['usage_percent']}% used)")
+                else:
+                    st.error(f"❌ {test_message}")
+    else:
+        st.error(f"❌ {message}")
+
+        # Show setup instructions
+        with st.expander("📖 Setup Instructions"):
+            st.markdown("""
+            **To configure Google Drive integration:**
+
+            1. **Create a Google Cloud Project:**
+               - Go to [Google Cloud Console](https://console.cloud.google.com/)
+               - Create a new project or select existing one
+
+            2. **Enable Google Drive API:**
+               - Go to APIs & Services > Library
+               - Search for "Google Drive API" and enable it
+
+            3. **Create Service Account:**
+               - Go to APIs & Services > Credentials
+               - Click "Create Credentials" > "Service Account"
+               - Download the JSON key file
+
+            4. **Set Environment Variables:**
+               ```
+               GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/service-account.json
+               GOOGLE_DRIVE_FOLDER_ID=optional-folder-id
+               ```
+
+            5. **Share Drive Folder (Optional):**
+               - Create a folder in Google Drive
+               - Share it with the service account email
+               - Copy the folder ID from the URL
+            """)
+
+
+def local_file_fallback(candidate_id: str, file_bytes: bytes, filename: str):
+    """
+    Fallback function to save files locally when Google Drive is not available
+    """
+    try:
+        # Create local storage directory
+        storage_dir = os.path.join(os.getcwd(), "local_storage", "resumes")
+        os.makedirs(storage_dir, exist_ok=True)
+
+        # Create unique filename
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        safe_filename = f"{candidate_id}_{timestamp}_{filename}"
+        file_path = os.path.join(storage_dir, safe_filename)
+
+        # Save file
+        with open(file_path, 'wb') as f:
+            f.write(file_bytes)
+
+        # Return local file path as "link"
+        return True, f"file://{os.path.abspath(file_path)}", "Saved locally (Google Drive not configured)"
+
+    except Exception as e:
+        return False, None, f"Local storage failed: {str(e)}"
+
+
+def smart_resume_upload(candidate_id: str, file_bytes: bytes, filename: str):
+    """
+    Smart resume upload that tries Google Drive first, falls back to local storage
+    """
+    # Try Google Drive first
+    is_configured, _ = check_google_drive_config()
+
+    if is_configured:
+        success, link, message = upload_resume_to_drive(candidate_id, file_bytes, filename)
+        if success:
+            return success, link, message
+        else:
+            st.warning(f"Google Drive upload failed: {message}")
+            st.info("Trying local storage fallback...")
+
+    # Fallback to local storage
+    return local_file_fallback(candidate_id, file_bytes, filename)

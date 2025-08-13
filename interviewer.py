@@ -1,110 +1,12 @@
 # interviewer.py
 import streamlit as st
-from db_postgres import get_all_candidates, get_candidate_by_id, get_conn
-from psycopg2.extras import RealDictCursor
+from db_postgres import (
+    get_all_candidates, get_candidate_by_id,
+    search_candidates_by_name_or_email, create_interview,
+    get_interviews_for_candidate
+)
 from datetime import datetime
 import json
-
-
-def create_interviews_table():
-    """Create interviews table if it doesn't exist"""
-    conn = get_conn()
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                        CREATE TABLE IF NOT EXISTS interviews
-                        (
-                            id
-                            SERIAL
-                            PRIMARY
-                            KEY,
-                            candidate_id
-                            TEXT
-                            NOT
-                            NULL,
-                            scheduled_at
-                            TIMESTAMP,
-                            interviewer
-                            TEXT,
-                            result
-                            TEXT,
-                            notes
-                            TEXT,
-                            created_at
-                            TIMESTAMP
-                            DEFAULT
-                            now
-                        (
-                        ),
-                            updated_at TIMESTAMP DEFAULT now
-                        (
-                        ),
-                            FOREIGN KEY
-                        (
-                            candidate_id
-                        ) REFERENCES candidates
-                        (
-                            candidate_id
-                        )
-                            );
-                        """)
-    conn.close()
-
-
-def save_interview(candidate_id: str, scheduled_at: datetime, interviewer: str, result: str, notes: str):
-    """Save interview record to database"""
-    create_interviews_table()  # Ensure table exists
-    conn = get_conn()
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                        INSERT INTO interviews (candidate_id, scheduled_at, interviewer, result, notes)
-                        VALUES (%s, %s, %s, %s, %s) RETURNING id
-                        """, (candidate_id, scheduled_at, interviewer, result or None, notes))
-            interview_id = cur.fetchone()[0]
-    conn.close()
-    return interview_id
-
-
-def get_interviews_for_candidate(candidate_id: str):
-    """Get all interviews for a candidate"""
-    create_interviews_table()  # Ensure table exists
-    conn = get_conn()
-    with conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                        SELECT *
-                        FROM interviews
-                        WHERE candidate_id = %s
-                        ORDER BY created_at DESC
-                        """, (candidate_id,))
-            interviews = cur.fetchall()
-    conn.close()
-    return interviews
-
-
-def search_candidates(query: str = ""):
-    """Search candidates by name or email"""
-    conn = get_conn()
-    with conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if query.strip():
-                cur.execute("""
-                            SELECT *
-                            FROM candidates
-                            WHERE LOWER(name) LIKE LOWER(%s)
-                               OR LOWER(email) LIKE LOWER(%s)
-                            ORDER BY updated_at DESC LIMIT 50
-                            """, (f"%{query}%", f"%{query}%"))
-            else:
-                cur.execute("""
-                            SELECT *
-                            FROM candidates
-                            ORDER BY updated_at DESC LIMIT 50
-                            """)
-            results = cur.fetchall()
-    conn.close()
-    return results
 
 
 def interviewer_view():
@@ -117,10 +19,10 @@ def interviewer_view():
     # Get candidates
     try:
         if search_query.strip():
-            candidates = search_candidates(search_query.strip())
+            candidates = search_candidates_by_name_or_email(search_query.strip())
             st.info(f"Found {len(candidates)} candidate(s) matching '{search_query}'")
         else:
-            candidates = search_candidates()
+            candidates = search_candidates_by_name_or_email("")  # Get recent candidates
             st.info(f"Showing {len(candidates)} most recent candidates")
 
         if not candidates:
@@ -160,8 +62,10 @@ def interviewer_view():
                         if isinstance(form_data, dict):
                             skills = form_data.get('skills', 'Not specified')
                             experience = form_data.get('experience', 'Not specified')
+                            education = form_data.get('education', 'Not specified')
                             st.write(f"**Skills:** {skills}")
                             st.write(f"**Experience:** {experience}")
+                            st.write(f"**Education:** {education}")
                         else:
                             st.json(form_data)
                     else:
@@ -226,7 +130,7 @@ def interviewer_view():
                             scheduled_datetime = datetime.combine(scheduled_date, scheduled_time)
 
                             # Save interview
-                            interview_id = save_interview(
+                            interview_id = create_interview(
                                 candidate['candidate_id'],
                                 scheduled_datetime,
                                 interviewer_name.strip(),
@@ -234,8 +138,11 @@ def interviewer_view():
                                 notes.strip()
                             )
 
-                            st.success(f"Interview saved successfully! (ID: {interview_id})")
-                            st.rerun()
+                            if interview_id:
+                                st.success(f"Interview saved successfully! (ID: {interview_id})")
+                                st.rerun()
+                            else:
+                                st.error("Failed to save interview")
 
                         except Exception as e:
                             st.error(f"Error saving interview: {str(e)}")

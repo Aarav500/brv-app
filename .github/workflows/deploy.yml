@@ -16,22 +16,28 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            cd /home/ubuntu/BRV1 || { echo "App directory not found, creating..."; mkdir -p /home/ubuntu/BRV1; cd /home/ubuntu/BRV1; }
-            
+            echo "📁 Creating required host directories..."
+            mkdir -p /home/ubuntu/logs
+            mkdir -p /home/ubuntu/CV
+            mkdir -p /home/ubuntu/BRV1
+
+            cd /home/ubuntu/BRV1
+
             echo "📥 Pulling latest code..."
             if [ -d .git ]; then
+              git reset --hard
               git pull origin main
             else
               git clone https://github.com/Aarav500/brv-app.git .
             fi
-            
-            echo "📝 Creating .env file..."
+
+            echo "📝 Writing .env file..."
             echo '${{ secrets.ENV }}' > .env
-            
+
             echo "🛑 Stopping containers..."
             docker compose down || true
-            
+
             echo "🚀 Building and starting containers..."
             docker compose up -d --build
-            
+
             echo "✅ Deploy complete!"

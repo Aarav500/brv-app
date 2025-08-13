@@ -4,17 +4,8 @@ import uuid
 from datetime import datetime
 from db_postgres import get_candidate_by_id, create_candidate_in_db, update_candidate_form_data, \
     update_candidate_resume_link
+from google_drive import smart_resume_upload
 import json
-
-
-def upload_resume_to_drive(candidate_id: str, file_bytes: bytes, filename: str):
-    """
-    Placeholder function for Google Drive upload
-    Replace this with your actual Google Drive integration
-    """
-    # This is a placeholder - implement your actual Drive upload logic here
-    st.warning("Google Drive upload not implemented yet")
-    return False, "", "Drive upload not configured"
 
 
 def candidate_form_view():
@@ -62,11 +53,11 @@ def candidate_form_view():
 
                     # Pre-populate form with existing data
                     if not name and existing_candidate.get('name'):
-                        name = existing_candidate['name']
+                        st.session_state.setdefault('candidate_name', existing_candidate['name'])
                     if not email and existing_candidate.get('email'):
-                        email = existing_candidate['email']
+                        st.session_state.setdefault('candidate_email', existing_candidate['email'])
                     if not phone and existing_candidate.get('phone'):
-                        phone = existing_candidate['phone']
+                        st.session_state.setdefault('candidate_phone', existing_candidate['phone'])
 
                     # Pre-populate additional fields from form_data
                     form_data = existing_candidate.get('form_data', {})
@@ -77,11 +68,16 @@ def candidate_form_view():
                             form_data = {}
 
                     if not skills and form_data.get('skills'):
-                        skills = form_data['skills']
+                        st.session_state.setdefault('candidate_skills', form_data['skills'])
                     if not experience and form_data.get('experience'):
-                        experience = form_data['experience']
+                        st.session_state.setdefault('candidate_experience', form_data['experience'])
                     if not education and form_data.get('education'):
-                        education = form_data['education']
+                        st.session_state.setdefault('candidate_education', form_data['education'])
+
+                    # Show current values
+                    st.info(f"Current Name: {existing_candidate.get('name', 'Not set')}")
+                    st.info(f"Current Email: {existing_candidate.get('email', 'Not set')}")
+                    st.info(f"Current Phone: {existing_candidate.get('phone', 'Not set')}")
 
                 else:
                     st.warning("🔒 Edit permission not granted. Contact the receptionist to enable editing.")
@@ -156,7 +152,7 @@ def candidate_form_view():
                     return
 
                 # Update form data
-                existing_form_data = existing_candidate.get('form_data', {})
+                existing_form_data = existing_candidate.get('form_data') or {}
                 if isinstance(existing_form_data, str):
                     try:
                         existing_form_data = json.loads(existing_form_data)
@@ -190,7 +186,7 @@ def candidate_form_view():
                 st.info("📤 Uploading resume...")
 
                 try:
-                    success, webview_url, message = upload_resume_to_drive(
+                    success, webview_url, message = smart_resume_upload(
                         candidate_id,
                         file_bytes,
                         uploaded_file.name
@@ -201,6 +197,7 @@ def candidate_form_view():
                         if update_candidate_resume_link(candidate_id, webview_url):
                             st.success("📄 Resume uploaded and linked successfully!")
                             st.markdown(f"[📎 View Your Resume]({webview_url})")
+                            st.info(f"Upload details: {message}")
                         else:
                             st.warning("⚠️ Resume uploaded but failed to update database link")
                     else:
