@@ -17,31 +17,46 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            # Ensure BRV1 directory exists
-            mkdir -p /home/ubuntu/BRV1
-            cd /home/ubuntu/BRV1
-
-            echo "📥 Pulling latest code..."
-            if [ -d .git ]; then
-              git pull origin main
-            else
-              git clone https://github.com/Aarav500/brv-app.git .
+            set -e  # Exit on any error
+            
+            echo "📥 Setting up deployment directory..."
+            cd /home/ubuntu
+            
+            # Clean up any existing deployment
+            if [ -d "brv-app" ]; then
+              cd brv-app
+              docker compose down || true
+              cd ..
+              rm -rf brv-app
             fi
-
+            
+            echo "📥 Cloning fresh repository..."
+            git clone https://github.com/Aarav500/brv-app.git
+            cd brv-app
+            
             echo "📝 Creating .env file..."
             echo '${{ secrets.ENV }}' > .env
-
-            echo "📂 Ensuring logs & CV directories..."
+            
+            echo "📂 Ensuring required directories..."
             mkdir -p /home/ubuntu/logs
             mkdir -p /home/ubuntu/CV
-
-            echo "🔑 Recreating google.json..."
-            echo '${{ secrets.GOOGLE_JSON_BASE64 }}' | base64 -d > /home/ubuntu/BRV1/brv-app-465004-a6eed334855a.json
-
-            echo "🛑 Stopping containers..."
-            docker compose down || true
-
+            mkdir -p secrets
+            
+            echo "🔑 Creating Google credentials..."
+            echo '${{ secrets.GOOGLE_JSON_BASE64 }}' | base64 -d > secrets/google.json
+            
+            echo "🧹 Cleaning up old containers and images..."
+            docker system prune -f
+            
             echo "🚀 Building and starting containers..."
-            docker compose up -d --build
-
+            docker compose up -d --build --remove-orphans
+            
+            echo "⏳ Waiting for services to start..."
+            sleep 10
+            
+            echo "🔍 Checking service status..."
+            docker compose ps
+            docker compose logs --tail=20
+            
             echo "✅ Deploy complete!"
+            echo "🌐 App should be available at: http://161.118.166.49:8501"

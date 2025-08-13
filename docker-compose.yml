@@ -1,24 +1,50 @@
 version: "3.8"
+
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: brv-app
     env_file: .env
     ports:
       - "8501:8501"
     volumes:
-      - .:/app
-      - ./secrets:/run/secrets:ro
+      - ./secrets:/app/secrets:ro
+      - /home/ubuntu/logs:/app/logs
+      - /home/ubuntu/CV:/app/CV
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - brv-network
+
   db:
     image: postgres:15
+    container_name: brv-postgres
     environment:
       POSTGRES_USER: dev
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: brvdb
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d brvdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - brv-network
+
 volumes:
   pgdata:
+    driver: local
+
+networks:
+  brv-network:
+    driver: bridge
