@@ -1,4 +1,5 @@
 name: 🚀 Deploy App
+
 on:
   push:
     branches:
@@ -16,23 +17,26 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            echo "📁 Creating required host directories..."
-            mkdir -p /home/ubuntu/logs
-            mkdir -p /home/ubuntu/CV
+            # Ensure BRV1 directory exists
             mkdir -p /home/ubuntu/BRV1
-
             cd /home/ubuntu/BRV1
 
             echo "📥 Pulling latest code..."
             if [ -d .git ]; then
-              git reset --hard
               git pull origin main
             else
               git clone https://github.com/Aarav500/brv-app.git .
             fi
 
-            echo "📝 Writing .env file..."
+            echo "📝 Creating .env file..."
             echo '${{ secrets.ENV }}' > .env
+
+            echo "📂 Ensuring logs & CV directories..."
+            mkdir -p /home/ubuntu/logs
+            mkdir -p /home/ubuntu/CV
+
+            echo "🔑 Recreating google.json..."
+            echo '${{ secrets.GOOGLE_JSON_BASE64 }}' | base64 -d > /home/ubuntu/BRV1/brv-app-465004-a6eed334855a.json
 
             echo "🛑 Stopping containers..."
             docker compose down || true
