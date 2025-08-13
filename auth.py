@@ -1,7 +1,5 @@
 # auth.py
-from database import SessionLocal
-from models import User, RoleEnum
-import bcrypt
+from db_postgres import get_user_by_email, hash_password, verify_password, get_conn
 import os
 import jwt
 from datetime import datetime, timedelta
@@ -16,38 +14,45 @@ RESET_TOKEN_EXP_MIN = 30
 
 logger = logging.getLogger(__name__)
 
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 def create_user(email: str, password: str, role: str = "candidate"):
-    db = SessionLocal()
+    """Create user using PostgreSQL database"""
     try:
-        existing = db.query(User).filter(User.email == email).first()
-        if existing:
-            return None, "User already exists"
-        user = User(email=email, password_hash=hash_password(password), role=RoleEnum(role))
-        db.add(user); db.commit(); db.refresh(user)
-        return user, None
+        conn = get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                # Check if user already exists
+                cur.execute("SELECT id FROM users WHERE email=%s", (email,))
+                if cur.fetchone():
+                    return None, "User already exists"
+
+                # Create new user
+                password_hash = hash_password(password)
+                cur.execute("""
+                            INSERT INTO users (email, password_hash, role)
+                            VALUES (%s, %s, %s) RETURNING id, email, role
+                            """, (email, password_hash, role))
+
+                result = cur.fetchone()
+                user_dict = {
+                    'id': result[0],
+                    'email': result[1],
+                    'role': result[2]
+                }
+        conn.close()
+        return user_dict, None
     except Exception as e:
         logger.exception("create_user failed")
         return None, str(e)
-    finally:
-        db.close()
+
 
 def authenticate_user(email: str, password: str):
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            return None
-        if verify_password(password, user.password_hash):
-            return user
-        return None
-    finally:
-        db.close()
+    """Authenticate user using PostgreSQL database"""
+    user = get_user_by_email(email)
+    if user and verify_password(password, user['password_hash']):
+        return user
+    return None
+
 
 def create_access_token(user_id: int, expires_minutes: int = 60):
     payload = {
@@ -57,12 +62,14 @@ def create_access_token(user_id: int, expires_minutes: int = 60):
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     return token
 
+
 def decode_access_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         return payload.get("sub")
     except Exception:
         return None
+
 
 # --- Password reset ---
 def create_reset_token(email: str, expires_min: int = RESET_TOKEN_EXP_MIN):
@@ -72,6 +79,7 @@ def create_reset_token(email: str, expires_min: int = RESET_TOKEN_EXP_MIN):
     }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
+
 def verify_reset_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
@@ -79,6 +87,13 @@ def verify_reset_token(token: str):
     except Exception as e:
         logger.debug("reset token invalid: %s", e)
         return None
+
+
+def update_user_password_by_email(email: str, new_password: str):
+    """Update user password by email"""
+    from db_postgres import update_user_password
+    return update_user_password(email, new_password)
+
 
 def send_reset_email(to_email: str, reset_token: str):
     smtp_host = os.getenv("SMTP_HOST")

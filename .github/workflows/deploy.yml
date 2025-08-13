@@ -1,5 +1,4 @@
-name: 🚀 Deploy to PostgreSQL VM
-
+name: 🚀 Deploy App
 on:
   push:
     branches:
@@ -8,60 +7,31 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 📂 Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: 🔐 Set up SSH
-        uses: webfactory/ssh-agent@v0.7.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: 📝 Create .env file from secret
-        run: |
-          echo "${{ secrets.ENV }}" > .env
-
-      - name: 📤 Upload .env file
-        uses: appleboy/scp-action@master
+      - name: 🚀 Deploy to Server
+        uses: appleboy/ssh-action@v0.1.7
         with:
           host: 161.118.166.49
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: ".env"
-          target: "/home/ubuntu/BRV1"
-          overwrite: true
-
-      - name: 🚀 Deploy via SSH
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@161.118.166.49 << 'EOF'
-            set -e
-
-            echo "📁 Cloning or pulling latest repo"
-            mkdir -p /home/ubuntu/BRV1
-            cd /home/ubuntu/BRV1
-
-            if [ -d "brv-app/.git" ]; then
-              cd brv-app
-              git reset --hard
+          port: 22
+          script: |
+            cd /home/ubuntu/BRV1 || { echo "App directory not found, creating..."; mkdir -p /home/ubuntu/BRV1; cd /home/ubuntu/BRV1; }
+            
+            echo "📥 Pulling latest code..."
+            if [ -d .git ]; then
               git pull origin main
             else
-              rm -rf brv-app   # cleanup any broken folder
-              git clone https://github.com/Aarav500/brv-app.git
-              cd brv-app
+              git clone https://github.com/Aarav500/brv-app.git .
             fi
-
-            echo "🧼 Stopping and removing old containers"
-            docker-compose down || true
-
-            echo "♻️ Cleaning Docker cache"
-            docker system prune -af || true
-
-            echo "🐳 Building Docker containers from scratch"
-            docker-compose build --no-cache
-
-            echo "🚀 Starting Docker containers"
-            docker-compose up -d
-
-            echo "✅ Deployment finished"
-          EOF
+            
+            echo "📝 Creating .env file..."
+            echo '${{ secrets.ENV }}' > .env
+            
+            echo "🛑 Stopping containers..."
+            docker compose down || true
+            
+            echo "🚀 Building and starting containers..."
+            docker compose up -d --build
+            
+            echo "✅ Deploy complete!"
