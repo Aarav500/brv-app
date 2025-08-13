@@ -34,6 +34,25 @@ jobs:
             git clone https://github.com/Aarav500/brv-app.git
             cd brv-app
             
+            echo "📝 Creating .env file..."
+            # Write ENV secret to .env file with proper handling of multiline content
+            cat > .env << 'ENVEOF'
+${{ secrets.ENV }}
+ENVEOF
+            
+            # Verify .env file was created correctly
+            echo "🔍 Verifying .env file..."
+            if [ -f .env ]; then
+              echo "✅ .env file created successfully"
+              echo "📊 .env file has $(wc -l < .env) lines"
+              # Show first few lines (without sensitive data)
+              echo "📋 First few lines of .env:"
+              head -3 .env | sed 's/=.*$/=***/'
+            else
+              echo "❌ Failed to create .env file"
+              exit 1
+            fi
+            
             echo "📂 Ensuring required directories..."
             mkdir -p /home/ubuntu/logs
             mkdir -p /home/ubuntu/CV
@@ -41,6 +60,9 @@ jobs:
             
             echo "🔑 Creating Google credentials..."
             echo '${{ secrets.GOOGLE_JSON_BASE64 }}' | base64 -d > secrets/google.json
+            
+            # Update Google service account file path in .env to point to container path
+            sed -i 's|GOOGLE_SERVICE_ACCOUNT_FILE=.*|GOOGLE_SERVICE_ACCOUNT_FILE=/app/secrets/google.json|' .env
             
             echo "🧹 Cleaning up old containers and images..."
             docker system prune -f
