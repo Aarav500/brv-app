@@ -17,12 +17,11 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            set -e  # Exit on any error
+            set -e
             
             echo "📥 Setting up deployment directory..."
             cd /home/ubuntu
             
-            # Clean up any existing deployment
             if [ -d "brv-app" ]; then
               cd brv-app
               docker compose down || true
@@ -35,21 +34,19 @@ jobs:
             cd brv-app
             
             echo "📝 Creating .env file..."
-            # Write ENV secret to .env file with proper handling of multiline content
-            cat > .env << 'ENVEOF'
-${{ secrets.ENV }}
-ENVEOF
+            printf '%s\n' '${{ secrets.ENV }}' > .env.backup
             
-            # Verify .env file was created correctly
-            echo "🔍 Verifying .env file..."
-            if [ -f .env ]; then
-              echo "✅ .env file created successfully"
-              echo "📊 .env file has $(wc -l < .env) lines"
-              # Show first few lines (without sensitive data)
-              echo "📋 First few lines of .env:"
-              head -3 .env | sed 's/=.*$/=***/'
+            echo "🔍 Creating temporary clean .env for Docker Compose..."
+            touch .env
+            
+            echo "🔍 Verifying .env.backup file..."
+            if [ -f .env.backup ]; then
+              echo "✅ .env.backup file created successfully"
+              echo "📊 .env.backup file has $(wc -l < .env.backup) lines"
+              echo "📋 First few lines of .env.backup:"
+              head -3 .env.backup | sed 's/=.*$/=***/'
             else
-              echo "❌ Failed to create .env file"
+              echo "❌ Failed to create .env.backup file"
               exit 1
             fi
             
@@ -61,14 +58,16 @@ ENVEOF
             echo "🔑 Creating Google credentials..."
             echo '${{ secrets.GOOGLE_JSON_BASE64 }}' | base64 -d > secrets/google.json
             
-            # Update Google service account file path in .env to point to container path
-            sed -i 's|GOOGLE_SERVICE_ACCOUNT_FILE=.*|GOOGLE_SERVICE_ACCOUNT_FILE=/app/secrets/google.json|' .env
+            sed -i 's|GOOGLE_SERVICE_ACCOUNT_FILE=.*|GOOGLE_SERVICE_ACCOUNT_FILE=/app/secrets/google.json|' .env.backup
             
             echo "🧹 Cleaning up old containers and images..."
             docker system prune -f
             
             echo "🚀 Building and starting containers..."
             docker compose up -d --build --remove-orphans
+            
+            echo "🔄 Restoring complete .env file..."
+            mv .env.backup .env
             
             echo "⏳ Waiting for services to start..."
             sleep 10
