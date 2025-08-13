@@ -482,6 +482,21 @@ def seed_sample_users():
     finally:
         conn.close()
 
+def get_all_users():
+    """Get all users from the database"""
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM users ORDER BY created_at DESC")
+                return cur.fetchall()
+    except Exception as e:
+        logger.exception("Error getting all users")
+        return []
+    finally:
+        conn.close()
+
+
 
 # Statistics functions for CEO dashboard
 def get_candidate_statistics():
