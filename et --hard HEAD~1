@@ -1,0 +1,284 @@
+[33mcommit 3dc07aaebc2789a2cf75e13238b8414d10d8816d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 20:19:56 2025 +0530
+
+    Final product
+
+[33mcommit fd9391d8962d0d4e96f28557c2e2f5d8956f55ea[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 20:16:33 2025 +0530
+
+    Final product
+
+[33mcommit a4187257ff3d5816eb03b8d57983406350f7d6e1[m[33m ([m[1;31morigin/main[m[33m)[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 20:08:42 2025 +0530
+
+    Final product
+
+[33mcommit 9167ba25c9b8519f5476e42efe93327d94c8af68[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 13:04:52 2025 +0530
+
+    change
+
+[33mcommit fa83d3b85d48eaab7998ee3c04f7a04450f58a50[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 11:34:21 2025 +0530
+
+    Updated deploy.yml
+
+[33mcommit 5e486e8992d601ce6bed93d2e2f713377547c8f8[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 11:12:24 2025 +0530
+
+    Updated deploy.yml
+
+[33mcommit f339be83e9533c4bc4e4e46433779c822806303e[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 11:05:31 2025 +0530
+
+    Updated deploy.yml
+
+[33mcommit 4907f0d4ab767706452d16ded5c42bcb3965c497[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 10:56:13 2025 +0530
+
+    Updated deploy.yml
+
+[33mcommit 7f3864699eed2b753e0a2f0961c733981690c53a[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 10:48:07 2025 +0530
+
+    Updated deploy.yml
+
+[33mcommit 31daa39d02ea08e77fc3e0654c17f2401b32980d[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Wed Aug 13 01:35:15 2025 +0530
+
+    Entire change
+
+[33mcommit c9a8fa87b8c3a1b4d647f4ce6999da726c19ac33[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Tue Aug 12 15:57:58 2025 +0530
+
+    updated requirements.text
+
+[33mcommit 30db6ad2f20048903299c4b90314356a96e5d8ad[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Tue Aug 12 15:44:10 2025 +0530
+
+    Migrate database code to PostgreSQL, remove Oracle/MySQL logic
+
+[33mcommit 7707156de2161b4996468648f5877817adee7ef4[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Tue Aug 12 13:51:43 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 23d42460408bb1acaf3526fd770793272faa866a[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Tue Aug 12 13:43:44 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 649b787e6f7a0d2893d0c5122f86fbb1c21036dc[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Tue Aug 12 13:33:25 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 4c0a6ad2282c367ee2ee639a9109c9cdbdd6818c[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Mon Aug 11 11:33:23 2025 +0530
+
+    Updated Wallet_BRV1
+
+[33mcommit f7069a44cbe9b271010215a7d02b859c650c0790[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 16:10:32 2025 +0530
+
+    updated oracle.db
+
+[33mcommit 577b72cf1fbfebccacf98b70c26b9f8d4ca934c2[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 16:00:14 2025 +0530
+
+    Update Dockerfile
+
+[33mcommit c8acbc2acee506f04a3e60224a1a62c7f9e96b12[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 15:52:38 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 14d5b7c6db57f673f468aca882fe507a4c9038e3[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 15:49:16 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 32040ee4288ea1c6a98c375598de79f1f20eac65[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 15:44:09 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 95e65c87d12e4fab8d6c5d19b6159f0f283bb565[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 15:13:07 2025 +0530
+
+    Update oracledb container
+
+[33mcommit ba9039fd1003f45e492adba8c7973b81f4549502[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 15:08:14 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 29362188d7fbdccd6258b5573aae3a6773866732[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 15:04:03 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit aff44f7cd1949a6324e91771cf5ea12f51216158[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 15:01:04 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 363ee444a118ba5f35807b5ab218a6de1dcdf2fc[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 14:57:15 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit ffa9c0e12f15dacc03409bfc065d68ea7f5e8581[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 14:49:26 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit f1fbeefc99b5c9cc1d7df3dea58574de55c6ded2[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 14:46:30 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit 9e5dd5aa6cd0ae878eded407818b56a615924065[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Sat Aug 9 14:37:44 2025 +0530
+
+    Update deploy.yml
+
+[33mcommit ba776d8f6e8e84892df1d67f74dfe3ad3597bc49[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 12:59:06 2025 +0530
+
+    Update oracledb container
+
+[33mcommit b203b37f413b744dbceeb6f957e48ddfa793fb22[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 11:52:51 2025 +0530
+
+    Update docker
+
+[33mcommit d55d8a8186b77b11264faa955e900eb69c9bbc80[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 11:42:36 2025 +0530
+
+    Update docker
+
+[33mcommit 64e3fd7f50652adc25d914cb154243934210d822[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 11:36:14 2025 +0530
+
+    Update docker
+
+[33mcommit 9cccf18d46d82b0ce804f33dfb5e79395682b094[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 11:24:48 2025 +0530
+
+    Update docker
+
+[33mcommit 8d3c3610a8764656dfb32c629dd4675c13417b12[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 11:16:46 2025 +0530
+
+    Update docker
+
+[33mcommit d214a427cf125a7d56a5002b0e1ebbc4d0db21f4[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 11:11:15 2025 +0530
+
+    Updated docker file
+
+[33mcommit ff3fa8b46f317a2af2f9b6d9e9eb4f96da4a8347[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Sat Aug 9 10:59:22 2025 +0530
+
+    Updated docker file
+
+[33mcommit 132960ca3fd2737ebdf8d2adf7851967d3fa1cc0[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Fri Aug 8 19:35:44 2025 +0530
+
+    Cloud
+
+[33mcommit a1857a64fe273c133850c2b93e03a0abd4ce82c9[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Fri Aug 8 16:51:17 2025 +0530
+
+    Fix: Solved docker-compose.yaml problem
+
+[33mcommit 0fdc59c7a6704ac56472c6963adb2c33c489d01b[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Fri Aug 8 16:11:22 2025 +0530
+
+    Fix: Solved .env problem
+
+[33mcommit a6d44f0ca364ec532212f926c1f6db6f117ad8d0[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Fri Aug 8 15:56:12 2025 +0530
+
+    Fix: Solved .env problem
+
+[33mcommit fd3af72d42e3cdef90854e0f65cf7aaa8ac66ff1[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Fri Aug 8 12:47:45 2025 +0530
+
+    Fix: update all UI components to use Oracle DB functions and update documentation
+
+[33mcommit 504fcd14400e314f30aca5056a32f683b61782ac[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Thu Aug 7 23:11:35 2025 +0530
+
+    🧪 Fix import issue in resume_linker.py
+
+[33mcommit 26f7f06c2d126f8ca3aeb6ef630639b448956806[m
+Merge: ac0d0d4 911b999
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Thu Aug 7 22:17:58 2025 +0530
+
+    🔀 Merge remote changes with local
+
+[33mcommit ac0d0d44f7b17840822e606adc10d650f6c9a298[m
+Author: Aarav500 <aarav7.shah@gmail.com>
+Date:   Thu Aug 7 22:12:54 2025 +0530
+
+    🧪 Add candidate login via users table
+
+[33mcommit 911b99924e3af49d8db0e37df5f33cccb601dfa7[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Thu Aug 7 15:20:45 2025 +0530
+
+    Update .env
+
+[33mcommit 7a949d06397d229468589fca41cd3dbd9feee624[m
+Author: Aarav500 <154858052+Aarav500@users.noreply.github.com>
+Date:   Thu Aug 7 15:07:02 2025 +0530
+
+    Update .env
+
+[33mcommit a8142c6e0ac51e324eade7ccefd2093f8ea41db7[

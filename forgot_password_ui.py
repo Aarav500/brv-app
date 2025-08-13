@@ -1,17 +1,18 @@
 # forgot_password_ui.py
 import streamlit as st
-from auth import create_reset_token, send_reset_email, verify_reset_token, create_user, verify_password, hash_password
-from database import SessionLocal
-from models import User
+from auth import create_reset_token, send_reset_email, verify_reset_token, create_user
+from db_postgres import get_user_by_email, update_user_password, hash_password
+
 
 def forgot_password_view():
     st.header("Forgot / Reset Password")
-    db = SessionLocal()
+
     try:
         st.subheader("Request password reset")
         email = st.text_input("Your email", key="fp_email")
         if st.button("Request reset"):
-            user = db.query(User).filter(User.email == email).first()
+            # Check if user exists using PostgreSQL function
+            user = get_user_by_email(email)
             if not user:
                 st.error("No user with that email")
             else:
@@ -31,13 +32,40 @@ def forgot_password_view():
             if not email_verified:
                 st.error("Invalid or expired token")
             else:
-                user = db.query(User).filter(User.email == email_verified).first()
+                # Check if user exists
+                user = get_user_by_email(email_verified)
                 if not user:
                     st.error("User not found")
                 else:
-                    user.password_hash = hash_password(new_pass)
-                    user.force_password_reset = False
-                    db.add(user); db.commit()
-                    st.success("Password changed. Please login.")
-    finally:
-        db.close()
+                    # Update password using PostgreSQL function
+                    success = update_user_password(email_verified, new_pass)
+                    if success:
+                        st.success("Password changed. Please login.")
+                    else:
+                        st.error("Failed to update password. Please try again.")
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+
+
+def create_user_view():
+    """Optional: Create new user interface"""
+    st.header("Create New User")
+
+    try:
+        email = st.text_input("Email", key="create_email")
+        password = st.text_input("Password", type="password", key="create_password")
+        role = st.selectbox("Role", ["candidate", "receptionist", "interviewer", "admin", "ceo"], key="create_role")
+
+        if st.button("Create User"):
+            if not email or not password:
+                st.error("Please fill in all fields")
+            else:
+                user, error = create_user(email, password, role)
+                if user:
+                    st.success(f"User created successfully: {email} with role {role}")
+                else:
+                    st.error(f"Failed to create user: {error}")
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
