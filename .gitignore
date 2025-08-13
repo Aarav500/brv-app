@@ -42,6 +42,8 @@ Wallet_*/
 google_key.json
 *.pem
 *.key
+Private/
+
 
 # Uploaded files
 resumes/
