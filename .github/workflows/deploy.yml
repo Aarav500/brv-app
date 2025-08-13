@@ -18,7 +18,11 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: 📤 Upload Secrets (.env)
+      - name: 📝 Create .env from GitHub Secret
+        run: |
+          echo "${{ secrets.ENV }}" > .env
+
+      - name: 📤 Upload .env to VM
         uses: appleboy/scp-action@master
         with:
           host: 140.245.27.38
@@ -36,17 +40,14 @@ jobs:
             echo "📁 Cloning or pulling latest repo"
             mkdir -p ~/BRV1
             cd /home/ubuntu/BRV1
-            if [ -d "brv-app" ]; then
-              cd brv-app
+            if [ -d ".git" ]; then
               git reset --hard
               git pull origin main
             else
-              git clone https://github.com/Aarav500/brv-app.git
-              cd brv-app
+              git clone https://github.com/Aarav500/brv-app.git .
             fi
 
             echo "🧼 Stopping and removing old containers"
-            cd ..
             docker-compose down || true
 
             echo "♻️ Cleaning Docker cache"

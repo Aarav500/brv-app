@@ -5,84 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="180f3012-0d66-4045-bac5-ff8268702845" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/admin.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/auth.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/candidate_view.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ceo.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/database.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/db_postgres.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/drive_and_cv_views.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/forgot_password_ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/interviewer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/logging_setup.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/receptionist.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smtp_mailer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/storage.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/.env.template" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/Dockerfile" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/admin.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/app.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/auth.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/candidate_auth.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/candidate_view.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/ceo.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/check_storage.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/cloud_storage.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/cv_display.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/cv_id_assigner.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/database.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/db.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/db_auto_scaling.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/db_config.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/docker-compose.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/edit_link_api.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/edit_profile.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/env_config.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/examples/firebase_sample.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/examples/sync_google_sheet_to_firestore.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/github_setup_instructions.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/google_drive.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/init_db.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/interviewer.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/interviewer_cv_view.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/login.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/main.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/mysql_db.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/new_applicant.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/oracle_candidates.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/oracle_db.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/profiles.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/reception_view.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/receptionist.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/receptionist_edit.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/receptionist_panel.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/requirements.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/reset_ceo_password_flag.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/resume_handler.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/resume_linker.log" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/resume_linker.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/run_app.bat" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/schedule_interview.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/security_update.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/session_manager.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/setup_new_location.bat" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/setup_users_db.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/user_auth.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/utils.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/brv-app/utils_update.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_db_connection.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_mysql_import.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_resume_linker.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -249,7 +172,7 @@
       <workItem from="1754930055865" duration="677000" />
       <workItem from="1754974857829" duration="578000" />
       <workItem from="1754985392042" duration="13027000" />
-      <workItem from="1755023439349" duration="4776000" />
+      <workItem from="1755023439349" duration="7737000" />
     </task>
     <servers />
   </component>
