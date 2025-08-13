@@ -34,9 +34,6 @@ jobs:
             git clone https://github.com/Aarav500/brv-app.git
             cd brv-app
             
-            echo "📝 Creating .env file..."
-            echo '${{ secrets.ENV }}' > .env
-            
             echo "📂 Ensuring required directories..."
             mkdir -p /home/ubuntu/logs
             mkdir -p /home/ubuntu/CV
