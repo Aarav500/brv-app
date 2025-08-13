@@ -34,7 +34,7 @@ jobs:
 
       - name: 🚀 Deploy via SSH
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@140.245.27.38 << 'EOF'
+          ssh -o StrictHostKeyChecking=no ubuntu@161.118.166.49 << 'EOF'
             set -e
 
             echo "📁 Cloning or pulling latest repo"
