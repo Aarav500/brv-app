@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from db_postgres import get_candidate_by_id, create_candidate_in_db, update_candidate_form_data, \
     update_candidate_resume_link
-from google_drive import smart_resume_upload
+from drive_and_cv_views import smart_resume_upload
 import json
 
 

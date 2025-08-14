@@ -2,7 +2,7 @@
 import streamlit as st
 from db_postgres import find_candidates_by_name, update_candidate_form_data, update_candidate_resume_link, \
     set_candidate_permission, create_candidate_in_db, get_all_candidates
-from google_drive import smart_resume_upload, show_drive_config_status
+from drive_and_cv_views import smart_resume_upload, show_drive_config_status
 from datetime import datetime
 import json
 import uuid
