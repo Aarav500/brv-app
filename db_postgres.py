@@ -496,6 +496,26 @@ def get_all_users():
     finally:
         conn.close()
 
+def create_user_in_db(email: str, password: str, role: str = "candidate") -> bool:
+    """Create a new user in the database"""
+    conn = get_conn()
+    try:
+        password_hash = hash_password(password)
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (email, password_hash, role)
+                    VALUES (%s, %s, %s)
+                """, (email, password_hash, role))
+                return True
+    except psycopg2.errors.UniqueViolation:
+        logger.warning(f"User with email {email} already exists")
+        return False
+    except Exception as e:
+        logger.exception(f"Error creating user {email}")
+        return False
+    finally:
+        conn.close()
 
 
 # Statistics functions for CEO dashboard
