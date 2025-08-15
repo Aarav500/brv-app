@@ -1,5 +1,6 @@
 # interviewer.py
 import streamlit as st
+import os
 from db_postgres import (
     get_all_candidates, get_candidate_by_id,
     search_candidates_by_name_or_email, create_interview,
