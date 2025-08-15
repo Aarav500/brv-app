@@ -3,7 +3,7 @@ import streamlit as st
 import uuid
 from datetime import datetime
 from db_postgres import get_candidate_by_id, create_candidate_in_db, update_candidate_form_data, \
-    update_candidate_resume_link
+    update_candidate_resume_link, set_candidate_permission
 from drive_and_cv_views import smart_resume_upload
 import json
 

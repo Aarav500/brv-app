@@ -1,348 +1,234 @@
 # receptionist.py
-import streamlit as st
-from db_postgres import find_candidates_by_name, update_candidate_form_data, update_candidate_resume_link, \
-    set_candidate_permission, create_candidate_in_db, get_all_candidates
-from drive_and_cv_views import smart_resume_upload, show_drive_config_status
-from datetime import datetime
-import json
-import uuid
+import os
+import re
+import smtplib
+from email.message import EmailMessage
+from typing import List, Dict, Any
 
+import streamlit as st
+from db_postgres import (
+    get_conn,
+    find_candidates_by_name,              # legacy helper (kept)
+    update_candidate_form_data,
+    update_candidate_resume_link,
+    create_candidate_in_db,
+    get_all_candidates,
+)
+
+EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
+
+
+# --------- helpers
+
+def _valid_email(addr: str) -> bool:
+    return bool(EMAIL_RE.match(addr or ""))
+
+
+def _search_candidates_all_fields(q: str) -> List[Dict[str, Any]]:
+    """
+    Search across many columns. Falls back to name search if anything fails.
+    """
+    try:
+        conn = get_conn()
+        with conn, conn.cursor() as cur:
+            like = f"%{q}%"
+            cur.execute(
+                """
+                SELECT id, candidate_id, name, email, phone, created_at, resume_link, form_data
+                FROM candidates
+                WHERE
+                    candidate_id ILIKE %s OR
+                    name ILIKE %s OR
+                    email ILIKE %s OR
+                    phone ILIKE %s OR
+                    COALESCE(CAST(form_data AS TEXT),'') ILIKE %s
+                ORDER BY created_at DESC
+                LIMIT 200
+                """,
+                (like, like, like, like, like),
+            )
+            rows = cur.fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            results.append({
+                "id": r[0],
+                "candidate_id": r[1],
+                "name": r[2],
+                "email": r[3],
+                "phone": r[4],
+                "created_at": r[5],
+                "resume_link": r[6],
+                "form_data": r[7],
+            })
+        return results
+    except Exception:
+        # fallback to older util
+        return find_candidates_by_name(q)
+
+
+def _set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
+    """Minimal local implementation if the DB helper is missing."""
+    conn = get_conn()
+    with conn, conn.cursor() as cur:
+        cur.execute("UPDATE candidates SET can_edit=%s WHERE candidate_id=%s", (can_edit, candidate_id))
+        ok = cur.rowcount > 0
+    conn.close()
+    return ok
+
+
+def _send_candidate_code(email: str, candidate_id: str) -> tuple[bool, str]:
+    """Email candidate code using SMTP env (same pattern as you used in auth)."""
+    if not _valid_email(email):
+        return False, "Invalid email address."
+
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = os.getenv("SMTP_PORT")
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_pass = os.getenv("SMTP_PASS")
+    from_email = os.getenv("FROM_EMAIL", "no-reply@brv.local")
+
+    subject = "Your BRV Candidate Code"
+    body = f"""Hello,
+
+Your candidate code is: {candidate_id}
+
+Use this code to view/update your application if permitted.
+
+Thanks,
+BRV Recruitment
+"""
+
+    if smtp_host and smtp_port and smtp_user and smtp_pass:
+        try:
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = from_email
+            msg["To"] = email
+            msg.set_content(body)
+
+            with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            return True, "Email sent."
+        except Exception as e:
+            return False, f"SMTP error: {e}"
+    else:
+        # fallback to console
+        print("---- Candidate Code Email (console fallback) ----")
+        print("To:", email)
+        print(body)
+        print("-----------------------------------------------")
+        return True, "Printed to console (SMTP not configured)."
+
+
+# --------- main view
 
 def receptionist_view():
-    st.header("Receptionist — Manage Candidates & Grant Edit Permission")
+    st.header("Receptionist — Candidate Management")
 
-    # Show Google Drive configuration status
-    with st.expander("🔧 Google Drive Configuration", expanded=False):
-        show_drive_config_status()
+    # Search section
+    st.subheader("Search Candidates (all fields)")
+    q = st.text_input("Search by candidate code, name, email, phone, or any form value", placeholder="Type to search…")
+    if q.strip():
+        rows = _search_candidates_all_fields(q.strip())
+    else:
+        rows = get_all_candidates()
 
-    # Tab layout for better organization
-    tab1, tab2, tab3, tab4 = st.tabs(["Search Candidates", "Create Walk-in", "All Candidates", "Quick Stats"])
+    st.caption(f"{len(rows)} result(s).")
+    for c in rows:
+        with st.expander(f"{c.get('name','(no name)')} — {c.get('candidate_id')}", expanded=False):
+            st.write(f"**Email:** {c.get('email','—')}")
+            st.write(f"**Phone:** {c.get('phone','—')}")
+            st.write(f"**Created:** {c.get('created_at','—')}")
+            if c.get("resume_link"):
+                st.write(f"**Resume:** {c['resume_link']}")
 
-    with tab1:
-        st.subheader("🔍 Search Candidates")
-        search_name = st.text_input("Search by name (partial match)")
+            # show form data preview
+            if c.get("form_data"):
+                try:
+                    data = c["form_data"]
+                    if isinstance(data, str):
+                        import json
+                        data = json.loads(data)
+                    with st.expander("Application Data", expanded=False):
+                        for k, v in (data or {}).items():
+                            st.write(f"- **{k}**: {v}")
+                except Exception:
+                    pass
 
-        if st.button("Search") or search_name:
-            if not search_name.strip():
-                st.warning("Please enter a name to search.")
+            st.markdown("---")
+            st.caption("Quick Actions")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                # toggle permission by code only
+                if st.button("Allow Edit (by code only)", key=f"allow_{c['candidate_id']}"):
+                    if _set_candidate_permission(c["candidate_id"], True):
+                        st.success("Permission granted.")
+                    else:
+                        st.error("Failed to update permission.")
+            with col2:
+                if st.button("Revoke Edit", key=f"revoke_{c['candidate_id']}"):
+                    if _set_candidate_permission(c["candidate_id"], False):
+                        st.success("Permission revoked.")
+                    else:
+                        st.error("Failed to update permission.")
+            with col3:
+                # email candidate code
+                if st.button("Email Candidate Code", key=f"code_{c['candidate_id']}"):
+                    ok, msg = _send_candidate_code(c.get("email",""), c["candidate_id"])
+                    (st.success if ok else st.error)(msg)
+
+    st.divider()
+
+    # Minimal create/edit tools (optional quick fixes)
+    st.subheader("Create/Update Application (front-desk help)")
+    cc, ce = st.columns(2)
+    with cc:
+        name = st.text_input("Full Name", key="new_name")
+        email = st.text_input("Email", key="new_email")
+        phone = st.text_input("Phone", key="new_phone")
+        if st.button("Create Candidate"):
+            if not _valid_email(email):
+                st.error("Please enter a valid email.")
             else:
                 try:
-                    results = find_candidates_by_name(search_name.strip())
-                    if not results:
-                        st.info("No candidates found with that name.")
+                    cid = create_candidate_in_db(name=name, email=email, phone=phone)
+                    if cid:
+                        st.success(f"Candidate created. Code: {cid}")
+                        ok, msg = _send_candidate_code(email, cid)
+                        (st.success if ok else st.warning)(msg)
                     else:
-                        st.success(f"Found {len(results)} candidate(s)")
-
-                        for candidate in results:
-                            with st.expander(f"📋 {candidate['candidate_id']} — {candidate.get('name', 'No Name')}"):
-                                # Display candidate info
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.write(f"**Name:** {candidate.get('name', 'N/A')}")
-                                    st.write(f"**Email:** {candidate.get('email', 'N/A')}")
-                                    st.write(f"**Phone:** {candidate.get('phone', 'N/A')}")
-                                with col2:
-                                    st.write(f"**Can Edit:** {'✅ Yes' if candidate.get('can_edit', False) else '❌ No'}")
-                                    st.write(f"**Created:** {candidate.get('created_at', 'N/A')}")
-                                    if candidate.get('resume_link'):
-                                        st.markdown(f"**Resume:** [View Resume]({candidate['resume_link']})")
-                                    else:
-                                        st.write("**Resume:** ❌ Not uploaded")
-
-                                # Permission management
-                                st.markdown("---")
-                                st.subheader("🔐 Edit Permission")
-
-                                current_permission = candidate.get('can_edit', False)
-                                new_permission = st.checkbox(
-                                    "Allow this candidate to edit their application",
-                                    value=current_permission,
-                                    key=f"allow_{candidate['candidate_id']}"
-                                )
-
-                                if st.button("Update Permission", key=f"update_perm_{candidate['candidate_id']}"):
-                                    success = set_candidate_permission(candidate['candidate_id'], new_permission)
-                                    if success:
-                                        action = "granted" if new_permission else "revoked"
-                                        st.success(f"✅ Edit permission {action} for {candidate['candidate_id']}")
-
-                                        # Update form_data with history
-                                        form_data = candidate.get('form_data') or {}
-                                        if isinstance(form_data, str):
-                                            try:
-                                                form_data = json.loads(form_data)
-                                            except:
-                                                form_data = {}
-
-                                        form_data.setdefault('history', []).append({
-                                            "action": f"permission_{action}",
-                                            "by": "receptionist",
-                                            "at": datetime.utcnow().isoformat()
-                                        })
-
-                                        update_candidate_form_data(candidate['candidate_id'], form_data)
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Failed to update permission.")
-
-                                # Resume upload
-                                st.markdown("---")
-                                st.subheader("📄 Resume Management")
-
-                                uploaded_file = st.file_uploader(
-                                    f"Upload/Replace resume for {candidate['candidate_id']}",
-                                    key=f"resume_{candidate['candidate_id']}",
-                                    type=["pdf", "doc", "docx"],
-                                    help="Upload a PDF or Word document"
-                                )
-
-                                if uploaded_file is not None:
-                                    file_bytes = uploaded_file.read()
-                                    st.info("📤 Uploading resume...")
-
-                                    with st.spinner("Uploading..."):
-                                        success, webview_url, message = smart_resume_upload(
-                                            candidate['candidate_id'],
-                                            file_bytes,
-                                            uploaded_file.name
-                                        )
-
-                                        if success:
-                                            # Update the resume link in database
-                                            if update_candidate_resume_link(candidate['candidate_id'], webview_url):
-                                                st.success("✅ Resume uploaded and linked successfully!")
-                                                st.markdown(f"[📎 View Resume]({webview_url})")
-                                                st.info(f"Upload details: {message}")
-
-                                                # Add to history
-                                                form_data = candidate.get('form_data') or {}
-                                                if isinstance(form_data, str):
-                                                    try:
-                                                        form_data = json.loads(form_data)
-                                                    except:
-                                                        form_data = {}
-
-                                                form_data.setdefault('history', []).append({
-                                                    "action": "resume_uploaded_by_receptionist",
-                                                    "filename": uploaded_file.name,
-                                                    "at": datetime.utcnow().isoformat()
-                                                })
-
-                                                update_candidate_form_data(candidate['candidate_id'], form_data)
-                                            else:
-                                                st.error("⚠️ Resume uploaded but failed to update database link")
-                                        else:
-                                            st.error(f"❌ Upload failed: {message}")
-
-                                # Display form data if available
-                                if candidate.get('form_data'):
-                                    st.markdown("---")
-                                    st.subheader("📋 Application Data")
-                                    form_data = candidate['form_data']
-                                    if isinstance(form_data, str):
-                                        try:
-                                            form_data = json.loads(form_data)
-                                        except:
-                                            st.text("Invalid JSON format")
-                                            form_data = {}
-
-                                    if isinstance(form_data, dict):
-                                        # Show key fields nicely formatted
-                                        if form_data.get('skills'):
-                                            st.write(f"**Skills:** {form_data['skills']}")
-                                        if form_data.get('experience'):
-                                            st.write(f"**Experience:** {form_data['experience']}")
-                                        if form_data.get('education'):
-                                            st.write(f"**Education:** {form_data['education']}")
-
-                                        # Show history if available
-                                        if form_data.get('history'):
-                                            with st.expander("📜 History"):
-                                                for entry in form_data['history']:
-                                                    st.write(
-                                                        f"• {entry.get('action', 'Unknown')} at {entry.get('at', 'Unknown time')}")
-                                    else:
-                                        st.json(form_data)
-
+                        st.error("Failed to create candidate.")
                 except Exception as e:
-                    st.error(f"Error searching candidates: {str(e)}")
+                    st.error(f"Error: {e}")
 
-    with tab2:
-        st.subheader("🚶 Create Walk-in Candidate")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            walkin_name = st.text_input("Full Name", key="walkin_name")
-            walkin_email = st.text_input("Email Address", key="walkin_email")
-            walkin_phone = st.text_input("Phone Number", key="walkin_phone")
-
-        with col2:
-            walkin_skills = st.text_area("Skills", key="walkin_skills", placeholder="Key skills and technologies")
-            walkin_experience = st.text_area("Experience", key="walkin_experience", placeholder="Work experience")
-            walkin_education = st.text_area("Education", key="walkin_education", placeholder="Educational background")
-
-        walkin_file = st.file_uploader("Upload CV (Optional)", key="walkin_cv", type=["pdf", "doc", "docx"])
-
-        col1, col2 = st.columns(2)
-        with col1:
-            allow_edit = st.checkbox("Allow candidate to edit later", value=True, key="walkin_allow_edit")
-        with col2:
-            if st.button("Create Walk-in Candidate", type="primary"):
-                if not walkin_name.strip():
-                    st.error("❌ Name is required")
+    with ce:
+        st.caption("Edit by Candidate Code (name can be changed; permission required)")
+        code = st.text_input("Candidate Code", key="edit_code")
+        new_name = st.text_input("New Name (optional)", key="edit_name")
+        # simple JSON editor for any form fields
+        form_json = st.text_area("Form JSON patch (optional)", placeholder='{"skills":"Excel, Email"}')
+        if st.button("Apply Update"):
+            try:
+                updates = {}
+                if new_name.strip():
+                    updates["name"] = new_name.strip()
+                if form_json.strip():
+                    import json
+                    updates["form_patch"] = json.loads(form_json)
+                if not updates:
+                    st.info("Nothing to update.")
                 else:
-                    try:
-                        new_id = str(uuid.uuid4())[:8].upper()
+                    # Use existing helper to update form data (and name if supported)
+                    ok = update_candidate_form_data(code, updates)
+                    if ok:
+                        st.success("Update applied.")
+                    else:
+                        st.error("Failed to update (check permission or code).")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
-                        form_data = {
-                            "skills": walkin_skills.strip(),
-                            "experience": walkin_experience.strip(),
-                            "education": walkin_education.strip(),
-                            "allowed_edit": allow_edit,
-                            "history": [{
-                                "action": "created_by_receptionist",
-                                "at": datetime.utcnow().isoformat()
-                            }]
-                        }
-
-                        # Create candidate
-                        rec = create_candidate_in_db(
-                            candidate_id=new_id,
-                            name=walkin_name.strip(),
-                            email=walkin_email.strip() if walkin_email.strip() else None,
-                            phone=walkin_phone.strip() if walkin_phone.strip() else None,
-                            form_data=form_data,
-                            created_by="receptionist"
-                        )
-
-                        if rec:
-                            st.success(f"✅ Created candidate {new_id}")
-
-                            # Set edit permission
-                            set_candidate_permission(new_id, allow_edit)
-
-                            # Handle file upload if provided
-                            if walkin_file:
-                                file_bytes = walkin_file.read()
-                                with st.spinner("Uploading resume..."):
-                                    ok, link, msg = smart_resume_upload(new_id, file_bytes, walkin_file.name)
-                                    if ok:
-                                        update_candidate_resume_link(new_id, link)
-                                        st.success(f"✅ Resume uploaded: [View Resume]({link})")
-                                        st.info(f"Upload details: {msg}")
-                                    else:
-                                        st.error(f"❌ Resume upload failed: {msg}")
-
-                            st.info(f"📝 Candidate ID: **{new_id}** (Share with candidate for future edits)")
-                        else:
-                            st.error("❌ Failed to create candidate")
-
-                    except Exception as e:
-                        st.error(f"❌ Error creating walk-in candidate: {str(e)}")
-
-    with tab3:
-        st.subheader("👥 All Candidates")
-
-        if st.button("Refresh All Candidates"):
-            st.rerun()
-
-        try:
-            all_candidates = get_all_candidates()
-
-            if all_candidates:
-                # Search filter
-                filter_text = st.text_input("Filter candidates", placeholder="Search by name or email...")
-
-                if filter_text:
-                    all_candidates = [
-                        c for c in all_candidates
-                        if filter_text.lower() in str(c.get('name', '')).lower() or
-                           filter_text.lower() in str(c.get('email', '')).lower()
-                    ]
-
-                st.info(f"Showing {len(all_candidates)} candidates")
-
-                # Create a summary table
-                for candidate in all_candidates:
-                    with st.container():
-                        col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
-
-                        with col1:
-                            st.write(f"**{candidate.get('name', 'No Name')}**")
-                            st.write(f"ID: {candidate['candidate_id']}")
-
-                        with col2:
-                            st.write(f"Email: {candidate.get('email', 'N/A')}")
-                            st.write(f"Phone: {candidate.get('phone', 'N/A')}")
-
-                        with col3:
-                            if candidate.get('resume_link'):
-                                st.markdown("✅ Resume")
-                            else:
-                                st.markdown("❌ No Resume")
-
-                        with col4:
-                            if candidate.get('can_edit'):
-                                st.markdown("🔓 Can Edit")
-                            else:
-                                st.markdown("🔒 No Edit")
-
-                        with col5:
-                            st.write(f"Created: {str(candidate.get('created_at', 'N/A'))[:10]}")
-
-                        st.divider()
-
-            else:
-                st.info("No candidates found")
-
-        except Exception as e:
-            st.error(f"Error loading candidates: {str(e)}")
-
-    with tab4:
-        st.subheader("📊 Quick Statistics")
-
-        try:
-            all_candidates = get_all_candidates()
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                st.metric("Total Candidates", len(all_candidates))
-
-            with col2:
-                with_resume = len([c for c in all_candidates if c.get('resume_link')])
-                st.metric("With Resume", with_resume)
-
-            with col3:
-                can_edit = len([c for c in all_candidates if c.get('can_edit')])
-                st.metric("Can Edit", can_edit)
-
-            with col4:
-                today = datetime.now().date()
-                today_candidates = len([
-                    c for c in all_candidates
-                    if c.get('created_at') and c['created_at'].date() == today
-                ])
-                st.metric("Created Today", today_candidates)
-
-        except Exception as e:
-            st.error(f"Error loading statistics: {str(e)}")
-
-    # Quick actions section
-    st.markdown("---")
-    st.subheader("⚡ Quick Actions")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        if st.button("🔄 Refresh View"):
-            st.rerun()
-
-    with col2:
-        if st.button("🗑️ Clear Search"):
-            st.session_state.clear()
-            st.rerun()
-
-    with col3:
-        if st.button("📊 Show Statistics"):
-            st.balloons()
-            st.success("Statistics refreshed!")
+    st.caption("Note: Editing only requires the candidate code if permission is granted.")
