@@ -1,4 +1,3 @@
-# main.py
 import streamlit as st
 from db_postgres import init_db, get_user_by_email, verify_password, hash_password
 from utils import require_login, VALID_ROLES
@@ -6,17 +5,14 @@ from admin import show_admin_panel
 from receptionist import receptionist_view
 from candidate_view import candidate_form_view
 from interviewer import interviewer_view
-import psycopg2
+from forgot_password_ui import forgot_password_view  # <-- Added import
 import os
 
 st.set_page_config(page_title="BRV Applicant Management", layout="wide")
 
-# Initialize DB if not exists
+# Initialize DB
 init_db()
 
-
-if st.button("Forgot Password?"):
-    st.session_state.page = "forgot_password"
 
 def authenticate_user(email: str, password: str):
     """Authenticate user using PostgreSQL database"""
@@ -60,9 +56,14 @@ def login_form():
         user = authenticate_user(email.strip(), password.strip())
         if user:
             st.session_state["user"] = {"id": user["id"], "email": user["email"], "role": user["role"]}
-            st.rerun()  # Updated from st.experimental_rerun()
+            st.rerun()
         else:
             st.sidebar.error("Invalid credentials")
+
+    # Forgot Password button
+    if st.sidebar.button("Forgot Password?"):
+        st.session_state.page = "forgot_password"
+        st.rerun()
 
 
 def register_form():
@@ -81,10 +82,15 @@ def register_form():
 def logout():
     if st.sidebar.button("Logout"):
         st.session_state.pop("user", None)
-        st.rerun()  # Updated from st.experimental_rerun()
+        st.rerun()
 
 
 def main():
+    # Forgot password page routing
+    if st.session_state.get("page") == "forgot_password":
+        forgot_password_view()
+        return
+
     st.title("BRV Applicant Management System")
 
     if "user" not in st.session_state:
@@ -98,7 +104,7 @@ def main():
 
     if st.sidebar.button("Logout"):
         st.session_state.pop("user", None)
-        st.rerun()  # Updated from st.experimental_rerun()
+        st.rerun()
 
     role = user["role"]
     if role == "ceo" or role == "admin":

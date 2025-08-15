@@ -1,4 +1,3 @@
-# forgot_password_ui.py
 import streamlit as st
 from auth import create_reset_token, send_reset_email, verify_reset_token, create_user
 from db_postgres import get_user_by_email, update_user_password, hash_password
@@ -6,6 +5,11 @@ from db_postgres import get_user_by_email, update_user_password, hash_password
 
 def forgot_password_view():
     st.header("Forgot / Reset Password")
+
+    # Back to login button
+    if st.button("⬅ Back to Login"):
+        st.session_state.page = None
+        st.rerun()
 
     try:
         st.subheader("Request password reset")
