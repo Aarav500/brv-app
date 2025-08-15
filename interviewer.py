@@ -4,17 +4,10 @@ import os
 from db_postgres import (
     get_all_candidates, get_candidate_by_id,
     search_candidates_by_name_or_email, create_interview,
-    get_interviews_for_candidate
+    get_interviews_for_candidate, get_all_interviews
 )
 from datetime import datetime
 import json
-
-st.text_area("Interview Questions Notes", key="questions_notes")
-st.text_area("Additional Notes", key="additional_notes")
-
-cv_path = os.path.join(os.getenv("LOCAL_STORAGE_PATH"), f"{candidate_id}.pdf")
-if os.path.exists(cv_path):
-    st.download_button("Download CV", open(cv_path, "rb"), file_name=f"{candidate_id}.pdf")
 
 def interviewer_view():
     st.header("Interviewer Dashboard")
@@ -49,10 +42,22 @@ def interviewer_view():
                     st.write(f"**Phone:** {candidate.get('phone', 'N/A')}")
                     st.write(f"**Created:** {candidate.get('created_at', 'N/A')}")
 
+                    # Show Google Drive link if available
                     if candidate.get('resume_link'):
                         st.markdown(f"**Resume:** [View Resume]({candidate['resume_link']})")
                     else:
                         st.write("**Resume:** Not uploaded")
+
+                    # Show local CV if available
+                    cv_path = os.path.join(os.getenv("LOCAL_STORAGE_PATH"), f"{candidate['candidate_id']}.pdf")
+                    if os.path.exists(cv_path):
+                        with open(cv_path, "rb") as f:
+                            st.download_button(
+                                "Download CV",
+                                f,
+                                file_name=f"{candidate['candidate_id']}.pdf",
+                                key=f"cv_{candidate['candidate_id']}"
+                            )
 
                 with col2:
                     st.markdown("### Application Data")
@@ -173,11 +178,12 @@ def interviewer_view():
 
     with col2:
         if st.button("Clear Search"):
-            # Clear search session state
-            if f"search_query" in st.session_state:
+            if "search_query" in st.session_state:
                 del st.session_state["search_query"]
             st.rerun()
 
     with col3:
         total_candidates = len(get_all_candidates())
         st.metric("Total Candidates", total_candidates)
+        st.metric("Total Interviews", len(get_all_interviews()))
+
