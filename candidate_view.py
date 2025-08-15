@@ -146,10 +146,8 @@ def candidate_form_view():
                     st.error("❌ You don't have permission to edit this application")
                     return
 
-                # Verify name matches (security check)
-                if existing_candidate.get('name', '').strip().lower() != name.strip().lower():
-                    st.error("❌ Name doesn't match the original application. Permission denied.")
-                    return
+                # Skip name match check — only Candidate ID + permission required
+                st.info("✅ Candidate ID verified. Name can be updated.")
 
                 # Update form data
                 existing_form_data = existing_candidate.get('form_data') or {}
