@@ -8,6 +8,12 @@ from db_postgres import (
 from datetime import datetime
 import json
 
+st.text_area("Interview Questions Notes", key="questions_notes")
+st.text_area("Additional Notes", key="additional_notes")
+
+cv_path = os.path.join(os.getenv("LOCAL_STORAGE_PATH"), f"{candidate_id}.pdf")
+if os.path.exists(cv_path):
+    st.download_button("Download CV", open(cv_path, "rb"), file_name=f"{candidate_id}.pdf")
 
 def interviewer_view():
     st.header("Interviewer Dashboard")
@@ -57,6 +63,9 @@ def interviewer_view():
                             except:
                                 st.text("Invalid form data format")
                                 form_data = {}
+
+                        interviews = get_all_interviews()
+                        st.table(interviews)
 
                         # Display key fields
                         if isinstance(form_data, dict):

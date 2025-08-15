@@ -159,6 +159,11 @@ def candidate_form_view():
                     except:
                         existing_form_data = {}
 
+                # After saving changes:
+                update_candidate_form_data(candidate_id, form_data)
+                set_candidate_permission(candidate_id, False)
+                st.success("Changes saved and edit permissions reset.")
+
                 # Update fields
                 existing_form_data.update({
                     "skills": skills.strip(),

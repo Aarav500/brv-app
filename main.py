@@ -15,6 +15,9 @@ st.set_page_config(page_title="BRV Applicant Management", layout="wide")
 init_db()
 
 
+if st.button("Forgot Password?"):
+    st.session_state.page = "forgot_password"
+
 def authenticate_user(email: str, password: str):
     """Authenticate user using PostgreSQL database"""
     user = get_user_by_email(email)

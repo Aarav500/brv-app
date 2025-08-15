@@ -60,14 +60,14 @@ jobs:
             
             sed -i 's|GOOGLE_SERVICE_ACCOUNT_FILE=.*|GOOGLE_SERVICE_ACCOUNT_FILE=/app/secrets/google.json|' .env.backup
             
+            echo "🔄 Restoring complete .env file..."
+            mv .env.backup .env
+            
             echo "🧹 Cleaning up old containers and images..."
             docker system prune -f
             
             echo "🚀 Building and starting containers..."
             docker compose up -d --build --remove-orphans
-            
-            echo "🔄 Restoring complete .env file..."
-            mv .env.backup .env
             
             echo "⏳ Waiting for services to start..."
             sleep 10

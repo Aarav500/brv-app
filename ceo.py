@@ -10,6 +10,19 @@ def show_admin_panel():
         seed_sample_users()
         st.success("DB initialized & sample users created (if absent).")
 
+    def remove_user(email):
+        conn = get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM users WHERE email=%s", (email,))
+
+    def update_user_password(email, new_password):
+        conn = get_conn()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET password=%s WHERE email=%s", (new_password, email))
+
+
     st.subheader("All candidates")
     candidates = get_all_candidates()
     for c in candidates:
