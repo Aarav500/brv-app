@@ -713,3 +713,24 @@ def get_candidate_statistics():
         }
     finally:
         conn.close()
+
+# === Storage Usage ===
+
+def get_cv_storage_usage(limit_mb: int = 100) -> dict | None:
+    """
+    Return storage usage stats for candidate CVs.
+    limit_mb = allowed storage cap in MB.
+    """
+    try:
+        used_bytes = get_total_cv_storage_usage()
+        used_mb = round(used_bytes / (1024 * 1024), 2)
+        usage_percent = round((used_mb / limit_mb) * 100, 2) if limit_mb > 0 else 0
+        return {
+            "used_bytes": used_bytes,
+            "used_mb": used_mb,
+            "limit_mb": limit_mb,
+            "usage_percent": usage_percent,
+        }
+    except Exception:
+        logger.exception("Error calculating CV storage usage")
+        return None
