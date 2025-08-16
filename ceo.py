@@ -9,8 +9,7 @@ from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
     get_all_candidates,
-    get_pending_deletion_candidates, delete_candidate_by_actor,
-    approve_candidate_deletion, update_candidate_form_data
+    delete_candidate_by_actor, update_candidate_form_data
 )
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
@@ -196,7 +195,6 @@ def show_ceo_panel():
     else:
         st.write(f"{len(stale)} user(s) have passwords older than 30 days.")
         if st.button("Reset All (generate random passwords)"):
-
             ok, fail = 0, 0
             for u in stale:
                 if _reset_password(u["id"], _random_password()):
@@ -211,38 +209,8 @@ def show_ceo_panel():
     st.markdown("---")
     st.subheader("Candidate Records")
 
-    # Pending requests
-    st.write("### Pending Deletion Requests")
-    pending = get_pending_deletion_candidates()
-    if not pending:
-        st.caption("No pending deletion requests.")
-    else:
-        for c in pending:
-            with st.expander(f"🟠 Pending: {c['name']} — {c['candidate_id']}"):
-                st.write(f"**Email:** {c.get('email','—')}")
-                st.write(f"**Phone:** {c.get('phone','—')}")
-                st.write(f"**Requested At:** {c.get('updated_at','—')}")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("✅ Approve Deletion", key=f"approve_{c['candidate_id']}"):
-                        if approve_candidate_deletion(c["candidate_id"], current_user["id"]):
-                            st.success("Candidate permanently deleted.")
-                            st.rerun()
-                        else:
-                            st.error("Failed to approve deletion.")
-                with col2:
-                    if st.button("❌ Reject Request", key=f"reject_{c['candidate_id']}"):
-                        form_data = dict(c.get("form_data", {}))
-                        form_data.pop("pending_delete", None)
-                        if update_candidate_form_data(c["candidate_id"], form_data):
-                            st.success("Deletion request rejected.")
-                            st.rerun()
-
-    # Direct deletion
-    st.write("### All Candidates")
-    if not current_user.get("can_delete_records", False):
-        st.info("You do not have permission to delete candidate records directly.")
+    if current_user.get("role") not in ("ceo", "admin"):
+        st.info("Only CEO/Admin can delete candidates.")
     else:
         candidates = get_all_candidates()
         if not candidates:
@@ -258,7 +226,7 @@ def show_ceo_panel():
                         st.success("Candidate deleted successfully.")
                         st.rerun()
                     else:
-                        st.error("You do not have permission or deletion failed.")
+                        st.error("Deletion failed.")
 
     st.markdown("---")
     st.caption("Emails are validated before updates. Passwords are stored hashed via the existing DB layer.")

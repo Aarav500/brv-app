@@ -11,7 +11,7 @@ from db_postgres import (
     create_interview,
     get_interviews_for_candidate,
     get_candidate_cv,         # Postgres CV storage
-    delete_candidate_record,  # ✅ new for deletion
+    delete_candidate_by_actor,  # ✅ new for deletion
 )
 
 
@@ -152,7 +152,8 @@ def interviewer_view():
                 current_user = st.session_state.get("user")
                 if current_user and current_user.get("can_delete_records", False):
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
-                        if delete_candidate_record(cid):
+                        user_id = current_user.get("id")  # ✅ get user id from session
+                        if user_id and delete_candidate_by_actor(cid, user_id):
                             st.success("Candidate deleted successfully.")
                             st.rerun()
                         else:

@@ -13,7 +13,7 @@ from db_postgres import (
     create_candidate_in_db,
     get_all_candidates,
     get_candidate_cv,                     # ✅ new for CVs
-    delete_candidate_record               # ✅ delete candidate support
+    delete_candidate_by_actor,              # ✅ delete candidate support
 )
 from drive_and_cv_views import upload_cv_ui, download_cv_ui, delete_cv_ui  # ✅ reuse CV UI
 
@@ -194,7 +194,8 @@ def receptionist_view():
                 current_user = st.session_state.get("user")
                 if current_user and current_user.get("can_delete_records", False):
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
-                        if delete_candidate_record(c["candidate_id"]):
+                        user_id = current_user.get("id")
+                        if user_id and delete_candidate_by_actor(c["candidate_id"], user_id):
                             st.success("Candidate deleted successfully.")
                             st.rerun()
                         else:
