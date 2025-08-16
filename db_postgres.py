@@ -567,6 +567,35 @@ def get_all_users_with_permissions():
     finally:
         conn.close()
 
+def seed_sample_users():
+    """Create sample users for testing (only if they don’t exist)."""
+    sample_users = [
+        ("admin@brv.com", "admin123", "admin"),
+        ("ceo@brv.com", "ceo123", "ceo"),
+        ("receptionist@brv.com", "recep123", "receptionist"),
+        ("interviewer@brv.com", "interview123", "interviewer"),
+        ("hr@brv.com", "hr123", "hr"),
+        ("candidate@brv.com", "candidate123", "candidate")
+    ]
+
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for email, password, role in sample_users:
+                    # check if user already exists
+                    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+                    if not cur.fetchone():
+                        password_hash = hash_password(password)
+                        cur.execute("""
+                            INSERT INTO users (email, password_hash, role)
+                            VALUES (%s, %s, %s)
+                        """, (email, password_hash, role))
+                        logger.info(f"Created sample user: {email} with role: {role}")
+    except Exception:
+        logger.exception("Error creating sample users")
+    finally:
+        conn.close()
 
 # === Candidate Deletion (direct + permission-aware) ===
 
