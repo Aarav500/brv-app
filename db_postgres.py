@@ -627,3 +627,60 @@ def delete_candidate_by_actor(candidate_id: str, actor_user_id: int) -> bool:
         logger.warning(f"User {actor_user_id} attempted candidate delete without permission.")
         return False
     return delete_candidate(candidate_id)
+
+# === Candidate Statistics ===
+
+def get_candidate_statistics():
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                stats = {}
+
+                # Total candidates
+                cur.execute("SELECT COUNT(*) FROM candidates")
+                stats["total_candidates"] = cur.fetchone()["count"]
+
+                # Candidates created today
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM candidates 
+                    WHERE DATE(created_at) = CURRENT_DATE
+                """)
+                stats["candidates_today"] = cur.fetchone()["count"]
+
+                # Candidates with resume uploaded
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM candidates 
+                    WHERE resume_link IS NOT NULL OR cv_file IS NOT NULL
+                """)
+                stats["candidates_with_resume"] = cur.fetchone()["count"]
+
+                # Interviews stats
+                cur.execute("SELECT COUNT(*) FROM interviews")
+                stats["total_interviews"] = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result = 'pass'")
+                stats["interviews_passed"] = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result = 'fail'")
+                stats["interviews_failed"] = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NULL OR result = 'scheduled'")
+                stats["interviews_pending"] = cur.fetchone()["count"]
+
+                return stats
+    except Exception:
+        logger.exception("Error getting candidate statistics")
+        return {
+            "total_candidates": 0,
+            "candidates_today": 0,
+            "candidates_with_resume": 0,
+            "total_interviews": 0,
+            "interviews_passed": 0,
+            "interviews_failed": 0,
+            "interviews_pending": 0,
+        }
+    finally:
+        conn.close()
