@@ -3,9 +3,15 @@ import re
 import secrets
 import string
 from datetime import datetime, timedelta
-
 import streamlit as st
-from db_postgres import get_conn, update_user_password
+
+from db_postgres import (
+    get_conn, update_user_password,
+    get_all_users_with_permissions, set_user_permission,
+    get_all_candidates,
+    get_pending_deletion_candidates, delete_candidate_by_actor,
+    approve_candidate_deletion, update_candidate_form_data
+)
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
@@ -62,7 +68,6 @@ def _update_email(uid: int, new_email: str) -> bool:
 
 
 def _reset_password(uid: int, new_password: str) -> bool:
-    # We already have update_user_password(email, new_pass) — but CEO might target by id.
     conn = get_conn()
     with conn, conn.cursor() as cur:
         cur.execute("SELECT email FROM users WHERE id=%s", (uid,))
@@ -89,18 +94,60 @@ def _users_older_than_30_days(users):
 
 
 def show_ceo_panel():
-    st.header("CEO — User Administration")
+    st.header("CEO — Administration Panel")
 
-    users = _fetch_users()
-    if not users:
-        st.info("No users found.")
+    current_user = st.session_state.get("user")
+    if not current_user:
+        st.error("No active user session. Please log in.")
         return
 
+    # -------------------------
+    # USER PERMISSION MANAGEMENT
+    # -------------------------
+    st.subheader("User Permissions")
+    if current_user["role"] not in ("ceo", "admin"):
+        st.warning("You do not have permission to manage users.")
+    else:
+        users = get_all_users_with_permissions()
+        if not users:
+            st.warning("No users found.")
+        else:
+            for u in users:
+                with st.expander(f"{u['email']} ({u['role']})", expanded=False):
+                    st.write(f"**ID:** {u['id']}")
+                    st.write(f"**Created:** {u['created_at']}")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        can_view = st.checkbox(
+                            "Can View CVs", value=u.get("can_view_cvs", False),
+                            key=f"view_{u['id']}"
+                        )
+                    with col2:
+                        can_delete = st.checkbox(
+                            "Can Delete Candidate Records", value=u.get("can_delete_records", False),
+                            key=f"delete_{u['id']}"
+                        )
+
+                    if st.button("Update Permissions", key=f"perm_{u['id']}"):
+                        if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete):
+                            st.success("Permissions updated.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update permissions.")
+
+    st.markdown("---")
+
+    # -------------------------
+    # USER ACCOUNT MANAGEMENT
+    # -------------------------
     st.subheader("All Users")
+    users = _fetch_users()
     for u in users:
         with st.expander(f"{u['email']}  ({u['role']})", expanded=False):
             st.write(f"**ID:** {u['id']}")
             st.write(f"**Last password change:** {u.get('last_changed', '—')}")
+
             # Update email
             new_email = st.text_input("New email", value=u["email"], key=f"email_{u['id']}")
             if st.button("Change Email", key=f"change_email_{u['id']}"):
@@ -149,6 +196,7 @@ def show_ceo_panel():
     else:
         st.write(f"{len(stale)} user(s) have passwords older than 30 days.")
         if st.button("Reset All (generate random passwords)"):
+
             ok, fail = 0, 0
             for u in stale:
                 if _reset_password(u["id"], _random_password()):
@@ -156,6 +204,61 @@ def show_ceo_panel():
                 else:
                     fail += 1
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
+
+    # -------------------------
+    # CANDIDATE RECORD DELETION
+    # -------------------------
+    st.markdown("---")
+    st.subheader("Candidate Records")
+
+    # Pending requests
+    st.write("### Pending Deletion Requests")
+    pending = get_pending_deletion_candidates()
+    if not pending:
+        st.caption("No pending deletion requests.")
+    else:
+        for c in pending:
+            with st.expander(f"🟠 Pending: {c['name']} — {c['candidate_id']}"):
+                st.write(f"**Email:** {c.get('email','—')}")
+                st.write(f"**Phone:** {c.get('phone','—')}")
+                st.write(f"**Requested At:** {c.get('updated_at','—')}")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Approve Deletion", key=f"approve_{c['candidate_id']}"):
+                        if approve_candidate_deletion(c["candidate_id"], current_user["id"]):
+                            st.success("Candidate permanently deleted.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to approve deletion.")
+                with col2:
+                    if st.button("❌ Reject Request", key=f"reject_{c['candidate_id']}"):
+                        form_data = dict(c.get("form_data", {}))
+                        form_data.pop("pending_delete", None)
+                        if update_candidate_form_data(c["candidate_id"], form_data):
+                            st.success("Deletion request rejected.")
+                            st.rerun()
+
+    # Direct deletion
+    st.write("### All Candidates")
+    if not current_user.get("can_delete_records", False):
+        st.info("You do not have permission to delete candidate records directly.")
+    else:
+        candidates = get_all_candidates()
+        if not candidates:
+            st.caption("No candidates found.")
+        for c in candidates:
+            with st.expander(f"{c['name']} — {c['candidate_id']}", expanded=False):
+                st.write(f"**Email:** {c.get('email','—')}")
+                st.write(f"**Phone:** {c.get('phone','—')}")
+                st.write(f"**Created At:** {c.get('created_at','—')}")
+
+                if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
+                    if delete_candidate_by_actor(c["candidate_id"], current_user["id"]):
+                        st.success("Candidate deleted successfully.")
+                        st.rerun()
+                    else:
+                        st.error("You do not have permission or deletion failed.")
 
     st.markdown("---")
     st.caption("Emails are validated before updates. Passwords are stored hashed via the existing DB layer.")

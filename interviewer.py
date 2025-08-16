@@ -1,8 +1,7 @@
-# interviewer.py
-import os
 import json
 import base64
 from datetime import datetime, date, time
+from typing import Dict, Any
 
 import streamlit as st
 from db_postgres import (
@@ -11,8 +10,9 @@ from db_postgres import (
     get_candidate_by_id,
     create_interview,
     get_interviews_for_candidate,
+    get_candidate_cv,         # Postgres CV storage
+    delete_candidate_record,  # ✅ new for deletion
 )
-from typing import Dict, Any
 
 
 # --------- helpers
@@ -22,7 +22,6 @@ def _status_badge(scheduled_at: str | datetime | None, result: str | None) -> st
     try:
         now = datetime.utcnow()
         if isinstance(scheduled_at, str):
-            # tolerate both "YYYY-mm-dd HH:MM:SS" and ISO timestamps
             try:
                 scheduled_at = datetime.fromisoformat(scheduled_at.replace("Z", ""))
             except Exception:
@@ -34,7 +33,7 @@ def _status_badge(scheduled_at: str | datetime | None, result: str | None) -> st
             return "✅ **done**"
         if is_future:
             return "🔴 **upcoming**"
-        return "🟢 **done**"  # past without explicit result
+        return "🟢 **done**"
     except Exception:
         return "ℹ️"
 
@@ -51,27 +50,19 @@ def _as_readable_form(form_data: Any) -> Dict[str, Any]:
     return form_data
 
 
-def _embed_pdf_from_local(path: str, height: int = 620):
-    """Inline-embed a local PDF (base64) + keep a download button."""
-    if not os.path.exists(path):
-        st.warning("Local CV file not found.")
-        return
-    with open(path, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode()
-    data_url = f"data:application/pdf;base64,{b64}"
-    st.components.v1.iframe(data_url, height=height)
-    st.download_button("Download CV", data, file_name=os.path.basename(path))
-
-
-def _embed_pdf_from_url(url: str, height: int = 620):
-    """Inline-embed Google Drive/HTTP link + provide a simple link."""
-    # Handle common Google Drive share links -> preview links
-    if "drive.google.com" in url and "view" in url:
-        # convert .../view?usp=sharing -> .../preview
-        url = url.split("/view")[0] + "/preview"
-    st.components.v1.iframe(url, height=height)
-    st.link_button("Open in new tab", url)
+def _embed_pdf_from_db(candidate_id: str, height: int = 620):
+    """Fetch candidate CV from Postgres and embed in the UI."""
+    try:
+        file_bytes, filename = get_candidate_cv(candidate_id)
+        if file_bytes:
+            b64 = base64.b64encode(file_bytes).decode()
+            data_url = f"data:application/pdf;base64,{b64}"
+            st.components.v1.iframe(data_url, height=height)
+            st.download_button("📥 Download CV", file_bytes, file_name=filename or f"{candidate_id}.pdf")
+        else:
+            st.info("No CV uploaded for this candidate.")
+    except Exception as e:
+        st.warning(f"Unable to preview CV: {e}")
 
 
 def _structured_notes_ui(prefix: str) -> Dict[str, str]:
@@ -119,7 +110,9 @@ def interviewer_view():
     st.header("Interviewer Dashboard")
 
     # Search
-    search_query = st.text_input("Search candidates (name / email / id / phone / skills)", placeholder="Start typing…")
+    search_query = st.text_input(
+        "Search candidates (name / email / id / phone / skills)", placeholder="Start typing…"
+    )
 
     # Fetch candidates
     try:
@@ -127,8 +120,7 @@ def interviewer_view():
             candidates = search_candidates_by_name_or_email(search_query.strip())
             st.info(f"Found {len(candidates)} candidate(s) for “{search_query}”.")
         else:
-            # fall back to most recent list
-            candidates = search_candidates_by_name_or_email("")  # implementation returns recent list
+            candidates = search_candidates_by_name_or_email("")  # recent list
             st.info(f"Showing {len(candidates)} most recent candidate(s).")
     except Exception as e:
         st.error(f"Error loading candidates: {e}")
@@ -154,25 +146,22 @@ def interviewer_view():
 
                 # CV preview/Download
                 st.markdown("#### Resume")
-                resume_link = cand.get("resume_link")
-                local_cv_dir = os.getenv("LOCAL_STORAGE_PATH") or "/app/CV"
-                local_path = os.path.join(local_cv_dir, f"{cid}.pdf")
+                _embed_pdf_from_db(cid)
 
-                try:
-                    if resume_link:
-                        _embed_pdf_from_url(resume_link)
-                    elif os.path.exists(local_path):
-                        _embed_pdf_from_local(local_path)
-                    else:
-                        st.info("No resume found.")
-                except Exception as e:
-                    st.warning(f"Unable to preview resume: {e}")
+                # 🔴 Candidate deletion (permission checked)
+                current_user = st.session_state.get("user")
+                if current_user and current_user.get("can_delete_records", False):
+                    if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
+                        if delete_candidate_record(cid):
+                            st.success("Candidate deleted successfully.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete candidate.")
 
             with right:
                 st.subheader("Application Data")
                 form_dict = _as_readable_form(cand.get("form_data"))
                 if form_dict:
-                    # Show as nice two-column label:value
                     keys = sorted(form_dict.keys())
                     for i in range(0, len(keys), 2):
                         c1, c2 = st.columns(2)

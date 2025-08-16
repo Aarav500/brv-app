@@ -10,10 +10,12 @@ from db_postgres import (
     get_conn,
     find_candidates_by_name,              # legacy helper (kept)
     update_candidate_form_data,
-    update_candidate_resume_link,
     create_candidate_in_db,
     get_all_candidates,
+    get_candidate_cv,                     # ✅ new for CVs
+    delete_candidate_record               # ✅ delete candidate support
 )
+from drive_and_cv_views import upload_cv_ui, download_cv_ui, delete_cv_ui  # ✅ reuse CV UI
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
@@ -25,16 +27,14 @@ def _valid_email(addr: str) -> bool:
 
 
 def _search_candidates_all_fields(q: str) -> List[Dict[str, Any]]:
-    """
-    Search across many columns. Falls back to name search if anything fails.
-    """
+    """Search across many columns. Falls back to name search if anything fails."""
     try:
         conn = get_conn()
         with conn, conn.cursor() as cur:
             like = f"%{q}%"
             cur.execute(
                 """
-                SELECT id, candidate_id, name, email, phone, created_at, resume_link, form_data
+                SELECT id, candidate_id, name, email, phone, created_at, form_data
                 FROM candidates
                 WHERE
                     candidate_id ILIKE %s OR
@@ -58,12 +58,10 @@ def _search_candidates_all_fields(q: str) -> List[Dict[str, Any]]:
                 "email": r[3],
                 "phone": r[4],
                 "created_at": r[5],
-                "resume_link": r[6],
-                "form_data": r[7],
+                "form_data": r[6],
             })
         return results
     except Exception:
-        # fallback to older util
         return find_candidates_by_name(q)
 
 
@@ -142,10 +140,22 @@ def receptionist_view():
             st.write(f"**Email:** {c.get('email','—')}")
             st.write(f"**Phone:** {c.get('phone','—')}")
             st.write(f"**Created:** {c.get('created_at','—')}")
-            if c.get("resume_link"):
-                st.write(f"**Resume:** {c['resume_link']}")
 
-            # show form data preview
+            # --- CV section ---
+            st.markdown("### Resume / CV")
+            try:
+                cv_file, cv_filename = get_candidate_cv(c["candidate_id"])
+                if cv_file:
+                    st.success(f"✅ CV found ({cv_filename or 'unnamed'})")
+                    download_cv_ui(c["candidate_id"])
+                    delete_cv_ui(c["candidate_id"])
+                else:
+                    st.info("No CV uploaded yet.")
+                    upload_cv_ui(c["candidate_id"])
+            except Exception as e:
+                st.error(f"Error fetching CV: {e}")
+
+            # --- Application data ---
             if c.get("form_data"):
                 try:
                     data = c["form_data"]
@@ -158,12 +168,12 @@ def receptionist_view():
                 except Exception:
                     pass
 
+            # --- Permissions & Quick Actions ---
             st.markdown("---")
             st.caption("Quick Actions")
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)  # add col4 for delete
             with col1:
-                # toggle permission by code only
                 if st.button("Allow Edit (by code only)", key=f"allow_{c['candidate_id']}"):
                     if _set_candidate_permission(c["candidate_id"], True):
                         st.success("Permission granted.")
@@ -176,10 +186,19 @@ def receptionist_view():
                     else:
                         st.error("Failed to update permission.")
             with col3:
-                # email candidate code
                 if st.button("Email Candidate Code", key=f"code_{c['candidate_id']}"):
                     ok, msg = _send_candidate_code(c.get("email",""), c["candidate_id"])
                     (st.success if ok else st.error)(msg)
+            with col4:
+                # 🔴 Delete Candidate (requires permission)
+                current_user = st.session_state.get("user")
+                if current_user and current_user.get("can_delete_records", False):
+                    if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
+                        if delete_candidate_record(c["candidate_id"]):
+                            st.success("Candidate deleted successfully.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete candidate.")
 
     st.divider()
 
@@ -209,7 +228,6 @@ def receptionist_view():
         st.caption("Edit by Candidate Code (name can be changed; permission required)")
         code = st.text_input("Candidate Code", key="edit_code")
         new_name = st.text_input("New Name (optional)", key="edit_name")
-        # simple JSON editor for any form fields
         form_json = st.text_area("Form JSON patch (optional)", placeholder='{"skills":"Excel, Email"}')
         if st.button("Apply Update"):
             try:
@@ -222,7 +240,6 @@ def receptionist_view():
                 if not updates:
                     st.info("Nothing to update.")
                 else:
-                    # Use existing helper to update form data (and name if supported)
                     ok = update_candidate_form_data(code, updates)
                     if ok:
                         st.success("Update applied.")
