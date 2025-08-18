@@ -1,4 +1,3 @@
-# ceo.py
 import re
 import secrets
 import string
@@ -8,9 +7,8 @@ import streamlit as st
 from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
-    get_all_candidates,
-    delete_candidate_by_actor, update_candidate_form_data,
-    get_cv_storage_usage
+    get_all_candidates, get_total_cv_storage_usage, get_candidate_statistics,
+    delete_candidate_by_actor
 )
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
@@ -93,6 +91,16 @@ def _users_older_than_30_days(users):
     return res
 
 
+def _human_bytes(n: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    v = float(n)
+    while v >= 1024 and i < len(units) - 1:
+        v /= 1024.0
+        i += 1
+    return f"{v:.2f} {units[i]}"
+
+
 def show_ceo_panel():
     st.header("CEO — Administration Panel")
 
@@ -102,39 +110,52 @@ def show_ceo_panel():
         return
 
     # -------------------------
+    # OVERVIEW: Storage + Stats
+    # -------------------------
+    with st.container():
+        colA, colB = st.columns(2)
+        with colA:
+            total_bytes = get_total_cv_storage_usage()
+            st.metric("Total CV Storage Used", _human_bytes(total_bytes))
+            if total_bytes:
+                limit_mb = 500
+                used_mb = total_bytes / (1024 * 1024)
+                pct = min(100, int((used_mb / limit_mb) * 100))
+                st.progress(pct)
+        with colB:
+            stats = get_candidate_statistics() or {}
+            st.metric("Total Candidates", stats.get("total_candidates", 0))
+            st.metric("With Resume", stats.get("candidates_with_resume", 0))
+            st.metric("Interviews", stats.get("total_interviews", 0))
+
+    st.markdown("---")
+
+    # -------------------------
     # USER PERMISSION MANAGEMENT
     # -------------------------
     st.subheader("User Permissions")
-    if current_user["role"] not in ("ceo", "admin"):
-        st.warning("You do not have permission to manage users.")
+    users = get_all_users_with_permissions()
+    if not users:
+        st.warning("No users found.")
     else:
-        users = get_all_users_with_permissions()
-        if not users:
-            st.warning("No users found.")
-        else:
-            for u in users:
-                with st.expander(f"{u['email']} ({u['role']})", expanded=False):
-                    st.write(f"**ID:** {u['id']}")
-                    st.write(f"**Created:** {u['created_at']}")
+        for u in users:
+            with st.expander(f"{u['email']} ({u['role']})", expanded=False):
+                st.write(f"**ID:** {u['id']} | **Created:** {u['created_at']}")
 
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        can_view = st.checkbox(
-                            "Can View CVs", value=u.get("can_view_cvs", False),
-                            key=f"view_{u['id']}"
-                        )
-                    with col2:
-                        can_delete = st.checkbox(
-                            "Can Delete Candidate Records", value=u.get("can_delete_records", False),
-                            key=f"delete_{u['id']}"
-                        )
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    can_view = st.checkbox("Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}")
+                with col2:
+                    can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
+                with col3:
+                    can_grant_delete = st.checkbox("Can Grant Delete Rights", value=u.get("can_grant_delete", False), key=f"grant_{u['id']}")
 
-                    if st.button("Update Permissions", key=f"perm_{u['id']}"):
-                        if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete):
-                            st.success("Permissions updated.")
-                            st.rerun()
-                        else:
-                            st.error("Failed to update permissions.")
+                if st.button("Update Permissions", key=f"perm_{u['id']}"):
+                    if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
+                        st.success("Permissions updated.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to update permissions.")
 
     st.markdown("---")
 
@@ -148,7 +169,6 @@ def show_ceo_panel():
             st.write(f"**ID:** {u['id']}")
             st.write(f"**Last password change:** {u.get('last_changed', '—')}")
 
-            # Update email
             new_email = st.text_input("New email", value=u["email"], key=f"email_{u['id']}")
             if st.button("Change Email", key=f"change_email_{u['id']}"):
                 if not _valid_email(new_email):
@@ -160,7 +180,6 @@ def show_ceo_panel():
                     else:
                         st.error("Failed to update email.")
 
-            # Reset password
             col1, col2 = st.columns(2)
             with col1:
                 new_pw = st.text_input("New password", type="password", key=f"pw_{u['id']}")
@@ -178,7 +197,6 @@ def show_ceo_panel():
                     else:
                         st.error("Failed to reset password.")
 
-            # Remove user
             st.markdown("---")
             if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
                 if _delete_user_by_id(u["id"]):
@@ -187,7 +205,6 @@ def show_ceo_panel():
                 else:
                     st.error("Failed to remove user.")
 
-    # 30-day forced reset helper
     st.markdown("---")
     st.subheader("Force Reset Passwords (older than 30 days)")
     stale = _users_older_than_30_days(users)
@@ -204,15 +221,10 @@ def show_ceo_panel():
                     fail += 1
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
 
-    # -------------------------
-    # CANDIDATE RECORD DELETION
-    # -------------------------
     st.markdown("---")
     st.subheader("Candidate Records")
 
-    if not current_user.get("can_delete_records", False) and current_user["role"] not in ("ceo", "admin"):
-        st.info("You do not have permission to delete candidate records.")
-    else:
+    if current_user.get("can_delete_records", False):
         candidates = get_all_candidates()
         if not candidates:
             st.caption("No candidates found.")
@@ -227,21 +239,9 @@ def show_ceo_panel():
                         st.success("Candidate deleted successfully.")
                         st.rerun()
                     else:
-                        st.error("You do not have permission or deletion failed.")
-
-    # -------------------------
-    # DATABASE STORAGE USAGE
-    # -------------------------
-    st.markdown("---")
-    st.subheader("Database Storage Usage")
-
-    usage = get_cv_storage_usage()
-    if not usage:
-        st.warning("Could not fetch storage info.")
+                        st.error("Deletion failed.")
     else:
-        used_mb = round(usage["used_bytes"] / (1024 * 1024), 2)
-        st.progress(min(100, int(usage["usage_percent"])))
-        st.write(f"Used: {used_mb} MB of {usage['limit_mb']} MB ({usage['usage_percent']}%)")
+        st.info("You don’t have permission to delete candidates.")
 
     st.markdown("---")
-    st.caption("Emails are validated before updates. Passwords are stored hashed via the existing DB layer.")
+    st.caption("Emails validated. Passwords stored hashed in DB.")

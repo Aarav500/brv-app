@@ -1,12 +1,14 @@
 import streamlit as st
+import os
+
 from db_postgres import init_db, get_user_by_email, verify_password, hash_password
-from utils import require_login, VALID_ROLES
+from utils import VALID_ROLES
 from admin import show_admin_panel
+from ceo import show_ceo_panel
 from receptionist import receptionist_view
 from candidate_view import candidate_form_view
 from interviewer import interviewer_view
-from forgot_password_ui import forgot_password_view  # <-- Added import
-import os
+from forgot_password_ui import forgot_password_view
 
 st.set_page_config(page_title="BRV Applicant Management", layout="wide")
 
@@ -14,6 +16,9 @@ st.set_page_config(page_title="BRV Applicant Management", layout="wide")
 init_db()
 
 
+# -------------------------
+# AUTH HELPERS
+# -------------------------
 def authenticate_user(email: str, password: str):
     """Authenticate user using PostgreSQL database"""
     user = get_user_by_email(email)
@@ -48,19 +53,29 @@ def create_user(email: str, password: str, role: str = "candidate"):
         return None, str(e)
 
 
+# -------------------------
+# LOGIN & REGISTER
+# -------------------------
 def login_form():
     st.sidebar.title("Login")
     email = st.sidebar.text_input("Email")
     password = st.sidebar.text_input("Password", type="password")
+
     if st.sidebar.button("Login"):
         user = authenticate_user(email.strip(), password.strip())
         if user:
-            st.session_state["user"] = {"id": user["id"], "email": user["email"], "role": user["role"]}
+            st.session_state["user"] = {
+                "id": user["id"],
+                "email": user["email"],
+                "role": user["role"],
+                # extra permissions if DB query returned them
+                "can_delete_records": user.get("can_delete_records", False),
+                "can_grant_delete": user.get("can_grant_delete", False),
+            }
             st.rerun()
         else:
             st.sidebar.error("Invalid credentials")
 
-    # Forgot Password button
     if st.sidebar.button("Forgot Password?"):
         st.session_state.page = "forgot_password"
         st.rerun()
@@ -71,6 +86,7 @@ def register_form():
     email = st.sidebar.text_input("New email", key="reg_email")
     password = st.sidebar.text_input("New password", type="password", key="reg_pass")
     role = st.sidebar.selectbox("Role", list(VALID_ROLES), index=5, key="reg_role")
+
     if st.sidebar.button("Register"):
         user, err = create_user(email.strip(), password.strip(), role)
         if err:
@@ -79,12 +95,9 @@ def register_form():
             st.sidebar.success("User created. Please login.")
 
 
-def logout():
-    if st.sidebar.button("Logout"):
-        st.session_state.pop("user", None)
-        st.rerun()
-
-
+# -------------------------
+# MAIN ROUTER
+# -------------------------
 def main():
     # Forgot password page routing
     if st.session_state.get("page") == "forgot_password":
@@ -106,8 +119,11 @@ def main():
         st.session_state.pop("user", None)
         st.rerun()
 
-    role = user["role"]
-    if role == "ceo" or role == "admin":
+    # Role-based routing
+    role = user["role"].lower()
+    if role == "ceo":
+        show_ceo_panel()
+    elif role == "admin":
         show_admin_panel()
     elif role == "receptionist":
         receptionist_view()
