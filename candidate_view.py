@@ -6,18 +6,18 @@ from db_postgres import (
     get_candidate_by_id,
     create_candidate_in_db,
     update_candidate_form_data,
-    update_candidate_resume_link,  # keep for backward compatibility
     set_candidate_permission,
     save_candidate_cv,
     get_candidate_cv,
     delete_candidate_cv,
 )
+from receptionist import _send_candidate_code   # ✅ for emailing Candidate ID
 
 
 def candidate_form_view():
     st.header("Candidate — Submit / Edit Application")
 
-    # Form fields
+    # Candidate ID entry
     candidate_id = st.text_input(
         "Candidate ID",
         placeholder="Leave blank to create new application",
@@ -28,7 +28,7 @@ def candidate_form_view():
     email = st.text_input("Email Address", placeholder="Enter your email address")
     phone = st.text_input("Phone Number", placeholder="Enter your phone number")
 
-    # Additional form fields
+    # Additional details
     st.subheader("Additional Information")
     skills = st.text_area("Skills", placeholder="List your key skills and technologies")
     experience = st.text_area("Experience", placeholder="Describe your work experience")
@@ -37,72 +37,48 @@ def candidate_form_view():
     # Resume upload
     st.subheader("Resume Upload")
     uploaded_file = st.file_uploader(
-        "Upload Resume/CV",
-        type=["pdf", "doc", "docx"],
-        help="PDF format recommended",
+        "Upload Resume/CV", type=["pdf", "doc", "docx"], help="PDF format recommended"
     )
 
-    # Check existing candidate if ID provided
-    existing_candidate = None
-    can_edit = False
-
+    # Existing candidate check
+    existing_candidate, can_edit = None, False
     if candidate_id.strip():
         try:
             existing_candidate = get_candidate_by_id(candidate_id.strip())
             if existing_candidate:
                 st.success("✅ Found existing application")
-
-                # Check edit permission
                 can_edit = existing_candidate.get("can_edit", False)
                 if can_edit:
                     st.info("🔓 You have permission to edit this application")
-
-                    # Show current values
-                    st.info(f"Current Name: {existing_candidate.get('name', 'Not set')}")
-                    st.info(f"Current Email: {existing_candidate.get('email', 'Not set')}")
-                    st.info(f"Current Phone: {existing_candidate.get('phone', 'Not set')}")
-
                 else:
-                    st.warning("🔒 Edit permission not granted. Contact the receptionist to enable editing.")
-
-                # Show existing resume if available
+                    st.warning("🔒 Edit permission not granted. Contact receptionist.")
                 if existing_candidate.get("cv_filename"):
                     st.markdown(f"**Current Resume:** {existing_candidate['cv_filename']}")
-
             else:
                 st.warning("❌ Candidate ID not found")
-
         except Exception as e:
             st.error(f"Error checking candidate ID: {str(e)}")
 
-    # Submit button
+    # Submit
     if st.button("Submit Application", type="primary"):
-        # Validation
         if not name.strip() or not email.strip():
             st.error("❌ Name and email are required fields")
             return
 
         try:
             if not candidate_id.strip():
-                # Create new candidate
+                # --- Create new candidate ---
                 new_candidate_id = str(uuid.uuid4())[:8].upper()
-
-                # Prepare form data
                 form_data = {
                     "skills": skills.strip(),
                     "experience": experience.strip(),
                     "education": education.strip(),
                     "allowed_edit": False,
                     "history": [
-                        {
-                            "action": "created",
-                            "at": datetime.utcnow().isoformat(),
-                            "source": "candidate_portal",
-                        }
+                        {"action": "created", "at": datetime.utcnow().isoformat()}
                     ],
                 }
 
-                # Create candidate in database
                 result = create_candidate_in_db(
                     candidate_id=new_candidate_id,
                     name=name.strip(),
@@ -113,27 +89,29 @@ def candidate_form_view():
                 )
 
                 if result:
-                    st.success(f"🎉 Application created successfully!")
+                    st.success("🎉 Application created successfully!")
                     st.info(f"📝 Your Candidate ID: **{new_candidate_id}**")
-                    st.info("💡 Save this ID to edit your application later")
                     candidate_id = new_candidate_id
+
+                    # ✅ Send Candidate ID by email
+                    ok, msg = _send_candidate_code(email.strip(), new_candidate_id)
+                    if ok:
+                        st.success("📧 Candidate ID emailed successfully.")
+                    else:
+                        st.warning(f"⚠️ Could not send email: {msg}")
                 else:
-                    st.error("❌ Failed to create application. Please try again.")
+                    st.error("❌ Failed to create application")
                     return
 
             else:
-                # Update existing candidate
+                # --- Update existing candidate ---
                 if not existing_candidate:
                     st.error("❌ Candidate ID not found")
                     return
-
                 if not can_edit:
                     st.error("❌ You don't have permission to edit this application")
                     return
 
-                st.info("✅ Candidate ID verified. Name can be updated.")
-
-                # Update form data
                 existing_form_data = existing_candidate.get("form_data") or {}
                 if isinstance(existing_form_data, str):
                     try:
@@ -142,18 +120,10 @@ def candidate_form_view():
                         existing_form_data = {}
 
                 existing_form_data.update(
-                    {
-                        "skills": skills.strip(),
-                        "experience": experience.strip(),
-                        "education": education.strip(),
-                    }
+                    {"skills": skills.strip(), "experience": experience.strip(), "education": education.strip()}
                 )
-
                 existing_form_data.setdefault("history", []).append(
-                    {
-                        "action": "updated_by_candidate",
-                        "at": datetime.utcnow().isoformat(),
-                    }
+                    {"action": "updated_by_candidate", "at": datetime.utcnow().isoformat()}
                 )
 
                 success = update_candidate_form_data(candidate_id.strip(), existing_form_data)
@@ -165,23 +135,24 @@ def candidate_form_view():
                     st.error("❌ Failed to update application")
                     return
 
-            # Handle resume upload
+            # --- Resume upload ---
             if uploaded_file is not None:
-                file_bytes = uploaded_file.read()
-                filename = uploaded_file.name
-                st.info("📤 Uploading resume...")
-
-                ok = save_candidate_cv(candidate_id, file_bytes, filename)
-                if ok:
-                    st.success("📄 Resume uploaded successfully!")
-                    st.info(f"Saved as {filename}")
+                if not candidate_id:
+                    st.error("❌ Cannot upload resume until candidate is created.")
                 else:
-                    st.error("❌ Failed to upload resume")
+                    file_bytes = uploaded_file.read()
+                    filename = uploaded_file.name
+                    ok = save_candidate_cv(candidate_id, file_bytes, filename)
+                    if ok:
+                        st.success("📄 Resume uploaded successfully!")
+                        st.info(f"Saved as {filename}")
+                    else:
+                        st.error("❌ Failed to upload resume")
 
         except Exception as e:
             st.error(f"❌ Error submitting application: {str(e)}")
 
-    # Resume management section (if candidate exists)
+    # Resume management
     if candidate_id.strip():
         file_bytes, filename = get_candidate_cv(candidate_id.strip())
         if file_bytes:
