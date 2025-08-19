@@ -50,17 +50,41 @@ def _as_readable_form(form_data: Any) -> Dict[str, Any]:
     return form_data
 
 
-def _embed_pdf_from_db(candidate_id: str, height: int = 620):
-    """Fetch candidate CV from Postgres and embed in the UI."""
+def _embed_cv_from_db(candidate_id: str, height: int = 620):
+    """Fetch candidate CV from Postgres and embed preview/download depending on file type."""
     try:
         file_bytes, filename = get_candidate_cv(candidate_id)
-        if file_bytes:
+        if not file_bytes:
+            st.info("No CV uploaded for this candidate.")
+            return
+
+        if not filename:
+            filename = f"{candidate_id}.cv"
+
+        ext = filename.split(".")[-1].lower()
+
+        if ext == "pdf":
+            # Embed PDF
             b64 = base64.b64encode(file_bytes).decode()
             data_url = f"data:application/pdf;base64,{b64}"
             st.components.v1.iframe(data_url, height=height)
-            st.download_button("📥 Download CV", file_bytes, file_name=filename or f"{candidate_id}.pdf")
+        elif ext in ["png", "jpg", "jpeg"]:
+            # Show image
+            st.image(file_bytes, caption=filename, use_container_width=True)
+        elif ext in ["txt", "md"]:
+            # Show text
+            try:
+                text = file_bytes.decode("utf-8")
+                st.text_area("📄 Text Preview", text, height=300)
+            except Exception:
+                st.warning("Could not decode text file.")
         else:
-            st.info("No CV uploaded for this candidate.")
+            # Fallback for other files
+            st.warning(f"Preview not supported for {ext.upper()} files. Please download.")
+
+        # Always provide download
+        st.download_button("📥 Download CV", file_bytes, file_name=filename)
+
     except Exception as e:
         st.warning(f"Unable to preview CV: {e}")
 
@@ -146,7 +170,7 @@ def interviewer_view():
 
                 # CV preview/Download
                 st.markdown("#### Resume")
-                _embed_pdf_from_db(cid)
+                _embed_cv_from_db(cid)
 
                 # 🔴 Candidate deletion (permission checked)
                 current_user = st.session_state.get("user")

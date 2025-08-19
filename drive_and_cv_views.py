@@ -1,3 +1,4 @@
+import base64
 import streamlit as st
 from db_postgres import (
     save_candidate_cv,
@@ -12,7 +13,9 @@ def upload_cv_ui(candidate_id: str):
     st.subheader("📤 Upload Candidate CV")
 
     uploaded_file = st.file_uploader(
-        "Upload CV (PDF/DOCX)", type=["pdf", "doc", "docx"], key=f"cv_{candidate_id}"
+        "Upload CV (any common type: PDF, DOCX, TXT, PNG, JPG, etc.)",
+        type=None,  # allow all file types
+        key=f"cv_{candidate_id}",
     )
     if uploaded_file is not None:
         file_bytes = uploaded_file.read()
@@ -25,10 +28,38 @@ def upload_cv_ui(candidate_id: str):
             st.error("❌ Failed to upload CV. Please try again.")
 
 
+def preview_cv_ui(candidate_id: str, height: int = 600):
+    """Preview candidate CV depending on file type + always allow download"""
+    file_bytes, filename = get_candidate_cv(candidate_id)
+    if not file_bytes:
+        st.info("No CV uploaded for this candidate.")
+        return
+
+    if not filename:
+        filename = f"{candidate_id}.cv"
+
+    ext = filename.split(".")[-1].lower()
+
+    if ext == "pdf":
+        b64 = base64.b64encode(file_bytes).decode()
+        data_url = f"data:application/pdf;base64,{b64}"
+        st.components.v1.iframe(data_url, height=height)
+    elif ext in ["png", "jpg", "jpeg"]:
+        st.image(file_bytes, caption=filename, use_container_width=True)
+    elif ext in ["txt", "md"]:
+        try:
+            text = file_bytes.decode("utf-8")
+            st.text_area("📄 Text Preview", text, height=300)
+        except Exception:
+            st.warning("Could not decode text file.")
+    else:
+        st.warning(f"Preview not supported for {ext.upper()} files. Please download.")
+
+    st.download_button("📥 Download CV", file_bytes, file_name=filename)
+
+
 def download_cv_ui(candidate_id: str):
     """Streamlit UI for downloading CV from PostgreSQL"""
-    st.subheader("📥 Download Candidate CV")
-
     file_bytes, filename = get_candidate_cv(candidate_id)
     if file_bytes:
         st.download_button(
