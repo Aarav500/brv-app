@@ -10,6 +10,7 @@ from db_postgres import (
     save_candidate_cv,
     get_candidate_cv,
     delete_candidate_cv,
+    get_conn,
 )
 from receptionist import _send_candidate_code   # ✅ for emailing Candidate ID
 
@@ -24,6 +25,7 @@ def candidate_form_view():
         help="If you have an existing Candidate ID, enter it here to edit your application",
     )
 
+    # Basic info
     name = st.text_input("Full Name", placeholder="Enter your full name")
     email = st.text_input("Email Address", placeholder="Enter your email address")
     phone = st.text_input("Phone Number", placeholder="Enter your phone number")
@@ -61,47 +63,66 @@ def candidate_form_view():
 
     # Submit
     if st.button("Submit Application", type="primary"):
-        if not name.strip() or not email.strip():
-            st.error("❌ Name and email are required fields")
+        # 🔴 Validate mandatory fields
+        if not all([
+            name.strip(),
+            email.strip(),
+            phone.strip(),
+            skills.strip(),
+            experience.strip(),
+            education.strip(),
+        ]):
+            st.error("❌ All fields are mandatory (Name, Email, Phone, Skills, Experience, Education).")
             return
 
         try:
             if not candidate_id.strip():
-                # --- Create new candidate ---
-                new_candidate_id = str(uuid.uuid4())[:8].upper()
-                form_data = {
-                    "skills": skills.strip(),
-                    "experience": experience.strip(),
-                    "education": education.strip(),
-                    "allowed_edit": False,
-                    "history": [
-                        {"action": "created", "at": datetime.utcnow().isoformat()}
-                    ],
-                }
+                # --- Prevent duplicates by checking email ---
+                conn = get_conn()
+                with conn, conn.cursor() as cur:
+                    cur.execute("SELECT candidate_id FROM candidates WHERE email = %s", (email.strip(),))
+                    row = cur.fetchone()
+                conn.close()
 
-                result = create_candidate_in_db(
-                    candidate_id=new_candidate_id,
-                    name=name.strip(),
-                    email=email.strip(),
-                    phone=phone.strip(),
-                    form_data=form_data,
-                    created_by="candidate_portal",
-                )
-
-                if result:
-                    st.success("🎉 Application created successfully!")
-                    st.info(f"📝 Your Candidate ID: **{new_candidate_id}**")
-                    candidate_id = new_candidate_id
-
-                    # ✅ Send Candidate ID by email
-                    ok, msg = _send_candidate_code(email.strip(), new_candidate_id)
-                    if ok:
-                        st.success("📧 Candidate ID emailed successfully.")
-                    else:
-                        st.warning(f"⚠️ Could not send email: {msg}")
+                if row:
+                    candidate_id = row[0]
+                    st.info(f"⚠️ Candidate already exists. Using existing ID: {candidate_id}")
                 else:
-                    st.error("❌ Failed to create application")
-                    return
+                    # --- Create new candidate ---
+                    new_candidate_id = str(uuid.uuid4())[:8].upper()
+                    form_data = {
+                        "skills": skills.strip(),
+                        "experience": experience.strip(),
+                        "education": education.strip(),
+                        "allowed_edit": False,
+                        "history": [
+                            {"action": "created", "at": datetime.utcnow().isoformat()}
+                        ],
+                    }
+
+                    result = create_candidate_in_db(
+                        candidate_id=new_candidate_id,
+                        name=name.strip(),
+                        email=email.strip(),
+                        phone=phone.strip(),
+                        form_data=form_data,
+                        created_by="candidate_portal",
+                    )
+
+                    if result:
+                        st.success("🎉 Application created successfully!")
+                        st.info(f"📝 Your Candidate ID: **{new_candidate_id}**")
+                        candidate_id = new_candidate_id
+
+                        # ✅ Send Candidate ID by email
+                        ok, msg = _send_candidate_code(email.strip(), new_candidate_id)
+                        if ok:
+                            st.success("📧 Candidate ID emailed successfully.")
+                        else:
+                            st.warning(f"⚠️ Could not send email: {msg}")
+                    else:
+                        st.error("❌ Failed to create application")
+                        return
 
             else:
                 # --- Update existing candidate ---
@@ -120,7 +141,11 @@ def candidate_form_view():
                         existing_form_data = {}
 
                 existing_form_data.update(
-                    {"skills": skills.strip(), "experience": experience.strip(), "education": education.strip()}
+                    {
+                        "skills": skills.strip(),
+                        "experience": experience.strip(),
+                        "education": education.strip(),
+                    }
                 )
                 existing_form_data.setdefault("history", []).append(
                     {"action": "updated_by_candidate", "at": datetime.utcnow().isoformat()}
@@ -135,19 +160,16 @@ def candidate_form_view():
                     st.error("❌ Failed to update application")
                     return
 
-            # --- Resume upload ---
+            # --- Resume upload (AFTER candidate exists) ---
             if uploaded_file is not None:
-                if not candidate_id:
-                    st.error("❌ Cannot upload resume until candidate is created.")
+                file_bytes = uploaded_file.read()
+                filename = uploaded_file.name
+                ok = save_candidate_cv(candidate_id, file_bytes, filename)
+                if ok:
+                    st.success("📄 Resume uploaded successfully!")
+                    st.info(f"Saved as {filename}")
                 else:
-                    file_bytes = uploaded_file.read()
-                    filename = uploaded_file.name
-                    ok = save_candidate_cv(candidate_id, file_bytes, filename)
-                    if ok:
-                        st.success("📄 Resume uploaded successfully!")
-                        st.info(f"Saved as {filename}")
-                    else:
-                        st.error("❌ Failed to upload resume")
+                    st.error("❌ Failed to upload resume")
 
         except Exception as e:
             st.error(f"❌ Error submitting application: {str(e)}")
