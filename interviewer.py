@@ -1,5 +1,5 @@
+# interviewer.py
 import json
-import base64
 from datetime import datetime, date, time
 from typing import Dict, Any
 
@@ -7,12 +7,13 @@ import streamlit as st
 from db_postgres import (
     get_all_candidates,
     search_candidates_by_name_or_email,
-    get_candidate_by_id,
-    create_interview,
     get_interviews_for_candidate,
-    get_candidate_cv,         # Postgres CV storage
-    delete_candidate_by_actor,  # ✅ new for deletion
+    create_interview,
+    get_candidate_cv,  # still used
+    delete_candidate_by_actor,
 )
+from drive_and_cv_views import preview_cv_ui  # ✅ new reusable CV UI
+
 
 # --------- helpers
 
@@ -49,84 +50,66 @@ def _as_readable_form(form_data: Any) -> Dict[str, Any]:
     return form_data
 
 
-def _show_history(form_dict: dict):
-    """Show candidate history in a clean UI instead of raw JSON."""
-    history = form_dict.get("history", [])
-    if history and isinstance(history, list):
-        st.markdown("### 📜 Application History")
-        for h in history:
-            at = h.get("at", "—")
-            action = h.get("action", "—")
-            st.write(f"- **{action.title()}** on {at}")
-
-
-def _embed_cv_from_db(candidate_id: str, height: int = 620):
-    """Embed or offer download for candidate CV depending on file type."""
-    try:
-        file_bytes, filename = get_candidate_cv(candidate_id)
-        if not file_bytes:
-            st.info("No CV uploaded for this candidate.")
-            return
-
-        # Always allow download
-        st.download_button("📥 Download CV", file_bytes, file_name=filename or f"{candidate_id}.cv")
-
-        # Inline preview only for PDF
-        if filename and filename.lower().endswith(".pdf"):
-            b64 = base64.b64encode(file_bytes).decode()
-            data_url = f"data:application/pdf;base64,{b64}"
-            st.components.v1.html(
-                f"<iframe src='{data_url}' width='100%' height='{height}'></iframe>",
-                height=height+10,
-            )
-        else:
-            st.info(f"Preview not supported for `{filename.split('.')[-1].upper()}`. Please download instead.")
-    except Exception as e:
-        st.warning(f"Unable to preview CV: {e}")
-
-
 def _structured_notes_ui(prefix: str) -> Dict[str, str]:
-    """14 categorized notes fields."""
-    st.markdown("### 📝 Interview Questions & Notes")
-    cols = st.columns(2)
-    with cols[0]:
-        age = st.text_input("1. Age", key=f"{prefix}_age")
-        english = st.text_area("2. English understanding", key=f"{prefix}_english")
-        commitment = st.text_area("3. Commitment", key=f"{prefix}_commitment")
-        festivals = st.text_area("4. No leaves for festivals", key=f"{prefix}_festivals")
-        attitude = st.text_area("5. Attitude", key=f"{prefix}_attitude")
-        project = st.text_input("6. Suitable for which project", key=f"{prefix}_project")
-        education = st.text_input("7. Education", key=f"{prefix}_education")
-    with cols[1]:
-        family = st.text_area("8. Family background", key=f"{prefix}_family")
-        experience = st.text_area("9. Past work experience & salary", key=f"{prefix}_experience")
-        own_pc = st.selectbox("10. Own PC or laptop", ["", "yes", "no"], key=f"{prefix}_ownpc")
-        cont_night = st.selectbox("11. Continuous night shift", ["", "ok", "not ok"], key=f"{prefix}_contnight")
-        rot_night = st.selectbox("12. Rotational night shift", ["", "ok", "not ok"], key=f"{prefix}_rotnight")
-        profile_fit = st.text_area("13. Profile fit", key=f"{prefix}_profilefit")
-        grasping = st.text_area("14. Grasping", key=f"{prefix}_grasping")
+    """Organized Interview Questions UI."""
+    notes = {}
 
-    return {
-        "age": age,
-        "english": english,
-        "commitment": commitment,
-        "no_festival_leave": festivals,
-        "attitude": attitude,
-        "project_fit": project,
-        "education": education,
-        "family_background": family,
-        "experience_salary": experience,
-        "own_pc": own_pc,
-        "continuous_night": cont_night,
-        "rotational_night": rot_night,
-        "profile_fit": profile_fit,
-        "grasping": grasping,
-    }
+    st.markdown("### Interview Questions & Notes")
+
+    # --- Personal Info ---
+    with st.expander("👤 Personal Info", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            notes["age"] = st.text_input("Age", key=f"{prefix}_age")
+            notes["education"] = st.text_input("Education", key=f"{prefix}_education")
+        with col2:
+            notes["family_background"] = st.text_area("Family background", key=f"{prefix}_family")
+
+    # --- Skills & Understanding ---
+    with st.expander("💡 Skills & Understanding", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            notes["english"] = st.text_area("English understanding", key=f"{prefix}_english")
+            notes["experience_salary"] = st.text_area("Past work experience & salary", key=f"{prefix}_experience")
+        with col2:
+            notes["attitude"] = st.text_area("Attitude", key=f"{prefix}_attitude")
+            notes["commitment"] = st.text_area("Commitment", key=f"{prefix}_commitment")
+
+    # --- Work Conditions ---
+    with st.expander("🕒 Work Conditions", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            notes["no_festival_leave"] = st.selectbox(
+                "No leaves for festivals", ["", "Yes", "No"], key=f"{prefix}_festivals"
+            )
+            notes["own_pc"] = st.selectbox(
+                "Own PC or laptop", ["", "Yes", "No"], key=f"{prefix}_ownpc"
+            )
+        with col2:
+            notes["continuous_night"] = st.selectbox(
+                "Continuous night shift", ["", "Ok", "Not ok"], key=f"{prefix}_contnight"
+            )
+            notes["rotational_night"] = st.selectbox(
+                "Rotational night shift", ["", "Ok", "Not ok"], key=f"{prefix}_rotnight"
+            )
+
+    # --- Fit & Assignment ---
+    with st.expander("✅ Fit & Assignment", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            notes["profile_fit"] = st.text_area("Profile fit", key=f"{prefix}_profilefit")
+        with col2:
+            notes["project_fit"] = st.text_area("Suitable for which project", key=f"{prefix}_project")
+        notes["grasping"] = st.text_area("Grasping", key=f"{prefix}_grasping")
+        notes["other_notes"] = st.text_area("Other Notes", key=f"{prefix}_othernotes")
+
+    return notes
+
 
 # --------- main view
 
 def interviewer_view():
-    st.header("🎤 Interviewer Dashboard")
+    st.header("📝 Interviewer Dashboard")
 
     # Search
     search_query = st.text_input(
@@ -153,22 +136,21 @@ def interviewer_view():
         cid = cand.get("candidate_id") or cand.get("id") or ""
         cname = cand.get("name") or cand.get("candidate_name") or "Candidate"
         with st.expander(f"📋 {cname} — {cid}", expanded=False):
-            # Layout
+            # Layout: left = basics/resume, right = app & interviews
             left, right = st.columns([1, 1])
 
-            # ---------- LEFT PANEL ----------
             with left:
-                st.subheader("👤 Basic Info")
+                st.subheader("Basic Info")
                 st.write(f"**Name:** {cname}")
                 st.write(f"**Email:** {cand.get('email', cand.get('candidate_email', '—'))}")
                 st.write(f"**Phone:** {cand.get('phone', '—')}")
                 st.write(f"**Created:** {cand.get('created_at', '—')}")
 
                 # CV preview/Download
-                st.markdown("#### 📄 Resume")
-                _embed_cv_from_db(cid)
+                st.markdown("#### Resume")
+                preview_cv_ui(cid)
 
-                # Candidate deletion (if allowed)
+                # Candidate deletion
                 current_user = st.session_state.get("user")
                 if current_user and current_user.get("can_delete_records", False):
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
@@ -179,14 +161,11 @@ def interviewer_view():
                         else:
                             st.error("Failed to delete candidate.")
 
-            # ---------- RIGHT PANEL ----------
             with right:
-                st.subheader("📝 Application Data")
+                st.subheader("Application Data")
                 form_dict = _as_readable_form(cand.get("form_data"))
-
-                # Show details in grid
                 if form_dict:
-                    keys = sorted([k for k in form_dict.keys() if k != "history"])
+                    keys = sorted(form_dict.keys())
                     for i in range(0, len(keys), 2):
                         c1, c2 = st.columns(2)
                         k1 = keys[i]
@@ -201,11 +180,8 @@ def interviewer_view():
                                 st.caption(k2.replace("_", " ").title())
                                 st.write(v2 if v2 not in (None, "") else "—")
 
-                # Show history (clean)
-                _show_history(form_dict)
-
                 st.markdown("---")
-                st.subheader("📆 Interviews")
+                st.subheader("Interviews")
 
                 # Existing interviews
                 try:
@@ -225,7 +201,7 @@ def interviewer_view():
                             if row.get("notes"):
                                 try:
                                     j = json.loads(row["notes"])
-                                    with st.expander("📝 Notes", expanded=False):
+                                    with st.expander("Notes", expanded=False):
                                         for k, v in j.items():
                                             st.write(f"- **{k.replace('_',' ').title()}**: {v}")
                                 except Exception:
@@ -250,7 +226,7 @@ def interviewer_view():
                     )
                     structured = _structured_notes_ui(prefix=f"notes_{cid}")
 
-                if st.button("💾 Save Interview", key=f"save_{cid}"):
+                if st.button("Save Interview", key=f"save_{cid}"):
                     try:
                         scheduled_dt = datetime.combine(d, t)
                         notes_json = json.dumps(structured, ensure_ascii=False)
@@ -273,7 +249,7 @@ def interviewer_view():
     st.divider()
     cols = st.columns(3)
     with cols[0]:
-        if st.button("🔄 Refresh"):
+        if st.button("Refresh"):
             st.rerun()
     with cols[1]:
         total = 0
