@@ -8,9 +8,11 @@ import matplotlib.pyplot as plt
 
 from db_postgres import (
     get_conn, update_user_password,
-    get_all_users_with_permissions, set_user_permission,
-    get_all_candidates, get_total_cv_storage_usage, get_candidate_statistics,
+    set_user_permission, get_all_users_with_permissions,
+    get_all_candidates, get_total_cv_storage_usage,
+    get_candidate_statistics, get_candidate_cv,
 )
+from drive_and_cv_views import preview_cv_ui, download_cv_ui
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
@@ -25,6 +27,7 @@ def _random_password(n: int = 12) -> str:
 
 
 def _fetch_users():
+    """Fetch all users for management (not just those with permissions)."""
     conn = get_conn()
     with conn, conn.cursor() as cur:
         cur.execute("""
@@ -36,16 +39,10 @@ def _fetch_users():
         """)
         rows = cur.fetchall()
     conn.close()
-    users = []
-    for r in rows:
-        users.append({
-            "id": r[0],
-            "email": r[1],
-            "role": r[2],
-            "last_changed": r[3],
-            "created_at": r[4],
-        })
-    return users
+    return [
+        {"id": r[0], "email": r[1], "role": r[2], "last_changed": r[3], "created_at": r[4]}
+        for r in rows
+    ]
 
 
 def _delete_user_by_id(uid: int) -> bool:
@@ -94,8 +91,7 @@ def _users_older_than_30_days(users):
 
 def _human_bytes(n: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    v = float(n)
+    i, v = 0, float(n)
     while v >= 1024 and i < len(units) - 1:
         v /= 1024.0
         i += 1
@@ -103,7 +99,7 @@ def _human_bytes(n: int) -> str:
 
 
 def _plot_candidate_charts(stats: dict):
-    """Generate simple pie/bar charts for CEO overview"""
+    """Generate pie, bar, and timeline charts for advanced statistics."""
     if not stats:
         st.info("No statistics available to visualize.")
         return
@@ -117,7 +113,7 @@ def _plot_candidate_charts(stats: dict):
     ax1.set_title("Resume Uploads")
     st.pyplot(fig1)
 
-    # Bar: Interview Results (if breakdown available)
+    # Bar: Interview Results
     interview_breakdown = stats.get("interview_results", {})
     if interview_breakdown:
         fig2, ax2 = plt.subplots()
@@ -125,6 +121,27 @@ def _plot_candidate_charts(stats: dict):
         ax2.set_title("Interview Outcomes")
         ax2.set_ylabel("Count")
         st.pyplot(fig2)
+
+    # Bar: Candidates per role
+    role_counts = stats.get("candidates_per_role", {})
+    if role_counts:
+        fig3, ax3 = plt.subplots()
+        ax3.bar(role_counts.keys(), role_counts.values())
+        ax3.set_title("Candidates per Role")
+        st.pyplot(fig3)
+
+    # Time series: Candidates created by month
+    created_timeline = stats.get("candidates_by_month", {})
+    if created_timeline:
+        months = list(created_timeline.keys())
+        counts = list(created_timeline.values())
+        fig4, ax4 = plt.subplots()
+        ax4.plot(months, counts, marker="o")
+        ax4.set_title("Candidates Over Time")
+        ax4.set_xlabel("Month")
+        ax4.set_ylabel("New Candidates")
+        plt.xticks(rotation=45)
+        st.pyplot(fig4)
 
 
 def show_ceo_panel():
@@ -136,7 +153,7 @@ def show_ceo_panel():
         return
 
     # -------------------------
-    # STORAGE + STATISTICS
+    # STORAGE + STATS
     # -------------------------
     st.subheader("System Overview")
     colA, colB = st.columns(2)
@@ -159,7 +176,7 @@ def show_ceo_panel():
     st.subheader("📊 Advanced Candidate Statistics")
     if stats:
         _plot_candidate_charts(stats)
-        st.json(stats)  # Pretty print everything for transparency
+        st.json(stats)
     else:
         st.caption("No stats available.")
 
@@ -168,7 +185,8 @@ def show_ceo_panel():
     # -------------------------
     st.markdown("---")
     st.subheader("User Permissions")
-    users = get_all_users_with_permissions()
+    # 🔥 Fix: fetch all users here
+    users = _fetch_users()
     if not users:
         st.warning("No users found.")
     else:
@@ -262,10 +280,10 @@ def show_ceo_panel():
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
 
     # -------------------------
-    # CANDIDATE RECORDS (Read-Only)
+    # CANDIDATE RECORDS + CV PREVIEW
     # -------------------------
     st.markdown("---")
-    st.subheader("Candidate Records (Read-Only)")
+    st.subheader("Candidate Records")
     candidates = get_all_candidates()
     if not candidates:
         st.caption("No candidates found.")
@@ -278,5 +296,13 @@ def show_ceo_panel():
                 if c.get("form_data"):
                     st.json(c["form_data"])
 
+                # CV section
+                st.markdown("#### Candidate CV")
+                try:
+                    preview_cv_ui(c["candidate_id"])
+                    download_cv_ui(c["candidate_id"])
+                except Exception as e:
+                    st.error(f"Error fetching CV: {e}")
+
     st.markdown("---")
-    st.caption("CEO can now manage all permissions including delete rights.")
+    st.caption("CEO can now view CVs, manage all permissions (including delete rights), and see advanced statistics.")
