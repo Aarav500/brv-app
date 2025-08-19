@@ -5,33 +5,36 @@ import string
 from datetime import datetime, timedelta
 import streamlit as st
 import matplotlib.pyplot as plt
+import json
 
 from db_postgres import (
     get_conn, update_user_password,
-    set_user_permission, get_all_users_with_permissions,
+    set_user_permission,
     get_all_candidates, get_total_cv_storage_usage,
     get_candidate_statistics, get_candidate_cv,
+    get_interviews_for_candidate,
 )
 from drive_and_cv_views import preview_cv_ui, download_cv_ui
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
 
+# ---------------- HELPER FUNCTIONS ---------------- #
+
 def _valid_email(addr: str) -> bool:
     return bool(EMAIL_RE.match(addr or ""))
-
 
 def _random_password(n: int = 12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%?"
     return "".join(secrets.choice(chars) for _ in range(n))
 
-
 def _fetch_users():
-    """Fetch all users for management (not just those with permissions)."""
+    """Fetch all users for management (permissions + accounts)."""
     conn = get_conn()
     with conn, conn.cursor() as cur:
         cur.execute("""
             SELECT id, email, role,
+                   can_view_cvs, can_delete_records, can_grant_delete,
                    COALESCE(updated_at, created_at) AS last_changed,
                    created_at
             FROM users
@@ -40,10 +43,13 @@ def _fetch_users():
         rows = cur.fetchall()
     conn.close()
     return [
-        {"id": r[0], "email": r[1], "role": r[2], "last_changed": r[3], "created_at": r[4]}
+        {
+            "id": r[0], "email": r[1], "role": r[2],
+            "can_view_cvs": r[3], "can_delete_records": r[4], "can_grant_delete": r[5],
+            "last_changed": r[6], "created_at": r[7]
+        }
         for r in rows
     ]
-
 
 def _delete_user_by_id(uid: int) -> bool:
     conn = get_conn()
@@ -53,7 +59,6 @@ def _delete_user_by_id(uid: int) -> bool:
     conn.close()
     return ok
 
-
 def _update_email(uid: int, new_email: str) -> bool:
     conn = get_conn()
     with conn, conn.cursor() as cur:
@@ -61,7 +66,6 @@ def _update_email(uid: int, new_email: str) -> bool:
         ok = cur.rowcount > 0
     conn.close()
     return ok
-
 
 def _reset_password(uid: int, new_password: str) -> bool:
     conn = get_conn()
@@ -72,7 +76,6 @@ def _reset_password(uid: int, new_password: str) -> bool:
             return False
         email = row[0]
     return update_user_password(email, new_password)
-
 
 def _users_older_than_30_days(users):
     cutoff = datetime.utcnow() - timedelta(days=30)
@@ -88,7 +91,6 @@ def _users_older_than_30_days(users):
             res.append(u)
     return res
 
-
 def _human_bytes(n: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     i, v = 0, float(n)
@@ -96,7 +98,6 @@ def _human_bytes(n: int) -> str:
         v /= 1024.0
         i += 1
     return f"{v:.2f} {units[i]}"
-
 
 def _plot_candidate_charts(stats: dict):
     """Generate pie, bar, and timeline charts for advanced statistics."""
@@ -113,7 +114,7 @@ def _plot_candidate_charts(stats: dict):
     ax1.set_title("Resume Uploads")
     st.pyplot(fig1)
 
-    # Bar: Interview Results
+    # Bar: Interview Results (pass/fail/etc)
     interview_breakdown = stats.get("interview_results", {})
     if interview_breakdown:
         fig2, ax2 = plt.subplots()
@@ -144,6 +145,8 @@ def _plot_candidate_charts(stats: dict):
         st.pyplot(fig4)
 
 
+# ---------------- MAIN CEO PANEL ---------------- #
+
 def show_ceo_panel():
     st.header("CEO — Administration Panel")
 
@@ -152,9 +155,7 @@ def show_ceo_panel():
         st.error("No active user session. Please log in.")
         return
 
-    # -------------------------
-    # STORAGE + STATS
-    # -------------------------
+    # --- Storage + Stats
     st.subheader("System Overview")
     colA, colB = st.columns(2)
     with colA:
@@ -165,7 +166,6 @@ def show_ceo_panel():
             used_mb = total_bytes / (1024 * 1024)
             pct = min(100, int((used_mb / limit_mb) * 100))
             st.progress(pct)
-
     with colB:
         stats = get_candidate_statistics() or {}
         st.metric("Total Candidates", stats.get("total_candidates", 0))
@@ -180,60 +180,42 @@ def show_ceo_panel():
     else:
         st.caption("No stats available.")
 
-    # -------------------------
-    # USER PERMISSIONS
-    # -------------------------
+    # --- User Permissions
     st.markdown("---")
     st.subheader("User Permissions")
-    # 🔥 Fix: fetch all users here
-    users = _fetch_users()
+    users = _fetch_users()  # ✅ fix mismatch
     if not users:
         st.warning("No users found.")
     else:
         for u in users:
             with st.expander(f"{u['email']} ({u['role']})", expanded=False):
                 st.write(f"**ID:** {u['id']} | **Created:** {u['created_at']}")
-
-                can_view = st.checkbox(
-                    "Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}"
-                )
-                can_delete = st.checkbox(
-                    "Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}"
-                )
-                can_grant_delete = st.checkbox(
-                    "Can Grant Delete Rights", value=u.get("can_grant_delete", False), key=f"grant_{u['id']}"
-                )
+                can_view = st.checkbox("Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}")
+                can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
+                can_grant_delete = st.checkbox("Can Grant Delete Rights", value=u.get("can_grant_delete", False), key=f"grant_{u['id']}")
 
                 if st.button("Update Permissions", key=f"perm_{u['id']}"):
-                    if set_user_permission(
-                        u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete
-                    ):
+                    if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
                         st.success("Permissions updated.")
                         st.rerun()
                     else:
                         st.error("Failed to update permissions.")
 
-    # -------------------------
-    # USER MANAGEMENT
-    # -------------------------
+    # --- User Management
     st.markdown("---")
     st.subheader("All Users")
-    users = _fetch_users()
     for u in users:
         with st.expander(f"{u['email']}  ({u['role']})", expanded=False):
-            st.write(f"**ID:** {u['id']}")
-            st.write(f"**Last password change:** {u.get('last_changed', '—')}")
-
+            st.write(f"**ID:** {u['id']} | **Last password change:** {u.get('last_changed', '—')}")
             new_email = st.text_input("New email", value=u["email"], key=f"email_{u['id']}")
             if st.button("Change Email", key=f"change_email_{u['id']}"):
                 if not _valid_email(new_email):
                     st.error("Invalid email format.")
+                elif _update_email(u["id"], new_email):
+                    st.success("Email updated.")
+                    st.rerun()
                 else:
-                    if _update_email(u["id"], new_email):
-                        st.success("Email updated.")
-                        st.rerun()
-                    else:
-                        st.error("Failed to update email.")
+                    st.error("Failed to update email.")
 
             col1, col2 = st.columns(2)
             with col1:
@@ -244,13 +226,10 @@ def show_ceo_panel():
                     st.rerun()
             if st.button("Reset Password", key=f"reset_{u['id']}"):
                 pw = st.session_state.get(f"pw_{u['id']}", new_pw)
-                if not pw:
-                    st.error("Please provide a new password.")
+                if pw and _reset_password(u["id"], pw):
+                    st.success("Password reset.")
                 else:
-                    if _reset_password(u["id"], pw):
-                        st.success("Password reset.")
-                    else:
-                        st.error("Failed to reset password.")
+                    st.error("Failed to reset password.")
 
             st.markdown("---")
             if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
@@ -260,9 +239,7 @@ def show_ceo_panel():
                 else:
                     st.error("Failed to remove user.")
 
-    # -------------------------
-    # PASSWORD AUDIT
-    # -------------------------
+    # --- Password Audit
     st.markdown("---")
     st.subheader("Force Reset Passwords (older than 30 days)")
     stale = _users_older_than_30_days(users)
@@ -279,9 +256,7 @@ def show_ceo_panel():
                     fail += 1
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
 
-    # -------------------------
-    # CANDIDATE RECORDS + CV PREVIEW
-    # -------------------------
+    # --- Candidate Records + CV + Interviews
     st.markdown("---")
     st.subheader("Candidate Records")
     candidates = get_all_candidates()
@@ -299,10 +274,32 @@ def show_ceo_panel():
                 # CV section
                 st.markdown("#### Candidate CV")
                 try:
-                    preview_cv_ui(c["candidate_id"])
-                    download_cv_ui(c["candidate_id"])
+                    preview_cv_ui(c["candidate_id"], prefix=f"ceo_{c['candidate_id']}")
+                    download_cv_ui(c["candidate_id"], prefix=f"ceo_{c['candidate_id']}")
                 except Exception as e:
                     st.error(f"Error fetching CV: {e}")
 
+                # Interviews section
+                st.markdown("#### Interviews")
+                try:
+                    interviews = get_interviews_for_candidate(c["candidate_id"])
+                except Exception as e:
+                    interviews = []
+                    st.warning(f"Could not load interviews: {e}")
+                if interviews:
+                    for row in interviews:
+                        st.write(f"**When:** {row.get('scheduled_at')} | **Interviewer:** {row.get('interviewer','—')} | **Result:** {row.get('result','—')}")
+                        if row.get("notes"):
+                            try:
+                                notes = json.loads(row["notes"])
+                                with st.expander("Interview Notes", expanded=False):
+                                    for k,v in notes.items():
+                                        st.write(f"- **{k.replace('_',' ').title()}**: {v}")
+                            except Exception:
+                                st.write(f"Notes: {row['notes']}")
+                        st.divider()
+                else:
+                    st.caption("No interviews recorded.")
+
     st.markdown("---")
-    st.caption("CEO can now view CVs, manage all permissions (including delete rights), and see advanced statistics.")
+    st.caption("CEO can now view CVs, all interview details, manage all permissions (including delete rights), and see advanced statistics.")

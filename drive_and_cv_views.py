@@ -1,98 +1,113 @@
 # drive_and_cv_views.py
+import base64
+import io
 import os
 import mimetypes
 import streamlit as st
-from db_postgres import save_candidate_cv, get_candidate_cv, delete_candidate_cv
+from db_postgres import get_candidate_cv
 
+# ---- helpers ---------------------------------------------------------------
 
-# --------- Upload CV
+def _safe_mime(filename: str | None, fallback: str = "application/octet-stream") -> str:
+    if not filename:
+        return fallback
+    m, _ = mimetypes.guess_type(filename)
+    return m or fallback
 
-def upload_cv_ui(candidate_id: str):
-    """Streamlit UI to upload a CV/resume file."""
-    st.markdown("**Upload CV/Resume**")
-    uploaded = st.file_uploader("Choose a file", type=["pdf", "doc", "docx", "png", "jpg", "jpeg"], key=f"cv_{candidate_id}")
-    if uploaded and st.button("Upload CV", key=f"uploadbtn_{candidate_id}"):
-        try:
-            data = uploaded.read()
-            save_candidate_cv(candidate_id, data, uploaded.name)
-            st.success(f"Uploaded {uploaded.name}")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error uploading CV: {e}")
+def _data_url(mime: str, content: bytes) -> str:
+    b64 = base64.b64encode(content).decode()
+    return f"data:{mime};base64,{b64}"
 
+def _is_text(mime: str) -> bool:
+    return mime.startswith("text/") or mime in {"application/json", "application/xml"}
 
-# --------- Download CV
+def _ext(name: str | None) -> str:
+    return (os.path.splitext(name or "")[1] or "").lower()
 
-def download_cv_ui(candidate_id: str):
-    """Streamlit UI to download candidate CV."""
+# ---- public UI pieces ------------------------------------------------------
+
+def preview_cv_ui(candidate_id: str, prefix: str = "cv") -> None:
+    """
+    Show an inline preview (when possible) and a download button.
+    Use unique keys via `prefix` to avoid Streamlit key collisions.
+    """
     try:
-        cv_file, cv_filename = get_candidate_cv(candidate_id)
-        if cv_file:
-            st.download_button(
-                "📥 Download CV",
-                data=cv_file,
-                file_name=cv_filename or "resume.pdf",
-                mime=mimetypes.guess_type(cv_filename or "resume.pdf")[0] or "application/octet-stream",
-                key=f"download_{candidate_id}"
-            )
+        file_data, filename = get_candidate_cv(candidate_id)
     except Exception as e:
         st.error(f"Error fetching CV: {e}")
+        return
 
+    if not file_data:
+        st.info("No CV uploaded.")
+        return
 
-# --------- Delete CV
+    # Always show download
+    st.download_button(
+        "⬇️ Download file",
+        data=file_data,
+        file_name=filename or f"{candidate_id}",
+        key=f"dl_{prefix}_{candidate_id}",
+    )
 
-def delete_cv_ui(candidate_id: str):
-    """Streamlit UI to delete candidate CV."""
-    if st.button("🗑️ Delete CV", key=f"delcv_{candidate_id}"):
-        try:
-            if delete_candidate_cv(candidate_id):
-                st.success("CV deleted successfully.")
-                st.rerun()
-            else:
-                st.warning("No CV to delete.")
-        except Exception as e:
-            st.error(f"Error deleting CV: {e}")
+    mime = _safe_mime(filename)
+    ext = _ext(filename)
 
-
-# --------- Preview CV
-
-def preview_cv_ui(candidate_id: str):
-    """Preview the CV file (PDF, DOCX, or image) inside Streamlit."""
+    # ---- Preview matrix (best-effort, no external services) ----
     try:
-        cv_file, cv_filename = get_candidate_cv(candidate_id)
-        if not cv_file:
-            st.info("No CV uploaded.")
-            upload_cv_ui(candidate_id)
+        if mime == "application/pdf" or ext == ".pdf":
+            st.markdown(
+                f'<iframe src="{_data_url("application/pdf", file_data)}" width="100%" height="640" style="border:0;"></iframe>',
+                unsafe_allow_html=True,
+            )
             return
 
-        # Show download button
-        download_cv_ui(candidate_id)
-        delete_cv_ui(candidate_id)
+        if mime.startswith("image/"):
+            st.image(file_data, caption=filename or "image")
+            return
 
-        # File type detection
-        mime_type, _ = mimetypes.guess_type(cv_filename or "")
-        if not mime_type:
-            mime_type = "application/octet-stream"
+        if mime.startswith("audio/"):
+            st.audio(io.BytesIO(file_data))
+            return
 
-        st.markdown("#### CV Preview")
+        if mime.startswith("video/"):
+            st.video(io.BytesIO(file_data))
+            return
 
-        if mime_type == "application/pdf":
-            # Embed PDF in iframe
-            import base64
-            b64_pdf = base64.b64encode(cv_file).decode("utf-8")
-            pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="600"></iframe>'
-            st.markdown(pdf_display, unsafe_allow_html=True)
+        if _is_text(mime):
+            # Try to decode as UTF-8; fall back to latin-1 for robustness
+            try:
+                text = file_data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = file_data.decode("latin-1", errors="replace")
+            st.code(text, language="text")
+            return
 
-        elif mime_type in ["image/png", "image/jpeg"]:
-            # Show image
-            from PIL import Image
-            import io
-            st.image(Image.open(io.BytesIO(cv_file)), caption=cv_filename, use_container_width=True)
+        # Word/Office files: show quick note + size, still downloadable above.
+        if ext in {".doc", ".docx", ".rtf", ".odt", ".ppt", ".pptx", ".xls", ".xlsx"}:
+            st.info("Preview not supported in-app for Office files. Please download to view.")
+            return
 
-        elif mime_type in ["application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
-            st.info("DOC/DOCX preview not supported inline. Please download to view.")
-        else:
-            st.info(f"Preview not available for this file type ({mime_type}). Please download to view.")
+        # Default fallback
+        st.caption(f"No inline preview for {filename or 'file'} (type: {mime}).")
 
     except Exception as e:
-        st.error(f"Error previewing CV: {e}")
+        st.warning(f"Preview error: {e}")
+
+def download_cv_ui(candidate_id: str, prefix: str = "cvdl") -> None:
+    """Download-only widget with unique key to avoid collisions."""
+    try:
+        file_data, filename = get_candidate_cv(candidate_id)
+    except Exception as e:
+        st.error(f"Error preparing download: {e}")
+        return
+
+    if not file_data:
+        st.info("No file available.")
+        return
+
+    st.download_button(
+        "⬇️ Download file",
+        data=file_data,
+        file_name=filename or f"{candidate_id}",
+        key=f"dl_only_{prefix}_{candidate_id}",
+    )
