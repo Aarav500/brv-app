@@ -15,7 +15,7 @@ from db_postgres import (
     get_candidate_cv,                     # ✅ new for CVs
     delete_candidate_by_actor,            # ✅ delete candidate support
 )
-from drive_and_cv_views import upload_cv_ui, preview_cv_ui, delete_cv_ui  # ✅ reuse CV UI
+from drive_and_cv_views import preview_cv_ui, download_cv_ui # ✅ reuse CV UI
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
