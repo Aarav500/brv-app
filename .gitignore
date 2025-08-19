@@ -57,3 +57,7 @@ Desktop.ini
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Testing
+test_resume_upload.py
+dummy_resume.txt
