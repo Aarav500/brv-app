@@ -24,7 +24,7 @@ def get_conn():
 
 
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and ensure schema consistency"""
     conn = get_conn()
     try:
         with conn:
@@ -62,14 +62,16 @@ def init_db():
                         phone VARCHAR(50),
                         form_data JSONB DEFAULT '{}'::jsonb,
                         resume_link TEXT,
-                        cv_file BYTEA,
-                        cv_filename TEXT,
                         can_edit BOOLEAN DEFAULT FALSE,
                         created_by VARCHAR(100),
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
+
+                # ✅ Ensure CV columns exist (migration safeguard)
+                cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_file BYTEA;")
+                cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_filename TEXT;")
 
                 # Create interviews table
                 cur.execute("""
@@ -248,6 +250,10 @@ def save_candidate_cv(candidate_id: str, file_bytes: bytes, filename: str | None
                     SET cv_file = %s, cv_filename = %s, updated_at = CURRENT_TIMESTAMP
                     WHERE candidate_id = %s
                 """, (psycopg2.Binary(file_bytes), filename, candidate_id))
+                if cur.rowcount == 0:
+                    logger.warning(f"No candidate found for resume upload (candidate_id={candidate_id})")
+                else:
+                    logger.info(f"Resume saved for candidate {candidate_id} as {filename}")
                 return cur.rowcount > 0
     except Exception:
         logger.exception(f"Error saving CV for candidate {candidate_id}")
@@ -303,6 +309,8 @@ def get_total_cv_storage_usage():
         return 0
     finally:
         conn.close()
+
+
 
 
 # === Candidate Management ===
