@@ -13,10 +13,11 @@ def upload_cv_ui(candidate_id: str):
     st.subheader("📤 Upload Candidate CV")
 
     uploaded_file = st.file_uploader(
-        "Upload CV (any common type: PDF, DOCX, TXT, PNG, JPG, etc.)",
-        type=None,  # allow all file types
-        key=f"cv_{candidate_id}",
+        "Upload CV (PDF / DOC / DOCX / TXT / RTF)",
+        type=["pdf", "doc", "docx", "txt", "rtf"],
+        key=f"cv_{candidate_id}"
     )
+
     if uploaded_file is not None:
         file_bytes = uploaded_file.read()
         filename = uploaded_file.name
@@ -28,53 +29,41 @@ def upload_cv_ui(candidate_id: str):
             st.error("❌ Failed to upload CV. Please try again.")
 
 
-def preview_cv_ui(candidate_id: str, height: int = 600):
-    """Preview candidate CV depending on file type + always allow download"""
+def preview_cv_ui(candidate_id: str, height: int = 620):
+    """Preview candidate CV if PDF, otherwise provide download."""
+    st.subheader("📄 Preview Candidate CV")
+
     file_bytes, filename = get_candidate_cv(candidate_id)
     if not file_bytes:
         st.info("No CV uploaded for this candidate.")
         return
 
-    if not filename:
-        filename = f"{candidate_id}.cv"
+    # Always allow download
+    st.download_button(
+        label="📥 Download CV",
+        data=file_bytes,
+        file_name=filename or f"{candidate_id}.cv",
+        mime="application/octet-stream",
+    )
 
-    ext = filename.split(".")[-1].lower()
-
-    if ext == "pdf":
+    # Inline preview only for PDF
+    if filename and filename.lower().endswith(".pdf"):
         b64 = base64.b64encode(file_bytes).decode()
         data_url = f"data:application/pdf;base64,{b64}"
-        st.components.v1.iframe(data_url, height=height)
-    elif ext in ["png", "jpg", "jpeg"]:
-        st.image(file_bytes, caption=filename, use_container_width=True)
-    elif ext in ["txt", "md"]:
-        try:
-            text = file_bytes.decode("utf-8")
-            st.text_area("📄 Text Preview", text, height=300)
-        except Exception:
-            st.warning("Could not decode text file.")
-    else:
-        st.warning(f"Preview not supported for {ext.upper()} files. Please download.")
-
-    st.download_button("📥 Download CV", file_bytes, file_name=filename)
-
-
-def download_cv_ui(candidate_id: str):
-    """Streamlit UI for downloading CV from PostgreSQL"""
-    file_bytes, filename = get_candidate_cv(candidate_id)
-    if file_bytes:
-        st.download_button(
-            label="Download CV",
-            data=file_bytes,
-            file_name=filename or f"{candidate_id}.pdf",
-            mime="application/octet-stream",
+        st.components.v1.html(
+            f"<iframe src='{data_url}' width='100%' height='{height}'></iframe>",
+            height=height + 10,
         )
     else:
-        st.info("No CV uploaded for this candidate.")
+        ext = filename.split(".")[-1].upper() if filename else "file"
+        st.info(f"Preview not supported for `{ext}`. Please download instead.")
 
 
 def delete_cv_ui(candidate_id: str):
     """Streamlit UI for deleting a candidate CV"""
-    if st.button("🗑️ Delete CV", key=f"delete_cv_{candidate_id}"):
+    st.subheader("🗑️ Delete Candidate CV")
+
+    if st.button("Delete CV", key=f"delete_cv_{candidate_id}"):
         ok = delete_candidate_cv(candidate_id)
         if ok:
             st.success("✅ CV deleted successfully")
