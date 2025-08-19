@@ -1,14 +1,15 @@
+# ceo.py
 import re
 import secrets
 import string
 from datetime import datetime, timedelta
 import streamlit as st
+import matplotlib.pyplot as plt
 
 from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
     get_all_candidates, get_total_cv_storage_usage, get_candidate_statistics,
-    delete_candidate_by_actor
 )
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
@@ -101,6 +102,31 @@ def _human_bytes(n: int) -> str:
     return f"{v:.2f} {units[i]}"
 
 
+def _plot_candidate_charts(stats: dict):
+    """Generate simple pie/bar charts for CEO overview"""
+    if not stats:
+        st.info("No statistics available to visualize.")
+        return
+
+    # Pie: Resume vs No Resume
+    fig1, ax1 = plt.subplots()
+    labels = ["With Resume", "Without Resume"]
+    values = [stats.get("candidates_with_resume", 0),
+              stats.get("total_candidates", 0) - stats.get("candidates_with_resume", 0)]
+    ax1.pie(values, labels=labels, autopct="%1.1f%%", startangle=90)
+    ax1.set_title("Resume Uploads")
+    st.pyplot(fig1)
+
+    # Bar: Interview Results (if breakdown available)
+    interview_breakdown = stats.get("interview_results", {})
+    if interview_breakdown:
+        fig2, ax2 = plt.subplots()
+        ax2.bar(interview_breakdown.keys(), interview_breakdown.values())
+        ax2.set_title("Interview Outcomes")
+        ax2.set_ylabel("Count")
+        st.pyplot(fig2)
+
+
 def show_ceo_panel():
     st.header("CEO — Administration Panel")
 
@@ -110,29 +136,37 @@ def show_ceo_panel():
         return
 
     # -------------------------
-    # OVERVIEW: Storage + Stats
+    # STORAGE + STATISTICS
     # -------------------------
-    with st.container():
-        colA, colB = st.columns(2)
-        with colA:
-            total_bytes = get_total_cv_storage_usage()
-            st.metric("Total CV Storage Used", _human_bytes(total_bytes))
-            if total_bytes:
-                limit_mb = 500
-                used_mb = total_bytes / (1024 * 1024)
-                pct = min(100, int((used_mb / limit_mb) * 100))
-                st.progress(pct)
-        with colB:
-            stats = get_candidate_statistics() or {}
-            st.metric("Total Candidates", stats.get("total_candidates", 0))
-            st.metric("With Resume", stats.get("candidates_with_resume", 0))
-            st.metric("Interviews", stats.get("total_interviews", 0))
+    st.subheader("System Overview")
+    colA, colB = st.columns(2)
+    with colA:
+        total_bytes = get_total_cv_storage_usage()
+        st.metric("Total CV Storage Used", _human_bytes(total_bytes))
+        if total_bytes:
+            limit_mb = 500
+            used_mb = total_bytes / (1024 * 1024)
+            pct = min(100, int((used_mb / limit_mb) * 100))
+            st.progress(pct)
+
+    with colB:
+        stats = get_candidate_statistics() or {}
+        st.metric("Total Candidates", stats.get("total_candidates", 0))
+        st.metric("With Resume", stats.get("candidates_with_resume", 0))
+        st.metric("Interviews", stats.get("total_interviews", 0))
 
     st.markdown("---")
+    st.subheader("📊 Advanced Candidate Statistics")
+    if stats:
+        _plot_candidate_charts(stats)
+        st.json(stats)  # Pretty print everything for transparency
+    else:
+        st.caption("No stats available.")
 
     # -------------------------
-    # USER PERMISSION MANAGEMENT
+    # USER PERMISSIONS
     # -------------------------
+    st.markdown("---")
     st.subheader("User Permissions")
     users = get_all_users_with_permissions()
     if not users:
@@ -142,26 +176,29 @@ def show_ceo_panel():
             with st.expander(f"{u['email']} ({u['role']})", expanded=False):
                 st.write(f"**ID:** {u['id']} | **Created:** {u['created_at']}")
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    can_view = st.checkbox("Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}")
-                with col2:
-                    can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
-                with col3:
-                    can_grant_delete = st.checkbox("Can Grant Delete Rights", value=u.get("can_grant_delete", False), key=f"grant_{u['id']}")
+                can_view = st.checkbox(
+                    "Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}"
+                )
+                can_delete = st.checkbox(
+                    "Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}"
+                )
+                can_grant_delete = st.checkbox(
+                    "Can Grant Delete Rights", value=u.get("can_grant_delete", False), key=f"grant_{u['id']}"
+                )
 
                 if st.button("Update Permissions", key=f"perm_{u['id']}"):
-                    if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
+                    if set_user_permission(
+                        u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete
+                    ):
                         st.success("Permissions updated.")
                         st.rerun()
                     else:
                         st.error("Failed to update permissions.")
 
+    # -------------------------
+    # USER MANAGEMENT
+    # -------------------------
     st.markdown("---")
-
-    # -------------------------
-    # USER ACCOUNT MANAGEMENT
-    # -------------------------
     st.subheader("All Users")
     users = _fetch_users()
     for u in users:
@@ -205,6 +242,9 @@ def show_ceo_panel():
                 else:
                     st.error("Failed to remove user.")
 
+    # -------------------------
+    # PASSWORD AUDIT
+    # -------------------------
     st.markdown("---")
     st.subheader("Force Reset Passwords (older than 30 days)")
     stale = _users_older_than_30_days(users)
@@ -221,27 +261,22 @@ def show_ceo_panel():
                     fail += 1
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
 
+    # -------------------------
+    # CANDIDATE RECORDS (Read-Only)
+    # -------------------------
     st.markdown("---")
-    st.subheader("Candidate Records")
-
-    if current_user.get("can_delete_records", False):
-        candidates = get_all_candidates()
-        if not candidates:
-            st.caption("No candidates found.")
+    st.subheader("Candidate Records (Read-Only)")
+    candidates = get_all_candidates()
+    if not candidates:
+        st.caption("No candidates found.")
+    else:
         for c in candidates:
             with st.expander(f"{c['name']} — {c['candidate_id']}", expanded=False):
                 st.write(f"**Email:** {c.get('email','—')}")
                 st.write(f"**Phone:** {c.get('phone','—')}")
                 st.write(f"**Created At:** {c.get('created_at','—')}")
-
-                if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
-                    if delete_candidate_by_actor(c["candidate_id"], current_user["id"]):
-                        st.success("Candidate deleted successfully.")
-                        st.rerun()
-                    else:
-                        st.error("Deletion failed.")
-    else:
-        st.info("You don’t have permission to delete candidates.")
+                if c.get("form_data"):
+                    st.json(c["form_data"])
 
     st.markdown("---")
-    st.caption("Emails validated. Passwords stored hashed in DB.")
+    st.caption("CEO can now manage all permissions including delete rights.")
