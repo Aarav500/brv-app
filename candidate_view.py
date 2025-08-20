@@ -21,7 +21,8 @@ from datetime import date
 
 def candidate_form():
     st.header("📝 Candidate Pre-Interview Form")
-
+    # Always initialize candidate_id
+    candidate_id = st.text_input("Candidate ID (auto-generated if left blank)", "")
     name = st.text_input("Full Name")
     current_address = st.text_area("Current Address")
     permanent_address = st.text_area("Permanent Address")
