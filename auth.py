@@ -50,6 +50,8 @@ def authenticate_user(email: str, password: str):
     """Authenticate user using PostgreSQL database"""
     user = get_user_by_email(email)
     if user and verify_password(password, user['password_hash']):
+        if user.get("force_password_reset"):
+            return {"force_password_reset": True, "id": user["id"], "email": user["email"], "role": user["role"]}
         return user
     return None
 

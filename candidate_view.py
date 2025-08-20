@@ -25,16 +25,26 @@ def candidate_form_view():
         help="If you have an existing Candidate ID, enter it here to edit your application",
     )
 
-    # Basic info
-    name = st.text_input("Full Name", placeholder="Enter your full name")
-    email = st.text_input("Email Address", placeholder="Enter your email address")
-    phone = st.text_input("Phone Number", placeholder="Enter your phone number")
+    with st.form("candidate_form"):
+        full_name = st.text_input("Full Name")
+        address = st.text_area("Address")
+        dob = st.date_input("Date of Birth")
+        caste = st.text_input("Caste")
+        email = st.text_input("Email")
+        phone = st.text_input("Phone")
+        submitted = st.form_submit_button("Submit")
 
-    # Additional details
-    st.subheader("Additional Information")
-    skills = st.text_area("Skills", placeholder="List your key skills and technologies")
-    experience = st.text_area("Experience", placeholder="Describe your work experience")
-    education = st.text_area("Education", placeholder="Your educational background")
+    if submitted:
+        candidate_id = str(uuid.uuid4())[:8]
+        created = create_candidate_in_db(
+            candidate_id, full_name, address, dob, caste, email, phone,
+            {},  # empty form_data for now
+            st.session_state["user"]["email"]
+        )
+        if created:
+            st.success("Candidate saved successfully!")
+        else:
+            st.error("Error saving candidate.")
 
     # Resume upload
     st.subheader("Resume Upload")

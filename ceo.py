@@ -10,8 +10,10 @@ from db_postgres import (
     set_user_permission, get_all_users_with_permissions,
     get_all_candidates, get_total_cv_storage_usage,
     get_candidate_statistics, get_candidate_cv,
-    get_interviews_for_candidate
+    get_interviews_for_candidate,
+    get_receptionist_assessment   # ✅ add this
 )
+
 from drive_and_cv_views import preview_cv_ui, download_cv_ui
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
@@ -242,6 +244,7 @@ def show_ceo_panel():
                         st.success("Password reset.")
                     else:
                         st.error("Failed to reset password.")
+            st.write(f"Force Password Reset: {u.get('force_password_reset', False)}")
 
             st.markdown("---")
             if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
@@ -270,6 +273,14 @@ def show_ceo_panel():
                 else:
                     fail += 1
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
+    if st.button("Force Reset Password", key=f"force_reset_{u['id']}"):
+        if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
+            conn = get_conn()
+            with conn, conn.cursor() as cur:
+                cur.execute("UPDATE users SET force_password_reset = TRUE WHERE id = %s", (u["id"],))
+            conn.close()
+            st.success("Password reset flag set.")
+            st.rerun()
 
     # -------------------------
     # CANDIDATE RECORDS + CV + INTERVIEWS
@@ -311,6 +322,20 @@ def show_ceo_panel():
                             st.markdown("---")
                 except Exception as e:
                     st.error(f"Error fetching interview history: {e}")
+                # Receptionist Assessment
+                st.markdown("#### Receptionist Assessment")
+                try:
+                    assessment = get_receptionist_assessment(c["candidate_id"])
+                    if not assessment:
+                        st.caption("No receptionist assessment found for this candidate.")
+                    else:
+                        st.write(f"**Speed Test (WPM):** {assessment.get('speed','—')}")
+                        st.write(f"**Accuracy Test (%):** {assessment.get('accuracy','—')}")
+                        st.write(f"**Work Commitment:** {assessment.get('work_commitment','—')}")
+                        st.write(f"**English Understanding:** {assessment.get('english','—')}")
+                        st.write(f"**Comments:** {assessment.get('comments','—')}")
+                except Exception as e:
+                    st.error(f"Error fetching receptionist assessment: {e}")
 
     st.markdown("---")
     st.caption("CEO can now view CVs, manage all permissions, and see advanced statistics.")

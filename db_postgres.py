@@ -51,17 +51,20 @@ def init_db():
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS candidates
                     (
-                        id SERIAL PRIMARY KEY,
-                        candidate_id VARCHAR(50) UNIQUE NOT NULL,
-                        name VARCHAR(255),
-                        email VARCHAR(255),
-                        phone VARCHAR(50),
-                        form_data JSONB DEFAULT '{}'::jsonb,
-                        resume_link TEXT,
-                        can_edit BOOLEAN DEFAULT FALSE,
-                        created_by VARCHAR(100),
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                       id SERIAL PRIMARY KEY,
+        candidate_id VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(255),
+        address TEXT,
+        dob DATE,
+        caste VARCHAR(100),
+        email VARCHAR(255),
+        phone VARCHAR(50),
+        form_data JSONB DEFAULT '{}'::jsonb,
+        resume_link TEXT,
+        can_edit BOOLEAN DEFAULT FALSE,
+        created_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
 
@@ -91,6 +94,32 @@ def init_db():
                     CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
                     CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
                 """)
+
+        # --- RECEPTIONIST ASSESSMENTS ---
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS receptionist_assessments
+                    (
+                        id
+                        SERIAL
+                        PRIMARY
+                        KEY,
+                        candidate_id
+                        VARCHAR
+                    (
+                        50
+                    ) NOT NULL REFERENCES candidates
+                    (
+                        candidate_id
+                    ),
+                        speed_test INTEGER,
+                        accuracy_test INTEGER,
+                        work_commitment TEXT,
+                        english_understanding TEXT,
+                        comments TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+
 
         logger.info("Database tables initialized successfully (with migration checks)")
     except Exception:
@@ -310,15 +339,20 @@ def get_total_cv_storage_usage():
 
 # === Candidate Management ===
 
-def create_candidate_in_db(candidate_id: str, name: str, email: str, phone: str, form_data: dict, created_by: str):
+def create_candidate_in_db(candidate_id: str, name: str, address: str, dob: str,
+                           caste: str, email: str, phone: str,
+                           form_data: dict, created_by: str):
     conn = get_conn()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    INSERT INTO candidates (candidate_id, name, email, phone, form_data, created_by, can_edit)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *;
-                """, (candidate_id, name, email, phone, Json(form_data), created_by, False))
+                    INSERT INTO candidates (candidate_id, name, address, dob, caste,
+                                            email, phone, form_data, created_by, can_edit)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *;
+                """, (candidate_id, name, address, dob, caste,
+                      email, phone, Json(form_data), created_by, False))
                 return cur.fetchone()
     except psycopg2.errors.UniqueViolation:
         logger.warning(f"Candidate ID {candidate_id} already exists")
@@ -429,6 +463,27 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
                 return cur.rowcount > 0
     except Exception:
         logger.exception(f"Error setting permission for candidate {candidate_id}")
+        return False
+    finally:
+        conn.close()
+
+def save_receptionist_assessment(candidate_id: str, speed_test: int, accuracy_test: int,
+                                 work_commitment: str, english_understanding: str,
+                                 comments: str):
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO receptionist_assessments
+                        (candidate_id, speed_test, accuracy_test, work_commitment,
+                         english_understanding, comments)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (candidate_id, speed_test, accuracy_test,
+                      work_commitment, english_understanding, comments))
+                return True
+    except Exception:
+        logger.exception(f"Error saving receptionist assessment for candidate {candidate_id}")
         return False
     finally:
         conn.close()
@@ -744,6 +799,17 @@ def get_candidate_statistics():
                 # Per role (based on user role)
                 cur.execute("SELECT role, COUNT(*) FROM users GROUP BY role;")
                 stats["users_per_role"] = {row["role"]: row["count"] for row in cur.fetchall()}
+
+                # Receptionist stats
+                cur.execute("SELECT COUNT(*) FROM receptionist_assessments;")
+                stats["total_assessments"] = cur.fetchone()["count"]
+
+                cur.execute(
+                    "SELECT AVG(speed_test) AS avg_speed, AVG(accuracy_test) AS avg_accuracy FROM receptionist_assessments;")
+                row = cur.fetchone()
+                stats["avg_speed_test"] = row["avg_speed"] or 0
+                stats["avg_accuracy_test"] = row["avg_accuracy"] or 0
+
 
                 return stats
     except Exception:

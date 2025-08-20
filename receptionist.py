@@ -8,12 +8,13 @@ from typing import List, Dict, Any
 import streamlit as st
 from db_postgres import (
     get_conn,
-    find_candidates_by_name,              # legacy helper (kept)
+    find_candidates_by_name,
     update_candidate_form_data,
     create_candidate_in_db,
     get_all_candidates,
-    get_candidate_cv,                     # ✅ new for CVs
-    delete_candidate_by_actor,            # ✅ delete candidate support
+    get_candidate_cv,
+    delete_candidate_by_actor,
+    save_receptionist_assessment,   # ✅ add this
 )
 from drive_and_cv_views import preview_cv_ui, download_cv_ui # ✅ reuse CV UI
 
@@ -167,6 +168,24 @@ def receptionist_view():
                             st.write(f"- **{k}**: {v}")
                 except Exception:
                     pass
+            # --- Receptionist Assessment ---
+            st.markdown("### Receptionist Assessment")
+            with st.form(f"receptionist_assessment_{c['candidate_id']}"):
+                speed = st.number_input("Speed Test (WPM)", min_value=0, key=f"speed_{c['candidate_id']}")
+                accuracy = st.number_input("Accuracy Test (%)", min_value=0, max_value=100, key=f"accuracy_{c['candidate_id']}")
+                work_commitment = st.text_area("Work Commitment", key=f"work_{c['candidate_id']}")
+                english = st.text_area("English Understanding", key=f"english_{c['candidate_id']}")
+                comments = st.text_area("Comments", key=f"comments_{c['candidate_id']}")
+                submitted = st.form_submit_button("💾 Save Assessment")
+
+            if submitted:
+                ok = save_receptionist_assessment(
+                    c["candidate_id"], speed, accuracy, work_commitment, english, comments
+                )
+                if ok:
+                    st.success("Assessment saved successfully.")
+                else:
+                    st.error("Failed to save assessment.")
 
             # --- Permissions & Quick Actions ---
             st.markdown("---")
