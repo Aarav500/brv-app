@@ -9,11 +9,10 @@ import streamlit as st
 from db_postgres import (
     get_conn,
     find_candidates_by_name,
-    update_candidate_form_data,
-    create_candidate_in_db,
     get_all_candidates,
     get_candidate_cv,
     delete_candidate_by_actor,
+    get_user_permissions,
     save_receptionist_assessment,   # ✅ add this
 )
 from drive_and_cv_views import preview_cv_ui, download_cv_ui # ✅ reuse CV UI
@@ -142,6 +141,18 @@ def receptionist_view():
             st.write(f"**Phone:** {c.get('phone','—')}")
             st.write(f"**Created:** {c.get('created_at','—')}")
 
+    def show_candidate_cv(candidate_id: str):
+            current_user = st.session_state.get("user")
+            if not current_user:
+                st.error("No active session")
+                 return
+
+                # check permission
+             perms = get_user_permissions(current_user["id"])
+            if not perms.get("can_view_cvs", False):
+                st.warning("You do not have permission to view CVs.")
+                return
+
             # --- CV section ---
             st.markdown("### Resume / CV")
             try:
@@ -222,50 +233,3 @@ def receptionist_view():
 
     st.divider()
 
-    # Minimal create/edit tools (optional quick fixes)
-    st.subheader("Create/Update Application (front-desk help)")
-    cc, ce = st.columns(2)
-    with cc:
-        name = st.text_input("Full Name", key="new_name")
-        email = st.text_input("Email", key="new_email")
-        phone = st.text_input("Phone", key="new_phone")
-        if st.button("Create Candidate"):
-            if not _valid_email(email):
-                st.error("Please enter a valid email.")
-            else:
-                try:
-                    cid = create_candidate_in_db(name=name, email=email, phone=phone)
-                    if cid:
-                        st.success(f"Candidate created. Code: {cid}")
-                        ok, msg = _send_candidate_code(email, cid)
-                        (st.success if ok else st.warning)(msg)
-                    else:
-                        st.error("Failed to create candidate.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-    with ce:
-        st.caption("Edit by Candidate Code (name can be changed; permission required)")
-        code = st.text_input("Candidate Code", key="edit_code")
-        new_name = st.text_input("New Name (optional)", key="edit_name")
-        form_json = st.text_area("Form JSON patch (optional)", placeholder='{"skills":"Excel, Email"}')
-        if st.button("Apply Update"):
-            try:
-                updates = {}
-                if new_name.strip():
-                    updates["name"] = new_name.strip()
-                if form_json.strip():
-                    import json
-                    updates["form_patch"] = json.loads(form_json)
-                if not updates:
-                    st.info("Nothing to update.")
-                else:
-                    ok = update_candidate_form_data(code, updates)
-                    if ok:
-                        st.success("Update applied.")
-                    else:
-                        st.error("Failed to update (check permission or code).")
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-    st.caption("Note: Editing only requires the candidate code if permission is granted.")
