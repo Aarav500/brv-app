@@ -145,7 +145,7 @@ def receptionist_view():
             current_user = st.session_state.get("user")
             if not current_user:
                 st.error("No active session")
-                 return
+                return
 
                 # check permission
              perms = get_user_permissions(current_user["id"])
