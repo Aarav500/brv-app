@@ -147,8 +147,8 @@ def receptionist_view():
                 st.error("No active session")
                 return
 
-                # check permission
-             perms = get_user_permissions(current_user["id"])
+            # check permission
+            perms = get_user_permissions(current_user["id"])
             if not perms.get("can_view_cvs", False):
                 st.warning("You do not have permission to view CVs.")
                 return
