@@ -22,14 +22,13 @@ def get_conn():
         sslmode=os.getenv("PGSSLMODE", "require")
     )
 
-
 def init_db():
     """Initialize database tables and ensure schema consistency"""
     conn = get_conn()
     try:
         with conn:
             with conn.cursor() as cur:
-                # Create users table
+                # --- USERS TABLE ---
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS users
                     (
@@ -38,20 +37,17 @@ def init_db():
                         password_hash VARCHAR(255) NOT NULL,
                         role VARCHAR(50) NOT NULL DEFAULT 'candidate',
                         force_password_reset BOOLEAN DEFAULT FALSE,
-                        can_view_cvs BOOLEAN DEFAULT FALSE,
-                        can_delete_records BOOLEAN DEFAULT FALSE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
 
-                # NEW: add delegated permission column
-                cur.execute("""
-                    ALTER TABLE users
-                    ADD COLUMN IF NOT EXISTS can_grant_delete BOOLEAN DEFAULT FALSE;
-                """)
+                # ✅ Ensure permission columns exist (migration-safe)
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_cvs BOOLEAN DEFAULT FALSE;")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_delete_records BOOLEAN DEFAULT FALSE;")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_grant_delete BOOLEAN DEFAULT FALSE;")
 
-                # Create candidates table
+                # --- CANDIDATES TABLE ---
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS candidates
                     (
@@ -69,11 +65,11 @@ def init_db():
                     );
                 """)
 
-                # ✅ Ensure CV columns exist (migration safeguard)
+                # ✅ Ensure CV columns exist (migration-safe)
                 cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_file BYTEA;")
                 cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_filename TEXT;")
 
-                # Create interviews table
+                # --- INTERVIEWS TABLE ---
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS interviews
                     (
@@ -89,20 +85,19 @@ def init_db():
                     );
                 """)
 
-                # Create indexes
+                # Indexes
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);
                     CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
                     CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
                 """)
 
-        logger.info("Database tables initialized successfully")
+        logger.info("Database tables initialized successfully (with migration checks)")
     except Exception:
         logger.exception("Failed to initialize database")
         raise
     finally:
         conn.close()
-
 
 # === Password utilities ===
 
