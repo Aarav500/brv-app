@@ -229,6 +229,11 @@ def candidate_form():
                 else:
                     st.error("❌ Failed to delete resume")
 
+def candidate_form_view():
+    """Wrapper so main.py can call candidate form."""
+    st.title("Candidate Registration")
+    candidate_form()
+
 
 def candidate_view():
     """Main candidate view function (backward compatibility)"""
