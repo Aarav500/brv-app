@@ -125,15 +125,13 @@ BRV Recruitment
 
 # --------- main view
 
-def receptionist_view():
-    st.header("Receptionist — Candidate Management")
-
     def receptionist_view():
         st.header("Receptionist Panel")
 
+        # 🔑 Always fetch current user from session
         current_user = st.session_state.get("user")
         if not current_user:
-            st.error("No active session. Please log in.")
+            st.error("No active user session. Please log in.")
             return
 
     # Search section
