@@ -314,3 +314,93 @@ def show_ceo_panel():
 
     st.markdown("---")
     st.caption("CEO can now view CVs, manage all permissions, and see advanced statistics.")
+
+def get_candidate_statistics():
+    """
+    Collect as many useful statistics as possible for CEO dashboard.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                stats = {}
+
+                # Total candidates
+                cur.execute("SELECT COUNT(*) FROM candidates;")
+                stats["total_candidates"] = cur.fetchone()["count"]
+
+                # Candidates created today
+                cur.execute("SELECT COUNT(*) FROM candidates WHERE DATE(created_at) = CURRENT_DATE;")
+                stats["candidates_today"] = cur.fetchone()["count"]
+
+                # Candidates created this week
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM candidates 
+                    WHERE DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE);
+                """)
+                stats["candidates_this_week"] = cur.fetchone()["count"]
+
+                # Candidates created this month
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM candidates 
+                    WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE);
+                """)
+                stats["candidates_this_month"] = cur.fetchone()["count"]
+
+                # With CV
+                cur.execute("SELECT COUNT(*) FROM candidates WHERE cv_file IS NOT NULL OR resume_link IS NOT NULL;")
+                stats["candidates_with_resume"] = cur.fetchone()["count"]
+
+                # Without CV
+                stats["candidates_without_resume"] = stats["total_candidates"] - stats["candidates_with_resume"]
+
+                # Interviews total
+                cur.execute("SELECT COUNT(*) FROM interviews;")
+                stats["total_interviews"] = cur.fetchone()["count"]
+
+                # Interviews by result
+                cur.execute("SELECT result, COUNT(*) FROM interviews GROUP BY result;")
+                stats["interview_results"] = {row["result"] or "unspecified": row["count"] for row in cur.fetchall()}
+
+                # Scheduled interviews
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NULL OR result ILIKE 'scheduled';")
+                stats["interviews_scheduled"] = cur.fetchone()["count"]
+
+                # Completed interviews
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled';")
+                stats["interviews_completed"] = cur.fetchone()["count"]
+
+                # Interviews this week
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM interviews 
+                    WHERE DATE_TRUNC('week', scheduled_at) = DATE_TRUNC('week', CURRENT_DATE);
+                """)
+                stats["interviews_this_week"] = cur.fetchone()["count"]
+
+                # Pass / Fail breakdown
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'pass';")
+                stats["interviews_passed"] = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'fail';")
+                stats["interviews_failed"] = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'on hold';")
+                stats["interviews_on_hold"] = cur.fetchone()["count"]
+
+                # Per interviewer
+                cur.execute("SELECT interviewer, COUNT(*) FROM interviews GROUP BY interviewer;")
+                stats["per_interviewer"] = {row["interviewer"] or "unknown": row["count"] for row in cur.fetchall()}
+
+                # Per role (based on user role)
+                cur.execute("SELECT role, COUNT(*) FROM users GROUP BY role;")
+                stats["users_per_role"] = {row["role"]: row["count"] for row in cur.fetchall()}
+
+                return stats
+    except Exception:
+        logger.exception("Error getting candidate statistics")
+        return {}
+    finally:
+        conn.close()
