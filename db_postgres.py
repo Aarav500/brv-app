@@ -51,20 +51,20 @@ def init_db():
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS candidates
                     (
-                       id SERIAL PRIMARY KEY,
-        candidate_id VARCHAR(50) UNIQUE NOT NULL,
-        name VARCHAR(255),
-        address TEXT,
-        dob DATE,
-        caste VARCHAR(100),
-        email VARCHAR(255),
-        phone VARCHAR(50),
-        form_data JSONB DEFAULT '{}'::jsonb,
-        resume_link TEXT,
-        can_edit BOOLEAN DEFAULT FALSE,
-        created_by VARCHAR(100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        id SERIAL PRIMARY KEY,
+                        candidate_id VARCHAR(50) UNIQUE NOT NULL,
+                        name VARCHAR(255),
+                        address TEXT,
+                        dob DATE,
+                        caste VARCHAR(100),
+                        email VARCHAR(255),
+                        phone VARCHAR(50),
+                        form_data JSONB DEFAULT '{}'::jsonb,
+                        resume_link TEXT,
+                        can_edit BOOLEAN DEFAULT FALSE,
+                        created_by VARCHAR(100),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
 
@@ -95,31 +95,20 @@ def init_db():
                     CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
                 """)
 
-        # --- RECEPTIONIST ASSESSMENTS ---
-        cur.execute("""
+                # --- RECEPTIONIST ASSESSMENTS ---
+                cur.execute("""
                     CREATE TABLE IF NOT EXISTS receptionist_assessments
                     (
-                        id
-                        SERIAL
-                        PRIMARY
-                        KEY,
-                        candidate_id
-                        VARCHAR
-                    (
-                        50
-                    ) NOT NULL REFERENCES candidates
-                    (
-                        candidate_id
-                    ),
+                        id SERIAL PRIMARY KEY,
+                        candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id),
                         speed_test INTEGER,
                         accuracy_test INTEGER,
                         work_commitment TEXT,
                         english_understanding TEXT,
                         comments TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                    """)
-
+                    );
+                """)
 
         logger.info("Database tables initialized successfully (with migration checks)")
     except Exception:
