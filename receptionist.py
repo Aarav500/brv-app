@@ -128,6 +128,14 @@ BRV Recruitment
 def receptionist_view():
     st.header("Receptionist — Candidate Management")
 
+    def receptionist_view():
+        st.header("Receptionist Panel")
+
+        current_user = st.session_state.get("user")
+        if not current_user:
+            st.error("No active session. Please log in.")
+            return
+
     # Search section
     st.subheader("Search Candidates (all fields)")
     q = st.text_input("Search by candidate code, name, email, phone, or any form value", placeholder="Type to search…")
