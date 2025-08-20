@@ -488,6 +488,29 @@ def save_receptionist_assessment(candidate_id: str, speed_test: int, accuracy_te
     finally:
         conn.close()
 
+def get_receptionist_assessment(candidate_id: str):
+    """
+    Fetch the latest receptionist assessment for a candidate.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT speed_test, accuracy_test, work_commitment,
+                           english_understanding, comments, created_at
+                    FROM receptionist_assessments
+                    WHERE candidate_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1;
+                """, (candidate_id,))
+                return cur.fetchone()
+    except Exception:
+        logger.exception(f"Error getting receptionist assessment for candidate {candidate_id}")
+        return None
+    finally:
+        conn.close()
+
 
 # === Interview Management ===
 

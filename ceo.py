@@ -11,7 +11,7 @@ from db_postgres import (
     get_all_candidates, get_total_cv_storage_usage,
     get_candidate_statistics, get_candidate_cv,
     get_interviews_for_candidate,
-    get_receptionist_assessment   # ✅ add this
+    get_receptionist_assessment   # ✅ now available
 )
 
 from drive_and_cv_views import preview_cv_ui, download_cv_ui
