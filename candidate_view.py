@@ -15,36 +15,66 @@ from db_postgres import (
 from receptionist import _send_candidate_code   # ✅ for emailing Candidate ID
 
 
-def candidate_form_view():
-    st.header("Candidate — Submit / Edit Application")
+import streamlit as st
+from db_postgres import create_candidate_in_db
+from datetime import date
 
-    # Candidate ID entry
-    candidate_id = st.text_input(
-        "Candidate ID",
-        placeholder="Leave blank to create new application",
-        help="If you have an existing Candidate ID, enter it here to edit your application",
-    )
+def candidate_form():
+    st.header("📝 Candidate Pre-Interview Form")
 
-    with st.form("candidate_form"):
-        full_name = st.text_input("Full Name")
-        address = st.text_area("Address")
-        dob = st.date_input("Date of Birth")
-        caste = st.text_input("Caste")
-        email = st.text_input("Email")
-        phone = st.text_input("Phone")
-        submitted = st.form_submit_button("Submit")
+    name = st.text_input("Full Name")
+    current_address = st.text_area("Current Address")
+    permanent_address = st.text_area("Permanent Address")
+    dob = st.date_input("Date of Birth", min_value=date(1900, 1, 1), max_value=date.today())
+    caste = st.text_input("Caste")
+    sub_caste = st.text_input("Sub-Caste")
+    marital_status = st.selectbox("Marital Status", ["Single", "Married", "Divorced", "Widowed"])
+    highest_qualification = st.text_input("Highest Qualification")
+    work_experience = st.text_area("Work Experience")
+    referral = st.text_input("Referral (if any)")
 
-    if submitted:
-        candidate_id = str(uuid.uuid4())[:8]
-        created = create_candidate_in_db(
-            candidate_id, full_name, address, dob, caste, email, phone,
-            {},  # empty form_data for now
-            st.session_state["user"]["email"]
-        )
-        if created:
-            st.success("Candidate saved successfully!")
+    ready_festivals = st.radio("Ready to work on festivals and national holidays?", ["Yes", "No"])
+    ready_late_nights = st.radio("Ready to work late nights if needed?", ["Yes", "No"])
+
+    email = st.text_input("Email")
+    phone = st.text_input("Phone")
+
+    if st.button("Submit Candidate Form"):
+        if not name:
+            st.error("Full name is required.")
         else:
-            st.error("Error saving candidate.")
+            candidate_id = f"cand_{int(date.today().strftime('%Y%m%d'))}_{phone[-4:] if phone else '0000'}"
+            data = {
+                "name": name,
+                "current_address": current_address,
+                "permanent_address": permanent_address,
+                "dob": str(dob),
+                "caste": caste,
+                "sub_caste": sub_caste,
+                "marital_status": marital_status,
+                "highest_qualification": highest_qualification,
+                "work_experience": work_experience,
+                "referral": referral,
+                "ready_festivals": (ready_festivals == "Yes"),
+                "ready_late_nights": (ready_late_nights == "Yes"),
+                "email": email,
+                "phone": phone
+            }
+            created = create_candidate_in_db(
+                candidate_id,
+                name,
+                current_address,
+                dob,
+                caste,
+                email,
+                phone,
+                data,
+                created_by="self-service"
+            )
+            if created:
+                st.success(f"Candidate {name} registered successfully!")
+            else:
+                st.error("Error saving candidate data.")
 
     # Resume upload
     st.subheader("Resume Upload")
