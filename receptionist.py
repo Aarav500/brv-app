@@ -12,7 +12,7 @@ from db_postgres import (
     update_candidate_form_data,
     create_candidate_in_db,
     get_all_candidates,
-get_user_permissions
+    get_user_permissions
     get_candidate_cv,
     delete_candidate_by_actor,
     save_receptionist_assessment,   # ✅ add this
