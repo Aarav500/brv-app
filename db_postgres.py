@@ -663,6 +663,9 @@ def delete_candidate_by_actor(candidate_id: str, actor_user_id: int) -> bool:
 # === Candidate Statistics ===
 
 def get_candidate_statistics():
+    """
+    Collect as many useful statistics as possible for CEO dashboard.
+    """
     conn = get_conn()
     try:
         with conn:
@@ -670,70 +673,81 @@ def get_candidate_statistics():
                 stats = {}
 
                 # Total candidates
-                cur.execute("SELECT COUNT(*) FROM candidates")
+                cur.execute("SELECT COUNT(*) FROM candidates;")
                 stats["total_candidates"] = cur.fetchone()["count"]
 
                 # Candidates created today
-                cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM candidates 
-                    WHERE DATE(created_at) = CURRENT_DATE
-                """)
+                cur.execute("SELECT COUNT(*) FROM candidates WHERE DATE(created_at) = CURRENT_DATE;")
                 stats["candidates_today"] = cur.fetchone()["count"]
 
-                # Candidates with resume uploaded
+                # Candidates created this week
                 cur.execute("""
                     SELECT COUNT(*) 
                     FROM candidates 
-                    WHERE resume_link IS NOT NULL OR cv_file IS NOT NULL
+                    WHERE DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE);
                 """)
+                stats["candidates_this_week"] = cur.fetchone()["count"]
+
+                # Candidates created this month
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM candidates 
+                    WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE);
+                """)
+                stats["candidates_this_month"] = cur.fetchone()["count"]
+
+                # With CV
+                cur.execute("SELECT COUNT(*) FROM candidates WHERE cv_file IS NOT NULL OR resume_link IS NOT NULL;")
                 stats["candidates_with_resume"] = cur.fetchone()["count"]
 
-                # Interviews stats
-                cur.execute("SELECT COUNT(*) FROM interviews")
+                # Without CV
+                stats["candidates_without_resume"] = stats["total_candidates"] - stats["candidates_with_resume"]
+
+                # Interviews total
+                cur.execute("SELECT COUNT(*) FROM interviews;")
                 stats["total_interviews"] = cur.fetchone()["count"]
 
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result = 'pass'")
+                # Interviews by result
+                cur.execute("SELECT result, COUNT(*) FROM interviews GROUP BY result;")
+                stats["interview_results"] = {row["result"] or "unspecified": row["count"] for row in cur.fetchall()}
+
+                # Scheduled interviews
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NULL OR result ILIKE 'scheduled';")
+                stats["interviews_scheduled"] = cur.fetchone()["count"]
+
+                # Completed interviews
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled';")
+                stats["interviews_completed"] = cur.fetchone()["count"]
+
+                # Interviews this week
+                cur.execute("""
+                    SELECT COUNT(*) 
+                    FROM interviews 
+                    WHERE DATE_TRUNC('week', scheduled_at) = DATE_TRUNC('week', CURRENT_DATE);
+                """)
+                stats["interviews_this_week"] = cur.fetchone()["count"]
+
+                # Pass / Fail breakdown
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'pass';")
                 stats["interviews_passed"] = cur.fetchone()["count"]
 
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result = 'fail'")
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'fail';")
                 stats["interviews_failed"] = cur.fetchone()["count"]
 
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NULL OR result = 'scheduled'")
-                stats["interviews_pending"] = cur.fetchone()["count"]
+                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'on hold';")
+                stats["interviews_on_hold"] = cur.fetchone()["count"]
+
+                # Per interviewer
+                cur.execute("SELECT interviewer, COUNT(*) FROM interviews GROUP BY interviewer;")
+                stats["per_interviewer"] = {row["interviewer"] or "unknown": row["count"] for row in cur.fetchall()}
+
+                # Per role (based on user role)
+                cur.execute("SELECT role, COUNT(*) FROM users GROUP BY role;")
+                stats["users_per_role"] = {row["role"]: row["count"] for row in cur.fetchall()}
 
                 return stats
     except Exception:
         logger.exception("Error getting candidate statistics")
-        return {
-            "total_candidates": 0,
-            "candidates_today": 0,
-            "candidates_with_resume": 0,
-            "total_interviews": 0,
-            "interviews_passed": 0,
-            "interviews_failed": 0,
-            "interviews_pending": 0,
-        }
+        return {}
     finally:
         conn.close()
-
-# === Storage Usage ===
-
-def get_cv_storage_usage(limit_mb: int = 100) -> dict | None:
-    """
-    Return storage usage stats for candidate CVs.
-    limit_mb = allowed storage cap in MB.
-    """
-    try:
-        used_bytes = get_total_cv_storage_usage()
-        used_mb = round(used_bytes / (1024 * 1024), 2)
-        usage_percent = round((used_mb / limit_mb) * 100, 2) if limit_mb > 0 else 0
-        return {
-            "used_bytes": used_bytes,
-            "used_mb": used_mb,
-            "limit_mb": limit_mb,
-            "usage_percent": usage_percent,
-        }
-    except Exception:
-        logger.exception("Error calculating CV storage usage")
-        return None
