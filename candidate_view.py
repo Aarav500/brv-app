@@ -9,7 +9,7 @@ from db_postgres import (
     set_candidate_permission,
     save_candidate_cv,
     get_candidate_cv,
-    delete_candidate_cv,
+    delete_candidate,
     get_conn,
 )
 from receptionist import _send_candidate_code   # ✅ for emailing Candidate ID
