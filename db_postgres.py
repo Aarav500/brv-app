@@ -487,6 +487,61 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
     finally:
         conn.close()
 
+def get_candidate_history(candidate_id: str):
+    """
+    Return a combined chronological history of candidate's lifecycle:
+    creation, updates, CV uploads, receptionist assessments, interviews, deletions.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                events = []
+
+                # Candidate creation
+                cur.execute("""
+                    SELECT created_at AS timestamp, 'Candidate Created' AS event, name AS detail
+                    FROM candidates WHERE candidate_id = %s
+                """, (candidate_id,))
+                events.extend(cur.fetchall() or [])
+
+                # Candidate updates
+                cur.execute("""
+                    SELECT updated_at AS timestamp, 'Candidate Updated' AS event, name AS detail
+                    FROM candidates WHERE candidate_id = %s
+                """, (candidate_id,))
+                events.extend(cur.fetchall() or [])
+
+                # CV uploads
+                cur.execute("""
+                    SELECT updated_at AS timestamp, 'CV Uploaded' AS event, cv_filename AS detail
+                    FROM candidates WHERE candidate_id = %s AND cv_file IS NOT NULL
+                """, (candidate_id,))
+                events.extend(cur.fetchall() or [])
+
+                # Receptionist assessments
+                cur.execute("""
+                    SELECT created_at AS timestamp, 'Receptionist Assessment' AS event, comments AS detail
+                    FROM receptionist_assessments WHERE candidate_id = %s
+                """, (candidate_id,))
+                events.extend(cur.fetchall() or [])
+
+                # Interviews
+                cur.execute("""
+                    SELECT created_at AS timestamp, 'Interview Scheduled' AS event, interviewer AS detail
+                    FROM interviews WHERE candidate_id = %s
+                """, (candidate_id,))
+                events.extend(cur.fetchall() or [])
+
+                # Sort all events by time
+                events_sorted = sorted(events, key=lambda x: x.get("timestamp") or datetime.min)
+                return events_sorted
+    except Exception:
+        logger.exception(f"Error fetching candidate history for {candidate_id}")
+        return []
+    finally:
+        conn.close()
+
 
 # Receptionist assessments
 def save_receptionist_assessment(candidate_id: str, speed_test: int, accuracy_test: int,
@@ -570,6 +625,49 @@ def get_interviews_for_candidate(candidate_id: str):
     except Exception:
         logger.exception(f"Error getting interviews for candidate {candidate_id}")
         return []
+    finally:
+        conn.close()
+
+def get_interviewer_performance_stats(user_id: int):
+    """
+    Return stats for a given interviewer: scheduled, completed, success rate.
+    Assumes interviewer name matches the user email.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Find interviewer name by user_id
+                cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+                row = cur.fetchone()
+                if not row:
+                    return {}
+
+                interviewer_name = row["email"]
+
+                cur.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE result ILIKE 'scheduled') AS scheduled,
+                        COUNT(*) FILTER (WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled') AS completed,
+                        COUNT(*) FILTER (WHERE result ILIKE 'pass') AS passed
+                    FROM interviews
+                    WHERE interviewer = %s
+                """, (interviewer_name,))
+                stats = cur.fetchone()
+
+                completed = stats.get("completed", 0) or 0
+                passed = stats.get("passed", 0) or 0
+                success_rate = round((passed / completed) * 100, 1) if completed > 0 else 0
+
+                return {
+                    "scheduled": stats.get("scheduled", 0) or 0,
+                    "completed": completed,
+                    "passed": passed,
+                    "success_rate": success_rate,
+                }
+    except Exception:
+        logger.exception(f"Error fetching interviewer performance for {user_id}")
+        return {}
     finally:
         conn.close()
 
