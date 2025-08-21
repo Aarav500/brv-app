@@ -1,82 +1,82 @@
 # db_postgres.py
 import os
+import logging
+from datetime import datetime
+from typing import Optional, Tuple, List, Dict, Any
+
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import bcrypt
-from datetime import datetime
-import logging
 from dotenv import load_dotenv
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
-# Optional: configure logging level if not configured elsewhere
-# logging.basicConfig(level=logging.INFO)
 
 
+# -----------------------------
+# Connection
+# -----------------------------
 def get_conn():
-    """Get PostgreSQL database connection"""
+    """Get PostgreSQL database connection."""
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL environment variable not set")
-
     return psycopg2.connect(
         database_url,
         sslmode=os.getenv("PGSSLMODE", "require")
     )
 
 
+# -----------------------------
+# Initialization / migrations
+# -----------------------------
+def _ensure_column(cur, table: str, column: str, ddl: str):
+    cur.execute(f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = %s AND column_name = %s
+            ) THEN
+                EXECUTE %s;
+            END IF;
+        END$$;
+    """, (table, column, f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+
+
 def init_db():
-    """Initialize database tables and ensure schema consistency"""
+    """Initialize database tables and ensure schema consistency."""
     conn = get_conn()
     try:
         with conn:
             with conn.cursor() as cur:
-                # --- USERS TABLE ---
+                # USERS
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS users
-                    (
+                    CREATE TABLE IF NOT EXISTS users (
                         id SERIAL PRIMARY KEY,
                         email VARCHAR(255) UNIQUE NOT NULL,
                         password_hash VARCHAR(255) NOT NULL,
                         role VARCHAR(50) NOT NULL DEFAULT 'candidate',
                         force_password_reset BOOLEAN DEFAULT FALSE,
-
-                        -- Candidate Management Permissions
-                        can_view_cv BOOLEAN DEFAULT FALSE,
-                        can_upload_cv BOOLEAN DEFAULT FALSE,
-                        can_edit_cv BOOLEAN DEFAULT FALSE,
-                        can_delete_candidate BOOLEAN DEFAULT FALSE,
-
-                        -- Access & Control Permissions
+                        can_view_cvs BOOLEAN DEFAULT FALSE,
+                        can_delete_records BOOLEAN DEFAULT FALSE,
                         can_grant_delete BOOLEAN DEFAULT FALSE,
-                        can_manage_users BOOLEAN DEFAULT FALSE,
-                        can_add_candidates BOOLEAN DEFAULT FALSE,
-                        can_edit_candidates BOOLEAN DEFAULT FALSE,
-                        can_view_all_candidates BOOLEAN DEFAULT FALSE,
-
-                        -- Interviewer & Feedback Permissions
-                        can_schedule_interviews BOOLEAN DEFAULT FALSE,
-                        can_view_interview_feedback BOOLEAN DEFAULT FALSE,
-                        can_edit_interview_feedback BOOLEAN DEFAULT FALSE,
-                        can_delete_interview_feedback BOOLEAN DEFAULT FALSE,
-
-                        -- Reporting & Analytics Permissions
-                        can_view_reports BOOLEAN DEFAULT FALSE,
-                        can_export_reports BOOLEAN DEFAULT FALSE,
-
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
 
-                # --- CANDIDATES TABLE ---
+                # CANDIDATES
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS candidates
-                    (
+                    CREATE TABLE IF NOT EXISTS candidates (
                         id SERIAL PRIMARY KEY,
                         candidate_id VARCHAR(50) UNIQUE NOT NULL,
                         name VARCHAR(255),
+                        email VARCHAR(255),
+                        phone VARCHAR(50),
+
+                        -- Expanded pre-interview fields
                         current_address TEXT,
                         permanent_address TEXT,
                         dob DATE,
@@ -85,51 +85,43 @@ def init_db():
                         marital_status VARCHAR(50),
                         highest_qualification VARCHAR(255),
                         work_experience TEXT,
-                        referral TEXT,
+                        referral VARCHAR(255),
                         ready_festivals BOOLEAN DEFAULT FALSE,
                         ready_late_nights BOOLEAN DEFAULT FALSE,
-                        email VARCHAR(255),
-                        phone VARCHAR(50),
+
+                        -- Legacy compatibility
+                        address TEXT,      -- keep for older data (unused by UI)
                         form_data JSONB DEFAULT '{}'::jsonb,
                         resume_link TEXT,
                         can_edit BOOLEAN DEFAULT FALSE,
                         created_by VARCHAR(100),
+
+                        -- CV blob store
+                        cv_file BYTEA,
+                        cv_filename TEXT,
+
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
 
-                # Ensure CV columns exist (migration-safe)
-                cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_file BYTEA;")
-                cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_filename TEXT;")
-
-                # --- INTERVIEWS TABLE ---
+                # INTERVIEWS
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS interviews
-                    (
+                    CREATE TABLE IF NOT EXISTS interviews (
                         id SERIAL PRIMARY KEY,
-                        candidate_id VARCHAR(50) NOT NULL,
+                        candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id) ON DELETE CASCADE,
                         scheduled_at TIMESTAMP,
                         interviewer VARCHAR(255),
                         result VARCHAR(50),
                         notes TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (candidate_id) REFERENCES candidates(candidate_id) ON DELETE CASCADE
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
 
-                # Indexes
+                # RECEPTIONIST ASSESSMENTS
                 cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);
-                    CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
-                    CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
-                """)
-
-                # --- RECEPTIONIST ASSESSMENTS ---
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS receptionist_assessments
-                    (
+                    CREATE TABLE IF NOT EXISTS receptionist_assessments (
                         id SERIAL PRIMARY KEY,
                         candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id) ON DELETE CASCADE,
                         speed_test INTEGER,
@@ -141,73 +133,72 @@ def init_db():
                     );
                 """)
 
-        logger.info("Database tables initialized successfully (with migration checks)")
-    except Exception:
-        logger.exception("Failed to initialize database")
-        raise
+                # Indexes
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
+                """)
+
+        logger.info("Database initialized / migrated.")
     finally:
         conn.close()
 
 
-# === Password utilities ===
-
+# -----------------------------
+# Password helpers
+# -----------------------------
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
-def verify_password(password: str, hashed: str) -> bool:
+def verify_password(password: str, password_hash: str) -> bool:
     try:
-        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-    except Exception as e:
-        logger.error(f"Password verification error: {e}")
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except Exception:
         return False
 
 
-# === User management ===
-
-def get_user_by_email(email: str):
+# -----------------------------
+# Users
+# -----------------------------
+def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM users WHERE email = %s", (email,))
-                return cur.fetchone()
-    except Exception:
-        logger.exception(f"Error getting user by email: {email}")
-        return None
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE email=%s", (email,))
+            return cur.fetchone()
     finally:
         conn.close()
 
 
-def get_user_by_id(user_id: int):
+def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-                return cur.fetchone()
-    except Exception:
-        logger.exception(f"Error getting user by ID: {user_id}")
-        return None
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE id=%s", (user_id,))
+            return cur.fetchone()
     finally:
         conn.close()
 
 
-def update_user_role(email: str, new_role: str) -> bool:
+def create_user_in_db(email: str, password: str, role: str = "candidate") -> bool:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE users SET role = %s, updated_at = CURRENT_TIMESTAMP WHERE email = %s",
-                    (new_role, email)
-                )
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error updating user role for {email}")
-        return False
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM users WHERE email=%s", (email,))
+            if cur.fetchone():
+                return False
+            cur.execute("""
+                INSERT INTO users (email, password_hash, role)
+                VALUES (%s, %s, %s)
+            """, (email, hash_password(password), role))
+            return True
     finally:
         conn.close()
 
@@ -215,73 +206,15 @@ def update_user_role(email: str, new_role: str) -> bool:
 def update_user_password(email: str, new_password: str) -> bool:
     conn = get_conn()
     try:
-        password_hash = hash_password(new_password)
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """UPDATE users
-                       SET password_hash        = %s,
-                           force_password_reset = FALSE,
-                           updated_at           = CURRENT_TIMESTAMP
-                       WHERE email = %s""",
-                    (password_hash, email)
-                )
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error updating password for {email}")
-        return False
-    finally:
-        conn.close()
-
-
-def get_all_users():
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM users ORDER BY created_at DESC")
-                return cur.fetchall()
-    except Exception:
-        logger.exception("Error getting all users")
-        return []
-    finally:
-        conn.close()
-
-
-def create_user_in_db(email: str, password: str, role: str = "candidate") -> bool:
-    """
-    Create a new user; explicitly set all permission flags to safe defaults.
-    """
-    conn = get_conn()
-    try:
-        password_hash = hash_password(password)
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO users (
-                        email, password_hash, role,
-                        can_view_cv, can_upload_cv, can_edit_cv, can_delete_candidate,
-                        can_grant_delete, can_manage_users, can_add_candidates, can_edit_candidates,
-                        can_view_all_candidates, can_schedule_interviews, can_view_interview_feedback,
-                        can_edit_interview_feedback, can_delete_interview_feedback,
-                        can_view_reports, can_export_reports
-                    )
-                    VALUES (
-                        %s, %s, %s,
-                        FALSE, FALSE, FALSE, FALSE,
-                        FALSE, FALSE, FALSE, FALSE,
-                        FALSE, FALSE, FALSE,
-                        FALSE, FALSE,
-                        FALSE, FALSE
-                    )
-                """, (email, password_hash, role))
-                return True
-    except psycopg2.errors.UniqueViolation:
-        logger.warning(f"User with email {email} already exists")
-        return False
-    except Exception:
-        logger.exception(f"Error creating user {email}")
-        return False
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET password_hash=%s,
+                    force_password_reset=FALSE,
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE email=%s
+            """, (hash_password(new_password), email))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
@@ -289,163 +222,199 @@ def create_user_in_db(email: str, password: str, role: str = "candidate") -> boo
 def delete_user(user_id: int) -> bool:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error deleting user {user_id}")
+        with conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id=%s", (user_id,))
+            return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_all_users() -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users ORDER BY id")
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def set_user_permission(user_id: int,
+                        can_view: bool | None = None,
+                        can_delete: bool | None = None,
+                        can_grant_delete: bool | None = None) -> bool:
+    if can_view is None and can_delete is None and can_grant_delete is None:
         return False
+    sets, params = [], []
+    if can_view is not None:
+        sets.append("can_view_cvs=%s")
+        params.append(can_view)
+    if can_delete is not None:
+        sets.append("can_delete_records=%s")
+        params.append(can_delete)
+    if can_grant_delete is not None:
+        sets.append("can_grant_delete=%s")
+        params.append(can_grant_delete)
+    params.append(user_id)
+    sql = f"UPDATE users SET {', '.join(sets)}, updated_at=CURRENT_TIMESTAMP WHERE id=%s"
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
 
-# === CV Management ===
-
-def save_candidate_cv(candidate_id: str, file_bytes: bytes, filename: str | None = None) -> bool:
+def get_all_users_with_permissions() -> List[Dict[str, Any]]:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE candidates
-                    SET cv_file = %s, cv_filename = %s, updated_at = CURRENT_TIMESTAMP
-                    WHERE candidate_id = %s
-                """, (psycopg2.Binary(file_bytes), filename, candidate_id))
-                if cur.rowcount == 0:
-                    logger.warning(f"No candidate found for resume upload (candidate_id={candidate_id})")
-                else:
-                    logger.info(f"Resume saved for candidate {candidate_id} as {filename}")
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error saving CV for candidate {candidate_id}")
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, email, role, can_view_cvs, can_delete_records, can_grant_delete,
+                       created_at, updated_at, force_password_reset
+                FROM users ORDER BY id
+            """)
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_user_permissions(user_id: int) -> Dict[str, Any]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT role, can_view_cvs, can_delete_records, can_grant_delete
+                FROM users WHERE id=%s
+            """, (user_id,))
+            return cur.fetchone() or {}
+    finally:
+        conn.close()
+
+
+def user_can_manage_delete(user_id: int) -> bool:
+    p = get_user_permissions(user_id)
+    r = (p.get("role") or "").lower()
+    return r in ("ceo", "admin") or bool(p.get("can_grant_delete"))
+
+
+def user_can_delete(user_id: int) -> bool:
+    p = get_user_permissions(user_id)
+    r = (p.get("role") or "").lower()
+    return r in ("ceo", "admin") or bool(p.get("can_delete_records"))
+
+
+# -----------------------------
+# Candidate CRUD + Search
+# -----------------------------
+def create_candidate_in_db(candidate_id: str,
+                           name: str,
+                           email: str,
+                           phone: str,
+                           current_address: str,
+                           permanent_address: str,
+                           dob: Optional[str],
+                           caste: Optional[str],
+                           sub_caste: Optional[str],
+                           marital_status: Optional[str],
+                           highest_qualification: Optional[str],
+                           work_experience: Optional[str],
+                           referral: Optional[str],
+                           ready_festivals: bool,
+                           ready_late_nights: bool,
+                           form_data: dict,
+                           created_by: Optional[str]) -> Optional[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO candidates (
+                    candidate_id, name, email, phone,
+                    current_address, permanent_address, dob, caste, sub_caste,
+                    marital_status, highest_qualification, work_experience, referral,
+                    ready_festivals, ready_late_nights,
+                    form_data, created_by, can_edit
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, FALSE)
+                RETURNING *;
+            """, (candidate_id, name, email, phone,
+                  current_address, permanent_address, dob, caste, sub_caste,
+                  marital_status, highest_qualification, work_experience, referral,
+                  ready_festivals, ready_late_nights,
+                  Json(form_data or {}), created_by))
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def get_candidate_by_id(candidate_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def get_all_candidates() -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM candidates ORDER BY created_at DESC")
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def find_candidates_by_name(q: str) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT * FROM candidates
+                WHERE LOWER(name) LIKE %s
+                ORDER BY updated_at DESC LIMIT 200
+            """, (f"%{q.lower()}%",))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def update_candidate_form_data(candidate_id: str, updates: dict) -> bool:
+    """
+    Supports keys: name, email, phone, current_address, permanent_address,
+    dob, caste, sub_caste, marital_status, highest_qualification, work_experience,
+    referral, ready_festivals, ready_late_nights, form_patch (merged into form_data)
+    """
+    allowed_cols = {
+        "name", "email", "phone", "current_address", "permanent_address", "dob", "caste",
+        "sub_caste", "marital_status", "highest_qualification", "work_experience",
+        "referral", "ready_festivals", "ready_late_nights"
+    }
+    sets, params = [], []
+    for k, v in (updates or {}).items():
+        if k in allowed_cols:
+            sets.append(f"{k}=%s")
+            params.append(v)
+    form_patch = updates.get("form_patch")
+    if form_patch:
+        sets.append("form_data = COALESCE(form_data,'{}'::jsonb) || %s::jsonb")
+        params.append(Json(form_patch))
+    if not sets:
         return False
-    finally:
-        conn.close()
+    params.append(candidate_id)
 
-
-def get_candidate_cv(candidate_id: str):
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT cv_file, cv_filename FROM candidates WHERE candidate_id = %s", (candidate_id,))
-                row = cur.fetchone()
-                if row and row[0]:
-                    return bytes(row[0]), row[1]
-                return None, None
-    except Exception:
-        logger.exception(f"Error retrieving CV for candidate {candidate_id}")
-        return None, None
-    finally:
-        conn.close()
-
-
-def get_total_cv_storage_usage():
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COALESCE(SUM(OCTET_LENGTH(cv_file)), 0) FROM candidates")
-                return cur.fetchone()[0]
-    except Exception:
-        logger.exception("Error getting CV storage usage")
-        return 0
-    finally:
-        conn.close()
-
-
-# === Candidate Management ===
-
-def create_candidate_in_db(candidate_id: str, name: str, address: str, dob: str,
-                           caste: str, email: str, phone: str,
-                           form_data: dict, created_by: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    INSERT INTO candidates (
-                        candidate_id, name, current_address, dob, caste,
-                        email, phone, form_data, created_by, can_edit
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *;
-                """, (candidate_id, name, address, dob, caste,
-                      email, phone, Json(form_data), created_by, False))
-                return cur.fetchone()
-    except psycopg2.errors.UniqueViolation:
-        logger.warning(f"Candidate ID {candidate_id} already exists")
-        return None
-    except Exception:
-        logger.exception(f"Error creating candidate {candidate_id}")
-        return None
-    finally:
-        conn.close()
-
-
-def get_candidate_by_id(candidate_id: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM candidates WHERE candidate_id = %s", (candidate_id,))
-                return cur.fetchone()
-    except Exception:
-        logger.exception(f"Error getting candidate {candidate_id}")
-        return None
-    finally:
-        conn.close()
-
-
-def get_all_candidates():
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM candidates ORDER BY created_at DESC")
-                return cur.fetchall()
-    except Exception:
-        logger.exception("Error getting all candidates")
-        return []
-    finally:
-        conn.close()
-
-
-def find_candidates_by_name(name: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT *
-                    FROM candidates
-                    WHERE LOWER(name) LIKE %s
-                    ORDER BY updated_at DESC
-                """, (f"%{name.lower()}%",))
-                return cur.fetchall()
-    except Exception:
-        logger.exception(f"Error finding candidates by name: {name}")
-        return []
-    finally:
-        conn.close()
-
-
-def update_candidate_form_data(candidate_id: str, form_data: dict) -> bool:
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE candidates
-                    SET form_data  = %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE candidate_id = %s
-                """, (Json(form_data), candidate_id))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error updating form data for candidate {candidate_id}")
-        return False
+        with conn, conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE candidates
+                SET {', '.join(sets)}, updated_at=CURRENT_TIMESTAMP
+                WHERE candidate_id=%s
+            """, tuple(params))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
@@ -453,18 +422,13 @@ def update_candidate_form_data(candidate_id: str, form_data: dict) -> bool:
 def update_candidate_resume_link(candidate_id: str, resume_link: str) -> bool:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE candidates
-                    SET resume_link = %s,
-                        updated_at  = CURRENT_TIMESTAMP
-                    WHERE candidate_id = %s
-                """, (resume_link, candidate_id))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error updating resume link for candidate {candidate_id}")
-        return False
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE candidates
+                SET resume_link=%s, updated_at=CURRENT_TIMESTAMP
+                WHERE candidate_id=%s
+            """, (resume_link, candidate_id))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
@@ -472,574 +436,303 @@ def update_candidate_resume_link(candidate_id: str, resume_link: str) -> bool:
 def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE candidates
-                    SET can_edit   = %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE candidate_id = %s
-                """, (can_edit, candidate_id))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error setting permission for candidate {candidate_id}")
-        return False
-    finally:
-        conn.close()
-
-def get_candidate_history(candidate_id: str):
-    """
-    Return a combined chronological history of candidate's lifecycle:
-    creation, updates, CV uploads, receptionist assessments, interviews, deletions.
-    """
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                events = []
-
-                # Candidate creation
-                cur.execute("""
-                    SELECT created_at AS timestamp, 'Candidate Created' AS event, name AS detail
-                    FROM candidates WHERE candidate_id = %s
-                """, (candidate_id,))
-                events.extend(cur.fetchall() or [])
-
-                # Candidate updates
-                cur.execute("""
-                    SELECT updated_at AS timestamp, 'Candidate Updated' AS event, name AS detail
-                    FROM candidates WHERE candidate_id = %s
-                """, (candidate_id,))
-                events.extend(cur.fetchall() or [])
-
-                # CV uploads
-                cur.execute("""
-                    SELECT updated_at AS timestamp, 'CV Uploaded' AS event, cv_filename AS detail
-                    FROM candidates WHERE candidate_id = %s AND cv_file IS NOT NULL
-                """, (candidate_id,))
-                events.extend(cur.fetchall() or [])
-
-                # Receptionist assessments
-                cur.execute("""
-                    SELECT created_at AS timestamp, 'Receptionist Assessment' AS event, comments AS detail
-                    FROM receptionist_assessments WHERE candidate_id = %s
-                """, (candidate_id,))
-                events.extend(cur.fetchall() or [])
-
-                # Interviews
-                cur.execute("""
-                    SELECT created_at AS timestamp, 'Interview Scheduled' AS event, interviewer AS detail
-                    FROM interviews WHERE candidate_id = %s
-                """, (candidate_id,))
-                events.extend(cur.fetchall() or [])
-
-                # Sort all events by time
-                events_sorted = sorted(events, key=lambda x: x.get("timestamp") or datetime.min)
-                return events_sorted
-    except Exception:
-        logger.exception(f"Error fetching candidate history for {candidate_id}")
-        return []
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE candidates
+                SET can_edit=%s, updated_at=CURRENT_TIMESTAMP
+                WHERE candidate_id=%s
+            """, (can_edit, candidate_id))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
 
-# Receptionist assessments
-def save_receptionist_assessment(candidate_id: str, speed_test: int, accuracy_test: int,
-                                 work_commitment: str, english_understanding: str,
-                                 comments: str):
+def delete_candidate(candidate_id: str) -> bool:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO receptionist_assessments
-                        (candidate_id, speed_test, accuracy_test, work_commitment,
-                         english_understanding, comments)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (candidate_id, speed_test, accuracy_test,
-                      work_commitment, english_understanding, comments))
-                return True
-    except Exception:
-        logger.exception(f"Error saving receptionist assessment for candidate {candidate_id}")
-        return False
-    finally:
-        conn.close()
-
-
-def get_receptionist_assessment(candidate_id: str):
-    """
-    Fetch the latest receptionist assessment for a candidate.
-    """
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT speed_test, accuracy_test, work_commitment,
-                           english_understanding, comments, created_at
-                    FROM receptionist_assessments
-                    WHERE candidate_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT 1;
-                """, (candidate_id,))
-                return cur.fetchone()
-    except Exception:
-        logger.exception(f"Error getting receptionist assessment for candidate {candidate_id}")
-        return None
-    finally:
-        conn.close()
-
-
-# === Interview Management ===
-
-def create_interview(candidate_id: str, scheduled_at: datetime, interviewer: str, result: str = None,
-                     notes: str = None):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO interviews (candidate_id, scheduled_at, interviewer, result, notes)
-                    VALUES (%s, %s, %s, %s, %s) RETURNING id;
-                """, (candidate_id, scheduled_at, interviewer, result, notes))
-                return cur.fetchone()[0]
-    except Exception:
-        logger.exception(f"Error creating interview for candidate {candidate_id}")
-        return None
-    finally:
-        conn.close()
-
-
-def get_interviews_for_candidate(candidate_id: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT *
-                    FROM interviews
-                    WHERE candidate_id = %s
-                    ORDER BY created_at DESC
-                """, (candidate_id,))
-                return cur.fetchall()
-    except Exception:
-        logger.exception(f"Error getting interviews for candidate {candidate_id}")
-        return []
-    finally:
-        conn.close()
-
-def get_interviewer_performance_stats(user_id: int):
-    """
-    Return stats for a given interviewer: scheduled, completed, success rate.
-    Assumes interviewer name matches the user email.
-    """
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Find interviewer name by user_id
-                cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
-                row = cur.fetchone()
-                if not row:
-                    return {}
-
-                interviewer_name = row["email"]
-
-                cur.execute("""
-                    SELECT
-                        COUNT(*) FILTER (WHERE result ILIKE 'scheduled') AS scheduled,
-                        COUNT(*) FILTER (WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled') AS completed,
-                        COUNT(*) FILTER (WHERE result ILIKE 'pass') AS passed
-                    FROM interviews
-                    WHERE interviewer = %s
-                """, (interviewer_name,))
-                stats = cur.fetchone()
-
-                completed = stats.get("completed", 0) or 0
-                passed = stats.get("passed", 0) or 0
-                success_rate = round((passed / completed) * 100, 1) if completed > 0 else 0
-
-                return {
-                    "scheduled": stats.get("scheduled", 0) or 0,
-                    "completed": completed,
-                    "passed": passed,
-                    "success_rate": success_rate,
-                }
-    except Exception:
-        logger.exception(f"Error fetching interviewer performance for {user_id}")
-        return {}
-    finally:
-        conn.close()
-
-
-def get_all_interviews():
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT i.*, c.name as candidate_name, c.email as candidate_email
-                    FROM interviews i
-                             JOIN candidates c ON i.candidate_id = c.candidate_id
-                    ORDER BY i.scheduled_at DESC
-                """)
-                return cur.fetchall()
-    except Exception:
-        logger.exception("Error getting all interviews")
-        return []
-    finally:
-        conn.close()
-
-
-def search_candidates_by_name_or_email(query: str):
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                if query.strip():
-                    cur.execute("""
-                        SELECT *
-                        FROM candidates
-                        WHERE LOWER(name) LIKE %s
-                           OR LOWER(email) LIKE %s
-                        ORDER BY updated_at DESC LIMIT 50
-                    """, (f"%{query.lower()}%", f"%{query.lower()}%"))
-                else:
-                    cur.execute("""
-                        SELECT *
-                        FROM candidates
-                        ORDER BY updated_at DESC LIMIT 50
-                    """)
-                return cur.fetchall()
-    except Exception:
-        logger.exception(f"Error searching candidates with query: {query}")
-        return []
-    finally:
-        conn.close()
-
-
-# === CEO Permission Management ===
-
-def set_user_permission(user_id: int, **permissions) -> bool:
-    """
-    Dynamically update one or more permission fields on users.
-    Example:
-        set_user_permission(7, can_view_cv=True, can_delete_candidate=False)
-    """
-    if not permissions:
-        return False
-
-    set_clause = ", ".join([f"{k} = %s" for k in permissions.keys()])
-    values = list(permissions.values()) + [user_id]
-    sql = f"UPDATE users SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
-
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, tuple(values))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error updating permissions for user {user_id}")
-        return False
-    finally:
-        conn.close()
-
-
-def get_all_users_with_permissions():
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT id, email, role,
-                           can_view_cv,
-                           can_upload_cv,
-                           can_edit_cv,
-                           can_delete_candidate,
-                           can_grant_delete,
-                           can_manage_users,
-                           can_add_candidates,
-                           can_edit_candidates,
-                           can_view_all_candidates,
-                           can_schedule_interviews,
-                           can_view_interview_feedback,
-                           can_edit_interview_feedback,
-                           can_delete_interview_feedback,
-                           can_view_reports,
-                           can_export_reports,
-                           created_at
-                    FROM users
-                    ORDER BY created_at DESC
-                """)
-                return cur.fetchall()
-    except Exception:
-        logger.exception("Error getting users with permissions")
-        return []
-    finally:
-        conn.close()
-
-
-def seed_sample_users():
-    """Create sample users for testing (only if they don’t exist)."""
-    sample_users = [
-        ("admin@brv.com", "admin123", "admin"),
-        ("ceo@brv.com", "ceo123", "ceo"),
-        ("receptionist@brv.com", "recep123", "receptionist"),
-        ("interviewer@brv.com", "interview123", "interviewer"),
-        ("hr@brv.com", "hr123", "hr"),
-        ("candidate@brv.com", "candidate123", "candidate")
-    ]
-
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                for email, password, role in sample_users:
-                    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
-                    if not cur.fetchone():
-                        password_hash = hash_password(password)
-                        cur.execute("""
-                            INSERT INTO users (
-                                email, password_hash, role,
-                                can_view_cv, can_upload_cv, can_edit_cv, can_delete_candidate,
-                                can_grant_delete, can_manage_users, can_add_candidates, can_edit_candidates,
-                                can_view_all_candidates, can_schedule_interviews, can_view_interview_feedback,
-                                can_edit_interview_feedback, can_delete_interview_feedback,
-                                can_view_reports, can_export_reports
-                            )
-                            VALUES (
-                                %s, %s, %s,
-                                FALSE, FALSE, FALSE, FALSE,
-                                FALSE, FALSE, FALSE, FALSE,
-                                FALSE, FALSE, FALSE,
-                                FALSE, FALSE,
-                                FALSE, FALSE
-                            )
-                        """, (email, password_hash, role))
-                        logger.info(f"Created sample user: {email} with role: {role}")
-    except Exception:
-        logger.exception("Error creating sample users")
-    finally:
-        conn.close()
-
-
-# === Candidate Deletion (permission-aware) ===
-
-def get_user_permissions(user_id: int):
-    """Fetch all permissions and role for a user."""
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT role,
-                           can_view_cv,
-                           can_upload_cv,
-                           can_edit_cv,
-                           can_delete_candidate,
-                           can_grant_delete,
-                           can_manage_users,
-                           can_add_candidates,
-                           can_edit_candidates,
-                           can_view_all_candidates,
-                           can_schedule_interviews,
-                           can_view_interview_feedback,
-                           can_edit_interview_feedback,
-                           can_delete_interview_feedback,
-                           can_view_reports,
-                           can_export_reports
-                    FROM users
-                    WHERE id = %s
-                """, (user_id,))
-                return cur.fetchone() or {}
-    except Exception:
-        logger.exception(f"Error reading permissions for user {user_id}")
-        return {}
-    finally:
-        conn.close()
-
-
-def user_can_manage_delete(user_id: int) -> bool:
-    perms = get_user_permissions(user_id)
-    role = (perms.get("role") or "").lower()
-    if role in ("ceo", "admin"):
-        return True
-    return bool(perms.get("can_grant_delete"))
-
-
-def user_can_delete(user_id: int) -> bool:
-    perms = get_user_permissions(user_id)
-    role = (perms.get("role") or "").lower()
-    return role in ("ceo", "admin") or bool(perms.get("can_delete_candidate"))
-
-
-def set_user_delete_permission(granter_user_id: int, target_user_id: int, allowed: bool) -> bool:
-    if not user_can_manage_delete(granter_user_id):
-        return False
-    return set_user_permission(target_user_id, can_delete_candidate=allowed)
-
-
-def delete_candidate(candidate_id: str, actor_id: int) -> bool:
-    """
-    Deletes the candidate and all related data (CV, interviews, assessments).
-    Ensures that only authorized users can perform deletion.
-    """
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                # Check if the actor has permission
-                cur.execute("""
-                    SELECT role, can_delete_candidate
-                    FROM users
-                    WHERE id = %s
-                """, (actor_id,))
-                row = cur.fetchone()
-                if not row:
-                    logger.warning("Actor not found while attempting delete")
-                    return False
-
-                role = row[0] or ""
-                can_delete_flag = row[1] if len(row) > 1 else False
-
-                # role-based or permission flag
-                if (role.lower() not in ("ceo", "admin")) and not can_delete_flag:
-                    logger.warning(f"User {actor_id} does not have delete permission")
-                    return False  # Actor does NOT have permission
-
-                # Attempt to delete CV from drive if you have integration function
-                try:
-                    # drive_and_cv_views.delete_cv_from_drive should accept candidate_id
-                    from drive_and_cv_views import delete_cv_from_drive  # optional
-                    try:
-                        delete_cv_from_drive(candidate_id)
-                    except Exception as e:
-                        logger.warning(f"Failed to delete CV from drive for {candidate_id}: {e}")
-                except Exception:
-                    # module or function not available - skip drive deletion
-                    pass
-
-                # Delete candidate interviews
-                cur.execute("DELETE FROM interviews WHERE candidate_id = %s", (candidate_id,))
-
-                # Delete receptionist assessments
-                cur.execute("DELETE FROM receptionist_assessments WHERE candidate_id = %s", (candidate_id,))
-
-                # Finally, delete the candidate itself
-                cur.execute("DELETE FROM candidates WHERE candidate_id = %s", (candidate_id,))
-
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error deleting candidate {candidate_id}")
-        return False
+        with conn, conn.cursor() as cur:
+            # interviews / assessments cascade due to FK ON DELETE CASCADE
+            cur.execute("DELETE FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
 
 def delete_candidate_by_actor(candidate_id: str, actor_user_id: int) -> bool:
-    """Wrapper used by higher-level code (UI) — enforces permission checks."""
-    return delete_candidate(candidate_id, actor_user_id)
+    if not user_can_delete(actor_user_id):
+        logger.warning("User %s lacks permission to delete.", actor_user_id)
+        return False
+    return delete_candidate(candidate_id)
 
 
-# === Candidate Statistics ===
-
-def get_candidate_statistics():
-    """
-    Collect as many useful statistics as possible for CEO dashboard.
-    """
+# -----------------------------
+# CV storage helpers
+# -----------------------------
+def save_candidate_cv(candidate_id: str, file_bytes: bytes, filename: Optional[str] = None) -> bool:
     conn = get_conn()
     try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                stats = {}
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE candidates
+                SET cv_file=%s, cv_filename=%s, updated_at=CURRENT_TIMESTAMP
+                WHERE candidate_id=%s
+            """, (psycopg2.Binary(file_bytes), filename, candidate_id))
+            return cur.rowcount > 0
+    finally:
+        conn.close()
 
-                # Total candidates
-                cur.execute("SELECT COUNT(*) FROM candidates;")
-                stats["total_candidates"] = cur.fetchone()["count"]
 
-                # Candidates created today
-                cur.execute("SELECT COUNT(*) FROM candidates WHERE DATE(created_at) = CURRENT_DATE;")
-                stats["candidates_today"] = cur.fetchone()["count"]
+def get_candidate_cv(candidate_id: str) -> Tuple[Optional[bytes], Optional[str]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT cv_file, cv_filename FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return bytes(row[0]), row[1]
+            return None, None
+    finally:
+        conn.close()
 
-                # Candidates created this week
+
+def delete_candidate_cv(candidate_id: str) -> bool:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE candidates
+                SET cv_file=NULL, cv_filename=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE candidate_id=%s
+            """, (candidate_id,))
+            return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_total_cv_storage_usage() -> int:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(SUM(OCTET_LENGTH(cv_file)),0) FROM candidates")
+            return cur.fetchone()[0] or 0
+    finally:
+        conn.close()
+
+
+# -----------------------------
+# Receptionist assessments
+# -----------------------------
+def save_receptionist_assessment(candidate_id: str,
+                                 speed_test: Optional[int],
+                                 accuracy_test: Optional[int],
+                                 work_commitment: Optional[str],
+                                 english_understanding: Optional[str],
+                                 comments: Optional[str]) -> bool:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO receptionist_assessments
+                    (candidate_id, speed_test, accuracy_test, work_commitment,
+                     english_understanding, comments)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (candidate_id, speed_test, accuracy_test, work_commitment,
+                  english_understanding, comments))
+            return True
+    finally:
+        conn.close()
+
+
+def get_receptionist_assessments(candidate_id: str) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT * FROM receptionist_assessments
+                WHERE candidate_id=%s ORDER BY created_at DESC
+            """, (candidate_id,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+# -----------------------------
+# Interviews
+# -----------------------------
+def create_interview(candidate_id: str,
+                     scheduled_at: Optional[datetime],
+                     interviewer: Optional[str],
+                     result: Optional[str] = None,
+                     notes: Optional[str] = None) -> Optional[int]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO interviews (candidate_id, scheduled_at, interviewer, result, notes)
+                VALUES (%s,%s,%s,%s,%s) RETURNING id
+            """, (candidate_id, scheduled_at, interviewer, result, notes))
+            row = cur.fetchone()
+            return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def get_interviews_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT * FROM interviews
+                WHERE candidate_id=%s ORDER BY created_at DESC
+            """, (candidate_id,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_all_interviews() -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT i.*, c.name AS candidate_name, c.email AS candidate_email
+                FROM interviews i
+                JOIN candidates c ON c.candidate_id=i.candidate_id
+                ORDER BY i.scheduled_at DESC NULLS LAST, i.created_at DESC
+            """)
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+# -----------------------------
+# Search helpers
+# -----------------------------
+def search_candidates_by_name_or_email(query: str) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if query.strip():
+                like = f"%{query.lower()}%"
                 cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM candidates 
-                    WHERE DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE);
-                """)
-                stats["candidates_this_week"] = cur.fetchone()["count"]
-
-                # Candidates created this month
+                    SELECT * FROM candidates
+                    WHERE LOWER(name) LIKE %s OR LOWER(email) LIKE %s
+                    ORDER BY updated_at DESC LIMIT 50
+                """, (like, like))
+            else:
                 cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM candidates 
-                    WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE);
+                    SELECT * FROM candidates
+                    ORDER BY updated_at DESC LIMIT 50
                 """)
-                stats["candidates_this_month"] = cur.fetchone()["count"]
+            return cur.fetchall()
+    finally:
+        conn.close()
 
-                # With CV
-                cur.execute("SELECT COUNT(*) FROM candidates WHERE cv_file IS NOT NULL OR resume_link IS NOT NULL;")
-                stats["candidates_with_resume"] = cur.fetchone()["count"]
 
-                # Without CV
-                stats["candidates_without_resume"] = stats["total_candidates"] - stats["candidates_with_resume"]
+# -----------------------------
+# Statistics for CEO
+# -----------------------------
+def get_candidate_statistics() -> Dict[str, Any]:
+    stats: Dict[str, Any] = {}
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT COUNT(*) AS c FROM candidates")
+            stats["total_candidates"] = cur.fetchone()["c"]
 
-                # Interviews total
-                cur.execute("SELECT COUNT(*) FROM interviews;")
-                stats["total_interviews"] = cur.fetchone()["count"]
+            cur.execute("SELECT COUNT(*) AS c FROM candidates WHERE DATE(created_at)=CURRENT_DATE")
+            stats["candidates_today"] = cur.fetchone()["c"]
 
-                # Interviews by result
-                cur.execute("SELECT result, COUNT(*) FROM interviews GROUP BY result;")
-                stats["interview_results"] = {row["result"] or "unspecified": row["count"] for row in cur.fetchall()}
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM candidates
+                WHERE DATE_TRUNC('week', created_at)=DATE_TRUNC('week', CURRENT_DATE)
+            """)
+            stats["candidates_this_week"] = cur.fetchone()["c"]
 
-                # Scheduled interviews
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NULL OR result ILIKE 'scheduled';")
-                stats["interviews_scheduled"] = cur.fetchone()["count"]
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM candidates
+                WHERE DATE_TRUNC('month', created_at)=DATE_TRUNC('month', CURRENT_DATE)
+            """)
+            stats["candidates_this_month"] = cur.fetchone()["c"]
 
-                # Completed interviews
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled';")
-                stats["interviews_completed"] = cur.fetchone()["count"]
+            cur.execute("SELECT COUNT(*) AS c FROM candidates WHERE cv_file IS NOT NULL OR resume_link IS NOT NULL")
+            stats["candidates_with_resume"] = cur.fetchone()["c"]
+            stats["candidates_without_resume"] = stats["total_candidates"] - stats["candidates_with_resume"]
 
-                # Interviews this week
-                cur.execute("""
-                    SELECT COUNT(*) 
-                    FROM interviews 
-                    WHERE DATE_TRUNC('week', scheduled_at) = DATE_TRUNC('week', CURRENT_DATE);
-                """)
-                stats["interviews_this_week"] = cur.fetchone()["count"]
+            cur.execute("SELECT COUNT(*) AS c FROM interviews")
+            stats["total_interviews"] = cur.fetchone()["c"]
 
-                # Pass / Fail breakdown
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'pass';")
-                stats["interviews_passed"] = cur.fetchone()["count"]
+            cur.execute("SELECT result, COUNT(*) AS c FROM interviews GROUP BY result")
+            stats["interview_results"] = { (r["result"] or "unspecified"): r["c"] for r in cur.fetchall() }
 
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'fail';")
-                stats["interviews_failed"] = cur.fetchone()["count"]
+            cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result IS NULL OR result ILIKE 'scheduled'")
+            stats["interviews_scheduled"] = cur.fetchone()["c"]
 
-                cur.execute("SELECT COUNT(*) FROM interviews WHERE result ILIKE 'on hold';")
-                stats["interviews_on_hold"] = cur.fetchone()["count"]
+            cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled'")
+            stats["interviews_completed"] = cur.fetchone()["c"]
 
-                # Per interviewer
-                cur.execute("SELECT interviewer, COUNT(*) FROM interviews GROUP BY interviewer;")
-                stats["per_interviewer"] = {row["interviewer"] or "unknown": row["count"] for row in cur.fetchall()}
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM interviews
+                WHERE DATE_TRUNC('week', COALESCE(scheduled_at, created_at))=DATE_TRUNC('week', CURRENT_DATE)
+            """)
+            stats["interviews_this_week"] = cur.fetchone()["c"]
 
-                # Per role (based on user role)
-                cur.execute("SELECT role, COUNT(*) FROM users GROUP BY role;")
-                stats["users_per_role"] = {row["role"]: row["count"] for row in cur.fetchall()}
+            cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result ILIKE 'pass'")
+            stats["interviews_passed"] = cur.fetchone()["c"] if cur.rowcount is not None else 0
 
-                # Receptionist stats
-                cur.execute("SELECT COUNT(*) FROM receptionist_assessments;")
-                stats["total_assessments"] = cur.fetchone()["count"]
+            cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result ILIKE 'fail'")
+            stats["interviews_failed"] = cur.fetchone()["c"] if cur.rowcount is not None else 0
 
-                cur.execute(
-                    "SELECT AVG(speed_test) AS avg_speed, AVG(accuracy_test) AS avg_accuracy FROM receptionist_assessments;")
-                row = cur.fetchone()
-                stats["avg_speed_test"] = row["avg_speed"] or 0
-                stats["avg_accuracy_test"] = row["avg_accuracy"] or 0
+            cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result ILIKE 'on hold'")
+            stats["interviews_on_hold"] = cur.fetchone()["c"] if cur.rowcount is not None else 0
 
-                return stats
-    except Exception:
-        logger.exception("Error getting candidate statistics")
-        return {}
+            cur.execute("SELECT interviewer, COUNT(*) AS c FROM interviews GROUP BY interviewer")
+            stats["per_interviewer"] = { (r["interviewer"] or "unknown"): r["c"] for r in cur.fetchall() }
+
+            cur.execute("SELECT role, COUNT(*) AS c FROM users GROUP BY role")
+            stats["users_per_role"] = { r["role"]: r["c"] for r in cur.fetchall() }
+
+            cur.execute("SELECT COUNT(*) AS c FROM receptionist_assessments")
+            stats["total_assessments"] = cur.fetchone()["c"]
+
+            cur.execute("""
+                SELECT AVG(speed_test) AS avg_speed, AVG(accuracy_test) AS avg_accuracy
+                FROM receptionist_assessments
+            """)
+            row = cur.fetchone()
+            stats["avg_speed_test"] = float(row["avg_speed"] or 0)
+            stats["avg_accuracy_test"] = float(row["avg_accuracy"] or 0)
+
+        return stats
+    finally:
+        conn.close()
+
+
+# -----------------------------
+# Seeding (optional)
+# -----------------------------
+def seed_sample_users():
+    """Create sample users for testing (idempotent)."""
+    samples = [
+        ("admin@brv.com", "admin123", "admin"),
+        ("ceo@brv.com", "ceo123", "ceo"),
+        ("receptionist@brv.com", "recep123", "receptionist"),
+        ("interviewer@brv.com", "interviewer123", "interviewer"),
+        ("hr@brv.com", "hr123", "hr"),
+        ("candidate@brv.com", "candidate123", "candidate"),
+    ]
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            for email, pw, role in samples:
+                cur.execute("SELECT 1 FROM users WHERE email=%s", (email,))
+                if not cur.fetchone():
+                    cur.execute("""
+                        INSERT INTO users (email, password_hash, role)
+                        VALUES (%s,%s,%s)
+                    """, (email, hash_password(pw), role))
     finally:
         conn.close()

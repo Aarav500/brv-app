@@ -1,161 +1,212 @@
 # auth.py
+import streamlit as st
 import os
-import jwt
-import logging
-import smtplib
-from datetime import datetime, timedelta
-from email.message import EmailMessage
-from dotenv import load_dotenv
-
+import secrets
+import time
 from db_postgres import (
-    get_user_by_email, hash_password, verify_password, get_conn,
-    update_user_password, get_user_permissions
+    get_user_by_email, get_user_by_id,
+    create_user_in_db, update_user_password,
+    verify_password, seed_sample_users,
+    get_all_users_with_permissions
 )
 
-load_dotenv()
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
-RESET_TOKEN_EXP_MIN = 30
 
-logger = logging.getLogger(__name__)
+# === SESSION HELPERS ===
 
-
-# -----------------------------
-# User Creation & Authentication
-# -----------------------------
-def create_user(email: str, password: str, role: str = "candidate"):
-    """Create new user in DB"""
-    try:
-        conn = get_conn()
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM users WHERE email=%s", (email,))
-                if cur.fetchone():
-                    return None, "User already exists"
-
-                pw_hash = hash_password(password)
-                cur.execute(
-                    """INSERT INTO users (email, password_hash, role)
-                       VALUES (%s, %s, %s) RETURNING id, email, role""",
-                    (email, pw_hash, role)
-                )
-                row = cur.fetchone()
-                user_dict = {"id": row[0], "email": row[1], "role": row[2]}
-        conn.close()
-        return user_dict, None
-    except Exception as e:
-        logger.exception("create_user failed")
-        return None, str(e)
+def _init_session():
+    if "user" not in st.session_state:
+        st.session_state.user = None
+    if "auth_token" not in st.session_state:
+        st.session_state.auth_token = None
+    if "flash" not in st.session_state:
+        st.session_state.flash = None
 
 
-def authenticate_user(email: str, password: str):
-    """
-    Authenticate and return user with permissions.
-    Returns None if invalid.
-    """
+def _flash(msg, level="info"):
+    st.session_state.flash = (msg, level)
+
+
+def _show_flash():
+    if st.session_state.flash:
+        msg, level = st.session_state.flash
+        if level == "success":
+            st.success(msg)
+        elif level == "error":
+            st.error(msg)
+        else:
+            st.info(msg)
+        st.session_state.flash = None
+
+
+def is_logged_in():
+    return bool(st.session_state.get("user"))
+
+
+def require_login():
+    if not is_logged_in():
+        st.warning("You must log in to continue.")
+        st.stop()
+
+
+def logout():
+    st.session_state.user = None
+    st.session_state.auth_token = None
+    _flash("You have been logged out.", "success")
+    st.experimental_rerun()
+
+
+# === AUTH LOGIC ===
+
+def login_user(email: str, password: str) -> bool:
+    """Check credentials and set session state."""
     user = get_user_by_email(email)
     if not user:
-        return None
-
+        return False
     if not verify_password(password, user["password_hash"]):
-        return None
+        return False
 
-    # Merge role + permissions
-    perms = get_user_permissions(user["id"]) or {}
-    session_user = {
+    # Generate session token
+    st.session_state.auth_token = secrets.token_hex(16)
+    st.session_state.user = {
         "id": user["id"],
         "email": user["email"],
         "role": user["role"],
-        "force_password_reset": user.get("force_password_reset", False),
-        **perms
+        "can_view_cvs": user.get("can_view_cvs", False),
+        "can_delete_records": user.get("can_delete_records", False),
+        "can_grant_delete": user.get("can_grant_delete", False),
     }
-    return session_user
+    return True
 
 
-# -----------------------------
-# JWT Token Helpers
-# -----------------------------
-def create_access_token(user_id: int, expires_minutes: int = 60):
-    payload = {
-        "sub": user_id,
-        "exp": datetime.utcnow() + timedelta(minutes=expires_minutes)
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-
-def decode_access_token(token: str):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return payload.get("sub")
-    except Exception:
-        return None
+def register_user(email: str, password: str, role: str = "candidate") -> bool:
+    return create_user_in_db(email, password, role)
 
 
-# -----------------------------
-# Password Reset
-# -----------------------------
-def create_reset_token(email: str, expires_min: int = RESET_TOKEN_EXP_MIN):
-    payload = {"email": email, "exp": datetime.utcnow() + timedelta(minutes=expires_min)}
-    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-
-def verify_reset_token(token: str):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return payload.get("email")
-    except Exception as e:
-        logger.debug("reset token invalid: %s", e)
-        return None
-
-def update_user_password_by_email(email: str, new_password: str):
+def reset_password(email: str, new_password: str) -> bool:
     return update_user_password(email, new_password)
 
 
-def send_reset_email(to_email: str, reset_token: str):
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = os.getenv("SMTP_PORT")
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_pass = os.getenv("SMTP_PASS")
-    from_email = os.getenv("FROM_EMAIL", "no-reply@example.com")
+# === STREAMLIT UI VIEWS ===
 
-    reset_link = f"RESET_TOKEN:{reset_token}"
-    body = f"Use this token to reset your password (expires in {RESET_TOKEN_EXP_MIN} minutes):\n\n{reset_link}"
+def login_view():
+    st.title("🔐 Login")
 
-    if smtp_host and smtp_port and smtp_user and smtp_pass:
-        try:
-            msg = EmailMessage()
-            msg["Subject"] = "BRV Password Reset"
-            msg["From"] = from_email
-            msg["To"] = to_email
-            msg.set_content(body)
+    _init_session()
+    _show_flash()
 
-            with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-            logger.info("Password reset email sent to %s", to_email)
-            return True, "Email sent"
-        except Exception as e:
-            logger.exception("Failed to send reset email")
-            return False, str(e)
+    with st.form("login_form"):
+        email = st.text_input("Email", placeholder="you@example.com")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+    if submitted:
+        if login_user(email.strip(), password.strip()):
+            _flash("Login successful.", "success")
+            st.experimental_rerun()
+        else:
+            _flash("Invalid credentials.", "error")
+            st.experimental_rerun()
+
+    st.caption("Don’t have an account? Contact admin or register if allowed.")
+
+
+def register_view():
+    st.title("📝 Register New Account")
+    with st.form("register_form"):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        confirm = st.text_input("Confirm Password", type="password")
+        role = st.selectbox("Role", ["candidate", "receptionist", "interviewer", "hr"])
+        submitted = st.form_submit_button("Register")
+
+    if submitted:
+        if not email or not password:
+            st.error("Email and password required.")
+            return
+        if password != confirm:
+            st.error("Passwords do not match.")
+            return
+        ok = register_user(email, password, role)
+        if ok:
+            st.success(f"Account created for {email}. Please login.")
+        else:
+            st.error("Failed to register (maybe user exists).")
+
+
+def reset_password_view():
+    st.title("🔑 Reset Password")
+    with st.form("reset_form"):
+        email = st.text_input("Email")
+        new_pass = st.text_input("New Password", type="password")
+        confirm = st.text_input("Confirm New Password", type="password")
+        submitted = st.form_submit_button("Update Password")
+
+    if submitted:
+        if not email or not new_pass:
+            st.error("Email and new password required.")
+            return
+        if new_pass != confirm:
+            st.error("Passwords do not match.")
+            return
+        if reset_password(email, new_pass):
+            st.success("Password updated. Please log in.")
+        else:
+            st.error("Password reset failed.")
+
+
+def user_profile_view():
+    require_login()
+    st.title("👤 Profile")
+    user = st.session_state.user
+
+    st.write(f"**Email:** {user['email']}")
+    st.write(f"**Role:** {user['role']}")
+    st.write("**Permissions:**")
+    st.json({
+        "can_view_cvs": user.get("can_view_cvs", False),
+        "can_delete_records": user.get("can_delete_records", False),
+        "can_grant_delete": user.get("can_grant_delete", False),
+    })
+
+    if st.button("Logout"):
+        logout()
+
+
+def manage_users_view():
+    require_login()
+    user = st.session_state.user
+    if user["role"].lower() not in ("admin", "ceo"):
+        st.error("You do not have permission to view this page.")
+        return
+
+    st.title("👥 Manage Users")
+    users = get_all_users_with_permissions()
+    if not users:
+        st.info("No users found.")
+        return
+
+    for u in users:
+        with st.expander(f"{u['email']} — {u['role']}"):
+            st.write(f"ID: {u['id']}")
+            st.write(f"Role: {u['role']}")
+            st.json({
+                "can_view_cvs": u.get("can_view_cvs", False),
+                "can_delete_records": u.get("can_delete_records", False),
+                "can_grant_delete": u.get("can_grant_delete", False),
+            })
+
+
+# === ENTRY POINTS ===
+
+def auth_router():
+    """Show appropriate auth view based on session/user."""
+    _init_session()
+    if not is_logged_in():
+        login_view()
     else:
-        # Fallback console print
-        logger.warning("SMTP not configured — printing reset token to console")
-        print("---------- PASSWORD RESET TOKEN ----------")
-        print(body)
-        print("------------------------------------------")
-        return True, "Printed to console"
+        user_profile_view()
 
 
-# -----------------------------
-# Streamlit helpers
-# -----------------------------
-def require_login():
-    import streamlit as st
-    if "user" not in st.session_state or not st.session_state["user"]:
-        st.error("You must be logged in to access this page.")
-        st.stop()
-
-def require_permission(flag: str):
-    import streamlit as st
-    user = st.session_state.get("user", {})
-    if not user.get(flag) and user.get("role", "").lower() != "ceo":
-        st.error(f"🚫 You don’t have permission: {flag}")
-        st.stop()
+def seed_users_if_needed():
+    """Create initial test accounts."""
+    seed_sample_users()

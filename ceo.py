@@ -1,124 +1,107 @@
 # ceo.py
-# -----------------------------------------------------------------------------
-# CEO — Administration Panel
-# Full file (copy-paste). Integrates with db_postgres.py (permission-aware delete).
-# -----------------------------------------------------------------------------
-
 import re
 import secrets
 import string
 from datetime import datetime, timedelta
 
-import streamlit as st
 import matplotlib.pyplot as plt
+import streamlit as st
 
 from db_postgres import (
     get_conn,
     update_user_password,
     set_user_permission,
-    get_all_users_with_permissions,
     get_all_candidates,
     get_total_cv_storage_usage,
     get_candidate_statistics,
     get_candidate_cv,
     get_interviews_for_candidate,
-    get_receptionist_assessment,
-    delete_candidate_by_actor,
-    get_user_permissions,
+    get_user_permissions,           # used to check the CEO’s own permissions if you want
 )
-
-from drive_and_cv_views import preview_cv_ui, download_cv_ui
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
+
+# --------------------------------
+# helpers
+# --------------------------------
 
 def _valid_email(addr: str) -> bool:
     return bool(EMAIL_RE.match(addr or ""))
 
 
-def _random_password(n: int = 12) -> str:
-    chars = string.ascii_letters + string.digits + "!@#$%?"
+def _random_password(n: int = 14) -> str:
+    chars = string.ascii_letters + string.digits + "!@#$%?_"
     return "".join(secrets.choice(chars) for _ in range(n))
 
 
 def _fetch_users():
     """
-    Fetch all users along with the latest permissions and timestamps.
-    (Used for the admin list + password audit.)
+    Fetch all users including permission flags.
+    Only uses columns that exist in your DB: can_view_cvs, can_delete_records, can_grant_delete, force_password_reset.
     """
     conn = get_conn()
     with conn, conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id, email, role,
-                   can_view_cvs,  can_delete_candidate,
-                   can_grant_delete, can_manage_users, can_add_candidates,
-                   can_edit_candidates, can_view_all_candidates,
-                   can_schedule_interviews, can_view_interview_feedback,
-                   can_edit_interview_feedback, can_delete_interview_feedback,
-                   can_view_reports, can_export_reports,
+                   can_view_cvs, can_delete_records, can_grant_delete,
+                   force_password_reset,
                    COALESCE(updated_at, created_at) AS last_changed,
-                   created_at,
-                   force_password_reset
+                   created_at
             FROM users
             ORDER BY id
-        """)
+            """
+        )
         rows = cur.fetchall()
     conn.close()
-
-    return [
-        {
-            "id": r[0],
-            "email": r[1],
-            "role": r[2],
-            "can_view_cv": r[3],
-            "can_upload_cv": r[4],
-            "can_edit_cv": r[5],
-            "can_delete_candidate": r[6],
-            "can_grant_delete": r[7],
-            "can_manage_users": r[8],
-            "can_add_candidates": r[9],
-            "can_edit_candidates": r[10],
-            "can_view_all_candidates": r[11],
-            "can_schedule_interviews": r[12],
-            "can_view_interview_feedback": r[13],
-            "can_edit_interview_feedback": r[14],
-            "can_delete_interview_feedback": r[15],
-            "can_view_reports": r[16],
-            "can_export_reports": r[17],
-            "last_changed": r[18],
-            "created_at": r[19],
-            "force_password_reset": r[20],
-        }
-        for r in rows
-    ]
+    users = []
+    for r in rows:
+        users.append(
+            {
+                "id": r[0],
+                "email": r[1],
+                "role": r[2],
+                "can_view_cvs": r[3],
+                "can_delete_records": r[4],
+                "can_grant_delete": r[5],
+                "force_password_reset": r[6],
+                "last_changed": r[7],
+                "created_at": r[8],
+            }
+        )
+    return users
 
 
 def _delete_user_by_id(uid: int) -> bool:
     conn = get_conn()
-    with conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM users WHERE id=%s", (uid,))
-        ok = cur.rowcount > 0
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id=%s", (uid,))
+            ok = cur.rowcount > 0
     conn.close()
     return ok
 
 
 def _update_email(uid: int, new_email: str) -> bool:
     conn = get_conn()
-    with conn, conn.cursor() as cur:
-        cur.execute("UPDATE users SET email=%s WHERE id=%s", (new_email, uid))
-        ok = cur.rowcount > 0
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET email=%s WHERE id=%s", (new_email, uid))
+            ok = cur.rowcount > 0
     conn.close()
     return ok
 
 
 def _reset_password(uid: int, new_password: str) -> bool:
     conn = get_conn()
-    with conn, conn.cursor() as cur:
-        cur.execute("SELECT email FROM users WHERE id=%s", (uid,))
-        row = cur.fetchone()
-        if not row:
-            return False
-        email = row[0]
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT email FROM users WHERE id=%s", (uid,))
+            row = cur.fetchone()
+            if not row:
+                return False
+            email = row[0]
     return update_user_password(email, new_password)
 
 
@@ -147,27 +130,26 @@ def _human_bytes(n: int) -> str:
 
 
 def _plot_candidate_charts(stats: dict):
-    """Generate pie and bar charts for candidate stats."""
     if not stats:
         st.info("No statistics available to visualize.")
         return
 
-    # Pie chart: resumes
+    # Pie: Resume vs No Resume
     fig1, ax1 = plt.subplots()
     labels = ["With Resume", "Without Resume"]
-    with_resume = stats.get("candidates_with_resume", 0)
+    with_cv = stats.get("candidates_with_resume", 0)
     total = stats.get("total_candidates", 0)
-    values = [with_resume, max(total - with_resume, 0)]
+    values = [with_cv, max(0, total - with_cv)]
     ax1.pie(values, labels=labels, autopct="%1.1f%%", startangle=90)
     ax1.set_title("Resume Uploads")
     st.pyplot(fig1)
 
-    # Bar chart: interview breakdown
-    interview_breakdown = stats.get("interview_results", {})
-    if interview_breakdown:
+    # Bar: Interview Results (color-coded)
+    breakdown = stats.get("interview_results", {})
+    if breakdown:
         fig2, ax2 = plt.subplots()
         colors = []
-        for outcome in interview_breakdown.keys():
+        for outcome in breakdown.keys():
             o = (outcome or "").lower()
             if "pass" in o:
                 colors.append("green")
@@ -181,12 +163,15 @@ def _plot_candidate_charts(stats: dict):
                 colors.append("purple")
             else:
                 colors.append("gray")
-        ax2.bar(list(interview_breakdown.keys()), list(interview_breakdown.values()), color=colors)
+        ax2.bar(breakdown.keys(), breakdown.values(), color=colors)
         ax2.set_title("Interview Outcomes")
         ax2.set_ylabel("Count")
-        ax2.tick_params(axis="x", rotation=20)
         st.pyplot(fig2)
 
+
+# --------------------------------
+# CEO Panel
+# --------------------------------
 
 def show_ceo_panel():
     st.header("CEO — Administration Panel")
@@ -202,27 +187,16 @@ def show_ceo_panel():
     st.subheader("System Overview")
     colA, colB = st.columns(2)
     with colA:
-        try:
-            total_bytes = get_total_cv_storage_usage()
-        except Exception as e:
-            total_bytes = 0
-            st.error(f"Error reading storage usage: {e}")
-
+        total_bytes = get_total_cv_storage_usage()
         st.metric("Total CV Storage Used", _human_bytes(total_bytes))
         if total_bytes:
             limit_mb = 500
             used_mb = total_bytes / (1024 * 1024)
-            pct = min(100, int((used_mb / limit_mb) * 100)) if limit_mb else 0
+            pct = min(100, int((used_mb / limit_mb) * 100))
             st.progress(pct)
-            st.caption(f"Using ~{used_mb:.1f} MB of {limit_mb} MB soft limit")
 
     with colB:
-        try:
-            stats = get_candidate_statistics() or {}
-        except Exception as e:
-            stats = {}
-            st.error(f"Error loading statistics: {e}")
-
+        stats = get_candidate_statistics() or {}
         st.metric("Total Candidates", stats.get("total_candidates", 0))
         st.metric("With Resume", stats.get("candidates_with_resume", 0))
         st.metric("Interviews", stats.get("total_interviews", 0))
@@ -231,8 +205,7 @@ def show_ceo_panel():
     st.subheader("📊 Advanced Candidate Statistics")
     if stats:
         _plot_candidate_charts(stats)
-        with st.expander("Raw statistics (JSON)", expanded=False):
-            st.json(stats)
+        st.json(stats)
     else:
         st.caption("No stats available.")
 
@@ -240,56 +213,39 @@ def show_ceo_panel():
     # USER PERMISSIONS
     # -------------------------
     st.markdown("---")
-    st.subheader("User Permissions Management")
-
-    PERMISSION_FIELDS = [
-        "can_view_cv",
-        "can_upload_cv",
-        "can_edit_cv",
-        "can_delete_candidate",
-        "can_grant_delete",
-        "can_manage_users",
-        "can_add_candidates",
-        "can_edit_candidates",
-        "can_view_all_candidates",
-        "can_schedule_interviews",
-        "can_view_interview_feedback",
-        "can_edit_interview_feedback",
-        "can_delete_interview_feedback",
-        "can_view_reports",
-        "can_export_reports",
-    ]
-
-    users = get_all_users_with_permissions()
+    st.subheader("User Permissions")
+    users = _fetch_users()
     if not users:
         st.warning("No users found.")
     else:
-        for user in users:
-            with st.expander(f"🔹 {user['email']} ({user['role']})", expanded=False):
-                st.write(f"**User ID:** {user['id']} | **Role:** {user['role']}")
+        for u in users:
+            with st.expander(f"{u['email']} ({u['role']})", expanded=False):
+                st.write(f"**ID:** {u['id']} | **Created:** {u['created_at']}")
+                st.write(f"**Force Password Reset:** {u.get('force_password_reset', False)}")
 
-                updated_perms = {}
-                for field in PERMISSION_FIELDS:
-                    updated_perms[field] = st.checkbox(
-                        field.replace("_", " ").title(),
-                        value=user.get(field, False),
-                        key=f"{user['id']}_{field}"
-                    )
+                can_view = st.checkbox("Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}")
+                can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
+                can_grant_delete = st.checkbox("Can Grant Delete Rights", value=u.get("can_grant_delete", False), key=f"grant_{u['id']}")
 
-                if st.button(f"💾 Save Permissions for {user['email']}", key=f"save_{user['id']}"):
-                    try:
-                        success = set_user_permission(user["id"], **updated_perms)
-                    except Exception as e:
-                        st.error(f"Failed to update permissions: {e}")
-                        success = False
-                    if success:
-                        st.success("✅ Permissions updated successfully!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to update permissions.")
+                colp1, colp2 = st.columns(2)
+                with colp1:
+                    if st.button("Update Permissions", key=f"perm_{u['id']}"):
+                        if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
+                            st.success("Permissions updated.")
+                            st.experimental_rerun()
+                        else:
+                            st.error("Failed to update permissions.")
+                with colp2:
+                    if st.button("Force Reset Password", key=f"force_pw_{u['id']}"):
+                        conn = get_conn()
+                        with conn, conn.cursor() as cur:
+                            cur.execute("UPDATE users SET force_password_reset = TRUE WHERE id = %s", (u["id"],))
+                        conn.close()
+                        st.success("Password reset flag set.")
+                        st.experimental_rerun()
 
     # -------------------------
-    # ALL USERS (ADMIN)
+    # USER MANAGEMENT
     # -------------------------
     st.markdown("---")
     st.subheader("All Users")
@@ -298,7 +254,6 @@ def show_ceo_panel():
         with st.expander(f"{u['email']}  ({u['role']})", expanded=False):
             st.write(f"**ID:** {u['id']}")
             st.write(f"**Last password change:** {u.get('last_changed', '—')}")
-            st.write(f"**Force Password Reset:** {u.get('force_password_reset', False)}")
 
             new_email = st.text_input("New email", value=u["email"], key=f"email_{u['id']}")
             if st.button("Change Email", key=f"change_email_{u['id']}"):
@@ -307,7 +262,7 @@ def show_ceo_panel():
                 else:
                     if _update_email(u["id"], new_email):
                         st.success("Email updated.")
-                        st.rerun()
+                        st.experimental_rerun()
                     else:
                         st.error("Failed to update email.")
 
@@ -317,8 +272,7 @@ def show_ceo_panel():
             with col2:
                 if st.button("Generate Strong Password", key=f"gen_{u['id']}"):
                     st.session_state[f"pw_{u['id']}"] = _random_password()
-                    st.rerun()
-
+                    st.experimental_rerun()
             if st.button("Reset Password", key=f"reset_{u['id']}"):
                 pw = st.session_state.get(f"pw_{u['id']}", new_pw)
                 if not pw:
@@ -333,7 +287,7 @@ def show_ceo_panel():
             if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
                 if _delete_user_by_id(u["id"]):
                     st.success("User removed.")
-                    st.rerun()
+                    st.experimental_rerun()
                 else:
                     st.error("Failed to remove user.")
 
@@ -350,16 +304,11 @@ def show_ceo_panel():
         if st.button("Reset All (generate random passwords)"):
             ok, fail = 0, 0
             for u in stale:
-                try:
-                    if _reset_password(u["id"], _random_password()):
-                        ok += 1
-                    else:
-                        fail += 1
-                except Exception:
+                if _reset_password(u["id"], _random_password()):
+                    ok += 1
+                else:
                     fail += 1
             st.success(f"Done. Reset: {ok}, Failed: {fail}.")
-
-    # Single-user forced password reset button (per-user control shown above)
 
     # -------------------------
     # CANDIDATE RECORDS + CV + INTERVIEWS
@@ -371,25 +320,29 @@ def show_ceo_panel():
         st.caption("No candidates found.")
     else:
         for c in candidates:
-            with st.expander(f"{c.get('name','(unnamed)')} — {c.get('candidate_id','?')}", expanded=False):
+            with st.expander(f"{c['name']} — {c['candidate_id']}", expanded=False):
                 st.write(f"**Email:** {c.get('email','—')}")
                 st.write(f"**Phone:** {c.get('phone','—')}")
                 st.write(f"**Created At:** {c.get('created_at','—')}")
                 if c.get("form_data"):
                     st.json(c["form_data"])
 
-                # CV section
                 st.markdown("#### Candidate CV")
-                if current_user.get("can_view_cv", False):
-                    try:
-                        preview_cv_ui(c["candidate_id"])
-                        download_cv_ui(c["candidate_id"])
-                    except Exception as e:
-                        st.error(f"Error fetching CV: {e}")
-                else:
-                    st.warning("🚫 You don't have permission to view CVs.")
+                try:
+                    file_bytes, filename = get_candidate_cv(c["candidate_id"])
+                    if file_bytes:
+                        st.download_button(
+                            "Download CV",
+                            data=file_bytes,
+                            file_name=filename or f"{c['candidate_id']}_cv.bin",
+                            mime="application/octet-stream",
+                            key=f"ceo_dlcv_{c['candidate_id']}",
+                        )
+                    else:
+                        st.caption("No CV uploaded.")
+                except Exception as e:
+                    st.error(f"Error fetching CV: {e}")
 
-                # Interview history section
                 st.markdown("#### Interview History")
                 try:
                     interviews = get_interviews_for_candidate(c["candidate_id"])
@@ -405,48 +358,5 @@ def show_ceo_panel():
                 except Exception as e:
                     st.error(f"Error fetching interview history: {e}")
 
-                # Receptionist Assessment
-                st.markdown("#### Receptionist Assessment")
-                try:
-                    assessment = get_receptionist_assessment(c["candidate_id"])
-                    if not assessment:
-                        st.caption("No receptionist assessment found for this candidate.")
-                    else:
-                        st.write(f"**Speed Test (WPM):** {assessment.get('speed_test','—')}")
-                        st.write(f"**Accuracy Test (%):** {assessment.get('accuracy_test','—')}")
-                        st.write(f"**Work Commitment:** {assessment.get('work_commitment','—')}")
-                        st.write(f"**English Understanding:** {assessment.get('english_understanding','—')}")
-                        st.write(f"**Comments:** {assessment.get('comments','—')}")
-                except Exception as e:
-                    st.error(f"Error fetching receptionist assessment: {e}")
-
-                # === Candidate Delete Action ===
-                user_id = current_user.get("id")
-                try:
-                    user_perms = get_user_permissions(user_id) if user_id else {}
-                except Exception:
-                    user_perms = {}
-
-                can_delete = bool(user_perms.get("can_delete_candidate")) or (user_perms.get("role") or "").lower() in ("ceo", "admin")
-
-                st.markdown("#### Danger Zone")
-                if can_delete:
-                    confirm_key = f"confirm_delete_{c['candidate_id']}"
-                    delete_key = f"delete_{c['candidate_id']}"
-
-                    confirm_delete = st.checkbox(f"⚠️ Confirm Delete Candidate {c['candidate_id']}", key=confirm_key)
-                    if confirm_delete:
-                        if st.button(f"🗑️ Delete Candidate {c['candidate_id']}", key=delete_key):
-                            try:
-                                if delete_candidate_by_actor(c["candidate_id"], user_id):
-                                    st.success(f"✅ Candidate {c['candidate_id']} deleted successfully.")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ You don't have permission or deletion failed.")
-                            except Exception as e:
-                                st.error(f"❌ Error deleting candidate: {e}")
-                else:
-                    st.info("🚫 You do not have permission to delete candidates.")
-
     st.markdown("---")
-    st.caption("CEO can now view CVs, manage all permissions, audit passwords, and delete candidates (permission-aware).")
+    st.caption("CEO can view CVs, manage permissions, reset passwords (including force-reset flag), and review advanced stats.")
