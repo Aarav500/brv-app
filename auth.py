@@ -1,12 +1,16 @@
 # auth.py
-from db_postgres import get_user_by_email, hash_password, verify_password, get_conn
 import os
 import jwt
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import logging
 import smtplib
+from datetime import datetime, timedelta
 from email.message import EmailMessage
+from dotenv import load_dotenv
+
+from db_postgres import (
+    get_user_by_email, hash_password, verify_password, get_conn,
+    update_user_password, get_user_permissions
+)
 
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
@@ -15,30 +19,27 @@ RESET_TOKEN_EXP_MIN = 30
 logger = logging.getLogger(__name__)
 
 
+# -----------------------------
+# User Creation & Authentication
+# -----------------------------
 def create_user(email: str, password: str, role: str = "candidate"):
-    """Create user using PostgreSQL database"""
+    """Create new user in DB"""
     try:
         conn = get_conn()
         with conn:
             with conn.cursor() as cur:
-                # Check if user already exists
                 cur.execute("SELECT id FROM users WHERE email=%s", (email,))
                 if cur.fetchone():
                     return None, "User already exists"
 
-                # Create new user
-                password_hash = hash_password(password)
-                cur.execute("""
-                            INSERT INTO users (email, password_hash, role)
-                            VALUES (%s, %s, %s) RETURNING id, email, role
-                            """, (email, password_hash, role))
-
-                result = cur.fetchone()
-                user_dict = {
-                    'id': result[0],
-                    'email': result[1],
-                    'role': result[2]
-                }
+                pw_hash = hash_password(password)
+                cur.execute(
+                    """INSERT INTO users (email, password_hash, role)
+                       VALUES (%s, %s, %s) RETURNING id, email, role""",
+                    (email, pw_hash, role)
+                )
+                row = cur.fetchone()
+                user_dict = {"id": row[0], "email": row[1], "role": row[2]}
         conn.close()
         return user_dict, None
     except Exception as e:
@@ -47,23 +48,38 @@ def create_user(email: str, password: str, role: str = "candidate"):
 
 
 def authenticate_user(email: str, password: str):
-    """Authenticate user using PostgreSQL database"""
+    """
+    Authenticate and return user with permissions.
+    Returns None if invalid.
+    """
     user = get_user_by_email(email)
-    if user and verify_password(password, user['password_hash']):
-        if user.get("force_password_reset"):
-            return {"force_password_reset": True, "id": user["id"], "email": user["email"], "role": user["role"]}
-        return user
-    return None
+    if not user:
+        return None
+
+    if not verify_password(password, user["password_hash"]):
+        return None
+
+    # Merge role + permissions
+    perms = get_user_permissions(user["id"]) or {}
+    session_user = {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "force_password_reset": user.get("force_password_reset", False),
+        **perms
+    }
+    return session_user
 
 
+# -----------------------------
+# JWT Token Helpers
+# -----------------------------
 def create_access_token(user_id: int, expires_minutes: int = 60):
     payload = {
         "sub": user_id,
         "exp": datetime.utcnow() + timedelta(minutes=expires_minutes)
     }
-    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-    return token
-
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 def decode_access_token(token: str):
     try:
@@ -73,14 +89,12 @@ def decode_access_token(token: str):
         return None
 
 
-# --- Password reset ---
+# -----------------------------
+# Password Reset
+# -----------------------------
 def create_reset_token(email: str, expires_min: int = RESET_TOKEN_EXP_MIN):
-    payload = {
-        "email": email,
-        "exp": datetime.utcnow() + timedelta(minutes=expires_min)
-    }
+    payload = {"email": email, "exp": datetime.utcnow() + timedelta(minutes=expires_min)}
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-
 
 def verify_reset_token(token: str):
     try:
@@ -90,10 +104,7 @@ def verify_reset_token(token: str):
         logger.debug("reset token invalid: %s", e)
         return None
 
-
 def update_user_password_by_email(email: str, new_password: str):
-    """Update user password by email"""
-    from db_postgres import update_user_password
     return update_user_password(email, new_password)
 
 
@@ -104,7 +115,7 @@ def send_reset_email(to_email: str, reset_token: str):
     smtp_pass = os.getenv("SMTP_PASS")
     from_email = os.getenv("FROM_EMAIL", "no-reply@example.com")
 
-    reset_link = f"RESET_TOKEN:{reset_token}"  # For console fallback. In production you'd send a URL.
+    reset_link = f"RESET_TOKEN:{reset_token}"
     body = f"Use this token to reset your password (expires in {RESET_TOKEN_EXP_MIN} minutes):\n\n{reset_link}"
 
     if smtp_host and smtp_port and smtp_user and smtp_pass:
@@ -125,9 +136,26 @@ def send_reset_email(to_email: str, reset_token: str):
             logger.exception("Failed to send reset email")
             return False, str(e)
     else:
-        # Fallback: print token to console so you can copy it
+        # Fallback console print
         logger.warning("SMTP not configured — printing reset token to console")
-        print("---------- PASSWORD RESET TOKEN (console fallback) ----------")
+        print("---------- PASSWORD RESET TOKEN ----------")
         print(body)
-        print("------------------------------------------------------------")
+        print("------------------------------------------")
         return True, "Printed to console"
+
+
+# -----------------------------
+# Streamlit helpers
+# -----------------------------
+def require_login():
+    import streamlit as st
+    if "user" not in st.session_state or not st.session_state["user"]:
+        st.error("You must be logged in to access this page.")
+        st.stop()
+
+def require_permission(flag: str):
+    import streamlit as st
+    user = st.session_state.get("user", {})
+    if not user.get(flag) and user.get("role", "").lower() != "ceo":
+        st.error(f"🚫 You don’t have permission: {flag}")
+        st.stop()

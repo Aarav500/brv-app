@@ -1,3 +1,4 @@
+# db_postgres.py
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
@@ -9,6 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+# Optional: configure logging level if not configured elsewhere
+# logging.basicConfig(level=logging.INFO)
 
 
 def get_conn():
@@ -21,6 +24,7 @@ def get_conn():
         database_url,
         sslmode=os.getenv("PGSSLMODE", "require")
     )
+
 
 def init_db():
     """Initialize database tables and ensure schema consistency"""
@@ -37,15 +41,34 @@ def init_db():
                         password_hash VARCHAR(255) NOT NULL,
                         role VARCHAR(50) NOT NULL DEFAULT 'candidate',
                         force_password_reset BOOLEAN DEFAULT FALSE,
+
+                        -- Candidate Management Permissions
+                        can_view_cv BOOLEAN DEFAULT FALSE,
+                        can_upload_cv BOOLEAN DEFAULT FALSE,
+                        can_edit_cv BOOLEAN DEFAULT FALSE,
+                        can_delete_candidate BOOLEAN DEFAULT FALSE,
+
+                        -- Access & Control Permissions
+                        can_grant_delete BOOLEAN DEFAULT FALSE,
+                        can_manage_users BOOLEAN DEFAULT FALSE,
+                        can_add_candidates BOOLEAN DEFAULT FALSE,
+                        can_edit_candidates BOOLEAN DEFAULT FALSE,
+                        can_view_all_candidates BOOLEAN DEFAULT FALSE,
+
+                        -- Interviewer & Feedback Permissions
+                        can_schedule_interviews BOOLEAN DEFAULT FALSE,
+                        can_view_interview_feedback BOOLEAN DEFAULT FALSE,
+                        can_edit_interview_feedback BOOLEAN DEFAULT FALSE,
+                        can_delete_interview_feedback BOOLEAN DEFAULT FALSE,
+
+                        -- Reporting & Analytics Permissions
+                        can_view_reports BOOLEAN DEFAULT FALSE,
+                        can_export_reports BOOLEAN DEFAULT FALSE,
+
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
-
-                # ✅ Ensure permission columns exist (migration-safe)
-                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_cvs BOOLEAN DEFAULT FALSE;")
-                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_delete_records BOOLEAN DEFAULT FALSE;")
-                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_grant_delete BOOLEAN DEFAULT FALSE;")
 
                 # --- CANDIDATES TABLE ---
                 cur.execute("""
@@ -76,7 +99,7 @@ def init_db():
                     );
                 """)
 
-                # ✅ Ensure CV columns exist (migration-safe)
+                # Ensure CV columns exist (migration-safe)
                 cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_file BYTEA;")
                 cur.execute("ALTER TABLE candidates ADD COLUMN IF NOT EXISTS cv_filename TEXT;")
 
@@ -92,7 +115,7 @@ def init_db():
                         notes TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (candidate_id) REFERENCES candidates(candidate_id)
+                        FOREIGN KEY (candidate_id) REFERENCES candidates(candidate_id) ON DELETE CASCADE
                     );
                 """)
 
@@ -108,7 +131,7 @@ def init_db():
                     CREATE TABLE IF NOT EXISTS receptionist_assessments
                     (
                         id SERIAL PRIMARY KEY,
-                        candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id),
+                        candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id) ON DELETE CASCADE,
                         speed_test INTEGER,
                         accuracy_test INTEGER,
                         work_commitment TEXT,
@@ -124,6 +147,7 @@ def init_db():
         raise
     finally:
         conn.close()
+
 
 # === Password utilities ===
 
@@ -225,14 +249,31 @@ def get_all_users():
 
 
 def create_user_in_db(email: str, password: str, role: str = "candidate") -> bool:
+    """
+    Create a new user; explicitly set all permission flags to safe defaults.
+    """
     conn = get_conn()
     try:
         password_hash = hash_password(password)
         with conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO users (email, password_hash, role)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO users (
+                        email, password_hash, role,
+                        can_view_cv, can_upload_cv, can_edit_cv, can_delete_candidate,
+                        can_grant_delete, can_manage_users, can_add_candidates, can_edit_candidates,
+                        can_view_all_candidates, can_schedule_interviews, can_view_interview_feedback,
+                        can_edit_interview_feedback, can_delete_interview_feedback,
+                        can_view_reports, can_export_reports
+                    )
+                    VALUES (
+                        %s, %s, %s,
+                        FALSE, FALSE, FALSE, FALSE,
+                        FALSE, FALSE, FALSE, FALSE,
+                        FALSE, FALSE, FALSE,
+                        FALSE, FALSE,
+                        FALSE, FALSE
+                    )
                 """, (email, password_hash, role))
                 return True
     except psycopg2.errors.UniqueViolation:
@@ -300,24 +341,6 @@ def get_candidate_cv(candidate_id: str):
         conn.close()
 
 
-def delete_candidate_cv(candidate_id: str) -> bool:
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE candidates
-                    SET cv_file = NULL, cv_filename = NULL, updated_at = CURRENT_TIMESTAMP
-                    WHERE candidate_id = %s
-                """, (candidate_id,))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error deleting CV for candidate {candidate_id}")
-        return False
-    finally:
-        conn.close()
-
-
 def get_total_cv_storage_usage():
     conn = get_conn()
     try:
@@ -332,8 +355,6 @@ def get_total_cv_storage_usage():
         conn.close()
 
 
-
-
 # === Candidate Management ===
 
 def create_candidate_in_db(candidate_id: str, name: str, address: str, dob: str,
@@ -344,8 +365,10 @@ def create_candidate_in_db(candidate_id: str, name: str, address: str, dob: str,
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    INSERT INTO candidates (candidate_id, name, address, dob, caste,
-                                            email, phone, form_data, created_by, can_edit)
+                    INSERT INTO candidates (
+                        candidate_id, name, current_address, dob, caste,
+                        email, phone, form_data, created_by, can_edit
+                    )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *;
                 """, (candidate_id, name, address, dob, caste,
@@ -464,6 +487,8 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
     finally:
         conn.close()
 
+
+# Receptionist assessments
 def save_receptionist_assessment(candidate_id: str, speed_test: int, accuracy_test: int,
                                  work_commitment: str, english_understanding: str,
                                  comments: str):
@@ -484,6 +509,7 @@ def save_receptionist_assessment(candidate_id: str, speed_test: int, accuracy_te
         return False
     finally:
         conn.close()
+
 
 def get_receptionist_assessment(candidate_id: str):
     """
@@ -596,31 +622,24 @@ def search_candidates_by_name_or_email(query: str):
 
 # === CEO Permission Management ===
 
-def set_user_permission(user_id: int,
-                        can_view: bool | None = None,
-                        can_delete: bool | None = None,
-                        can_grant_delete: bool | None = None) -> bool:
-    if can_view is None and can_delete is None and can_grant_delete is None:
+def set_user_permission(user_id: int, **permissions) -> bool:
+    """
+    Dynamically update one or more permission fields on users.
+    Example:
+        set_user_permission(7, can_view_cv=True, can_delete_candidate=False)
+    """
+    if not permissions:
         return False
 
-    sets, params = [], []
-    if can_view is not None:
-        sets.append("can_view_cvs = %s")
-        params.append(can_view)
-    if can_delete is not None:
-        sets.append("can_delete_records = %s")
-        params.append(can_delete)
-    if can_grant_delete is not None:
-        sets.append("can_grant_delete = %s")
-        params.append(can_grant_delete)
-    params.append(user_id)
-    sql = f"UPDATE users SET {', '.join(sets)}, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
+    set_clause = ", ".join([f"{k} = %s" for k in permissions.keys()])
+    values = list(permissions.values()) + [user_id]
+    sql = f"UPDATE users SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
 
     conn = get_conn()
     try:
         with conn:
             with conn.cursor() as cur:
-                cur.execute(sql, tuple(params))
+                cur.execute(sql, tuple(values))
                 return cur.rowcount > 0
     except Exception:
         logger.exception(f"Error updating permissions for user {user_id}")
@@ -635,8 +654,25 @@ def get_all_users_with_permissions():
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT id, email, role, can_view_cvs, can_delete_records, can_grant_delete, created_at
-                    FROM users ORDER BY created_at DESC
+                    SELECT id, email, role,
+                           can_view_cv,
+                           can_upload_cv,
+                           can_edit_cv,
+                           can_delete_candidate,
+                           can_grant_delete,
+                           can_manage_users,
+                           can_add_candidates,
+                           can_edit_candidates,
+                           can_view_all_candidates,
+                           can_schedule_interviews,
+                           can_view_interview_feedback,
+                           can_edit_interview_feedback,
+                           can_delete_interview_feedback,
+                           can_view_reports,
+                           can_export_reports,
+                           created_at
+                    FROM users
+                    ORDER BY created_at DESC
                 """)
                 return cur.fetchall()
     except Exception:
@@ -644,6 +680,7 @@ def get_all_users_with_permissions():
         return []
     finally:
         conn.close()
+
 
 def seed_sample_users():
     """Create sample users for testing (only if they don’t exist)."""
@@ -661,13 +698,26 @@ def seed_sample_users():
         with conn:
             with conn.cursor() as cur:
                 for email, password, role in sample_users:
-                    # check if user already exists
                     cur.execute("SELECT id FROM users WHERE email = %s", (email,))
                     if not cur.fetchone():
                         password_hash = hash_password(password)
                         cur.execute("""
-                            INSERT INTO users (email, password_hash, role)
-                            VALUES (%s, %s, %s)
+                            INSERT INTO users (
+                                email, password_hash, role,
+                                can_view_cv, can_upload_cv, can_edit_cv, can_delete_candidate,
+                                can_grant_delete, can_manage_users, can_add_candidates, can_edit_candidates,
+                                can_view_all_candidates, can_schedule_interviews, can_view_interview_feedback,
+                                can_edit_interview_feedback, can_delete_interview_feedback,
+                                can_view_reports, can_export_reports
+                            )
+                            VALUES (
+                                %s, %s, %s,
+                                FALSE, FALSE, FALSE, FALSE,
+                                FALSE, FALSE, FALSE, FALSE,
+                                FALSE, FALSE, FALSE,
+                                FALSE, FALSE,
+                                FALSE, FALSE
+                            )
                         """, (email, password_hash, role))
                         logger.info(f"Created sample user: {email} with role: {role}")
     except Exception:
@@ -675,31 +725,34 @@ def seed_sample_users():
     finally:
         conn.close()
 
-# === Candidate Deletion (direct + permission-aware) ===
 
-def delete_candidate(candidate_id: str) -> bool:
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM interviews WHERE candidate_id = %s", (candidate_id,))
-                cur.execute("DELETE FROM candidates WHERE candidate_id = %s", (candidate_id,))
-                return cur.rowcount > 0
-    except Exception:
-        logger.exception(f"Error deleting candidate {candidate_id}")
-        return False
-    finally:
-        conn.close()
-
+# === Candidate Deletion (permission-aware) ===
 
 def get_user_permissions(user_id: int):
+    """Fetch all permissions and role for a user."""
     conn = get_conn()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT role, can_delete_records, can_grant_delete
-                    FROM users WHERE id = %s
+                    SELECT role,
+                           can_view_cv,
+                           can_upload_cv,
+                           can_edit_cv,
+                           can_delete_candidate,
+                           can_grant_delete,
+                           can_manage_users,
+                           can_add_candidates,
+                           can_edit_candidates,
+                           can_view_all_candidates,
+                           can_schedule_interviews,
+                           can_view_interview_feedback,
+                           can_edit_interview_feedback,
+                           can_delete_interview_feedback,
+                           can_view_reports,
+                           can_export_reports
+                    FROM users
+                    WHERE id = %s
                 """, (user_id,))
                 return cur.fetchone() or {}
     except Exception:
@@ -720,20 +773,76 @@ def user_can_manage_delete(user_id: int) -> bool:
 def user_can_delete(user_id: int) -> bool:
     perms = get_user_permissions(user_id)
     role = (perms.get("role") or "").lower()
-    return role in ("ceo", "admin") or bool(perms.get("can_delete_records"))
+    return role in ("ceo", "admin") or bool(perms.get("can_delete_candidate"))
 
 
 def set_user_delete_permission(granter_user_id: int, target_user_id: int, allowed: bool) -> bool:
     if not user_can_manage_delete(granter_user_id):
         return False
-    return set_user_permission(target_user_id, can_delete=allowed)
+    return set_user_permission(target_user_id, can_delete_candidate=allowed)
+
+
+def delete_candidate(candidate_id: str, actor_id: int) -> bool:
+    """
+    Deletes the candidate and all related data (CV, interviews, assessments).
+    Ensures that only authorized users can perform deletion.
+    """
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                # Check if the actor has permission
+                cur.execute("""
+                    SELECT role, can_delete_candidate
+                    FROM users
+                    WHERE id = %s
+                """, (actor_id,))
+                row = cur.fetchone()
+                if not row:
+                    logger.warning("Actor not found while attempting delete")
+                    return False
+
+                role = row[0] or ""
+                can_delete_flag = row[1] if len(row) > 1 else False
+
+                # role-based or permission flag
+                if (role.lower() not in ("ceo", "admin")) and not can_delete_flag:
+                    logger.warning(f"User {actor_id} does not have delete permission")
+                    return False  # Actor does NOT have permission
+
+                # Attempt to delete CV from drive if you have integration function
+                try:
+                    # drive_and_cv_views.delete_cv_from_drive should accept candidate_id
+                    from drive_and_cv_views import delete_cv_from_drive  # optional
+                    try:
+                        delete_cv_from_drive(candidate_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete CV from drive for {candidate_id}: {e}")
+                except Exception:
+                    # module or function not available - skip drive deletion
+                    pass
+
+                # Delete candidate interviews
+                cur.execute("DELETE FROM interviews WHERE candidate_id = %s", (candidate_id,))
+
+                # Delete receptionist assessments
+                cur.execute("DELETE FROM receptionist_assessments WHERE candidate_id = %s", (candidate_id,))
+
+                # Finally, delete the candidate itself
+                cur.execute("DELETE FROM candidates WHERE candidate_id = %s", (candidate_id,))
+
+                return cur.rowcount > 0
+    except Exception:
+        logger.exception(f"Error deleting candidate {candidate_id}")
+        return False
+    finally:
+        conn.close()
 
 
 def delete_candidate_by_actor(candidate_id: str, actor_user_id: int) -> bool:
-    if not user_can_delete(actor_user_id):
-        logger.warning(f"User {actor_user_id} attempted candidate delete without permission.")
-        return False
-    return delete_candidate(candidate_id)
+    """Wrapper used by higher-level code (UI) — enforces permission checks."""
+    return delete_candidate(candidate_id, actor_user_id)
+
 
 # === Candidate Statistics ===
 
@@ -829,7 +938,6 @@ def get_candidate_statistics():
                 row = cur.fetchone()
                 stats["avg_speed_test"] = row["avg_speed"] or 0
                 stats["avg_accuracy_test"] = row["avg_accuracy"] or 0
-
 
                 return stats
     except Exception:

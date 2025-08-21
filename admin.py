@@ -1,27 +1,30 @@
+# admin.py
+
 import re
 import secrets
 import string
 from datetime import datetime, timedelta
+
 import streamlit as st
 
 from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
     get_all_candidates, get_total_cv_storage_usage, get_candidate_statistics,
-    delete_candidate_by_actor
+    delete_candidate_by_actor, get_user_permissions
 )
 
+# -------------------------
+# Helpers
+# -------------------------
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
-
 
 def _valid_email(addr: str) -> bool:
     return bool(EMAIL_RE.match(addr or ""))
 
-
 def _random_password(n: int = 12) -> str:
     chars = string.ascii_letters + string.digits + "!@#$%?"
     return "".join(secrets.choice(chars) for _ in range(n))
-
 
 def _fetch_users():
     conn = get_conn()
@@ -40,7 +43,6 @@ def _fetch_users():
         for r in rows
     ]
 
-
 def _delete_user_by_id(uid: int) -> bool:
     conn = get_conn()
     with conn, conn.cursor() as cur:
@@ -49,7 +51,6 @@ def _delete_user_by_id(uid: int) -> bool:
     conn.close()
     return ok
 
-
 def _update_email(uid: int, new_email: str) -> bool:
     conn = get_conn()
     with conn, conn.cursor() as cur:
@@ -57,7 +58,6 @@ def _update_email(uid: int, new_email: str) -> bool:
         ok = cur.rowcount > 0
     conn.close()
     return ok
-
 
 def _reset_password(uid: int, new_password: str) -> bool:
     conn = get_conn()
@@ -68,7 +68,6 @@ def _reset_password(uid: int, new_password: str) -> bool:
             return False
         email = row[0]
     return update_user_password(email, new_password)
-
 
 def _users_older_than_30_days(users):
     cutoff = datetime.utcnow() - timedelta(days=30)
@@ -84,7 +83,6 @@ def _users_older_than_30_days(users):
             res.append(u)
     return res
 
-
 def _human_bytes(n: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     i, v = 0, float(n)
@@ -94,13 +92,21 @@ def _human_bytes(n: int) -> str:
     return f"{v:.2f} {units[i]}"
 
 
+# -------------------------
+# Admin Panel (with access control)
+# -------------------------
 def show_admin_panel():
-    st.header("Admin — Administration Panel")
+    st.header("⚙️ Admin — Administration Panel")
 
     current_user = st.session_state.get("user")
     if not current_user:
         st.error("No active user session. Please log in.")
         return
+
+    # Load permissions
+    perms = get_user_permissions(current_user["id"]) or {}
+    role = current_user.get("role", "").lower()
+    is_ceo = (role == "ceo")
 
     # -------------------------
     # OVERVIEW: Storage + Stats
@@ -126,101 +132,114 @@ def show_admin_panel():
     # -------------------------
     # USER PERMISSION MANAGEMENT
     # -------------------------
-    st.subheader("User Permissions")
-    users = get_all_users_with_permissions()
-    if not users:
-        st.warning("No users found.")
-    else:
-        for u in users:
-            with st.expander(f"{u['email']} ({u['role']})", expanded=False):
-                st.write(f"**ID:** {u['id']} | **Created:** {u['created_at']}")
+    if is_ceo:
+        st.subheader("User Permissions")
+        users = get_all_users_with_permissions()
+        if not users:
+            st.warning("No users found.")
+        else:
+            for u in users:
+                with st.expander(f"{u['email']} ({u['role']})", expanded=False):
+                    st.write(f"**ID:** {u['id']} | **Created:** {u['created_at']}")
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    can_view = st.checkbox("Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}")
-                with col2:
-                    can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        can_view = st.checkbox("Can View CVs", value=u.get("can_view_cv", False), key=f"view_{u['id']}")
+                    with col2:
+                        can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
 
-                # Only show grant_delete toggle if admin has that right
-                can_grant_delete = u.get("can_grant_delete", False)
-                if current_user.get("can_grant_delete", False):
+                    can_grant_delete = u.get("can_grant_delete", False)
                     can_grant_delete = st.checkbox("Can Grant Delete Rights", value=can_grant_delete, key=f"grant_{u['id']}")
 
-                if st.button("Update Permissions", key=f"perm_{u['id']}"):
-                    if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
-                        st.success("Permissions updated.")
-                        st.rerun()
-                    else:
-                        st.error("Failed to update permissions.")
+                    if st.button("Update Permissions", key=f"perm_{u['id']}"):
+                        if set_user_permission(
+                            u["id"],
+                            can_view=can_view,
+                            can_delete=can_delete,
+                            can_grant_delete=can_grant_delete
+                        ):
+                            st.success("Permissions updated.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update permissions.")
 
-    st.markdown("---")
+        st.markdown("---")
+    else:
+        st.info("🔒 Only CEO can manage user permissions.")
 
     # -------------------------
     # USER ACCOUNT MANAGEMENT
     # -------------------------
-    st.subheader("All Users")
-    users = _fetch_users()
-    for u in users:
-        with st.expander(f"{u['email']}  ({u['role']})", expanded=False):
-            st.write(f"**ID:** {u['id']}")
-            st.write(f"**Last password change:** {u.get('last_changed', '—')}")
+    if is_ceo:
+        st.subheader("All Users")
+        users = _fetch_users()
+        for u in users:
+            with st.expander(f"{u['email']}  ({u['role']})", expanded=False):
+                st.write(f"**ID:** {u['id']}")
+                st.write(f"**Last password change:** {u.get('last_changed', '—')}")
 
-            new_email = st.text_input("New email", value=u["email"], key=f"email_{u['id']}")
-            if st.button("Change Email", key=f"change_email_{u['id']}"):
-                if not _valid_email(new_email):
-                    st.error("Invalid email format.")
-                else:
-                    if _update_email(u["id"], new_email):
-                        st.success("Email updated.")
+                new_email = st.text_input("New email", value=u["email"], key=f"email_{u['id']}")
+                if st.button("Change Email", key=f"change_email_{u['id']}"):
+                    if not _valid_email(new_email):
+                        st.error("Invalid email format.")
+                    else:
+                        if _update_email(u["id"], new_email):
+                            st.success("Email updated.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update email.")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_pw = st.text_input("New password", type="password", key=f"pw_{u['id']}")
+                with col2:
+                    if st.button("Generate Strong Password", key=f"gen_{u['id']}"):
+                        st.session_state[f"pw_{u['id']}"] = _random_password()
+                        st.rerun()
+                if st.button("Reset Password", key=f"reset_{u['id']}"):
+                    pw = st.session_state.get(f"pw_{u['id']}", new_pw)
+                    if not pw:
+                        st.error("Please provide a new password.")
+                    else:
+                        if _reset_password(u["id"], pw):
+                            st.success("Password reset.")
+                        else:
+                            st.error("Failed to reset password.")
+
+                st.markdown("---")
+                if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
+                    if _delete_user_by_id(u["id"]):
+                        st.success("User removed.")
                         st.rerun()
                     else:
-                        st.error("Failed to update email.")
+                        st.error("Failed to remove user.")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                new_pw = st.text_input("New password", type="password", key=f"pw_{u['id']}")
-            with col2:
-                if st.button("Generate Strong Password", key=f"gen_{u['id']}"):
-                    st.session_state[f"pw_{u['id']}"] = _random_password()
-                    st.rerun()
-            if st.button("Reset Password", key=f"reset_{u['id']}"):
-                pw = st.session_state.get(f"pw_{u['id']}", new_pw)
-                if not pw:
-                    st.error("Please provide a new password.")
-                else:
-                    if _reset_password(u["id"], pw):
-                        st.success("Password reset.")
+        st.markdown("---")
+        st.subheader("Force Reset Passwords (older than 30 days)")
+        stale = _users_older_than_30_days(users)
+        if not stale:
+            st.caption("No accounts older than 30 days found.")
+        else:
+            st.write(f"{len(stale)} user(s) have passwords older than 30 days.")
+            if st.button("Reset All (generate random passwords)"):
+                ok, fail = 0, 0
+                for u in stale:
+                    if _reset_password(u["id"], _random_password()):
+                        ok += 1
                     else:
-                        st.error("Failed to reset password.")
-
-            st.markdown("---")
-            if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
-                if _delete_user_by_id(u["id"]):
-                    st.success("User removed.")
-                    st.rerun()
-                else:
-                    st.error("Failed to remove user.")
-
-    st.markdown("---")
-    st.subheader("Force Reset Passwords (older than 30 days)")
-    stale = _users_older_than_30_days(users)
-    if not stale:
-        st.caption("No accounts older than 30 days found.")
+                        fail += 1
+                st.success(f"Done. Reset: {ok}, Failed: {fail}.")
     else:
-        st.write(f"{len(stale)} user(s) have passwords older than 30 days.")
-        if st.button("Reset All (generate random passwords)"):
-            ok, fail = 0, 0
-            for u in stale:
-                if _reset_password(u["id"], _random_password()):
-                    ok += 1
-                else:
-                    fail += 1
-            st.success(f"Done. Reset: {ok}, Failed: {fail}.")
+        st.info("🔒 Only CEO can manage user accounts and passwords.")
 
     st.markdown("---")
+
+    # -------------------------
+    # Candidate Records
+    # -------------------------
     st.subheader("Candidate Records")
 
-    if current_user.get("can_delete_records", False):
+    if perms.get("can_delete_records") or is_ceo:
         candidates = get_all_candidates()
         if not candidates:
             st.caption("No candidates found.")
@@ -237,7 +256,7 @@ def show_admin_panel():
                     else:
                         st.error("Deletion failed.")
     else:
-        st.info("You don’t have permission to delete candidates.")
+        st.info("🔒 You don’t have permission to delete candidates.")
 
     st.markdown("---")
-    st.caption("Admin can manage users, permissions, and candidates — within CEO-granted rights.")
+    st.caption("Admin panel actions depend on CEO-granted rights. CEO always has full access.")
