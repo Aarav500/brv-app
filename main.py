@@ -5,7 +5,6 @@ from db_postgres import init_db, get_user_by_email, verify_password, hash_passwo
 from utils import VALID_ROLES
 from admin import show_admin_panel
 from ceo import show_ceo_panel
-from receptionist import receptionist_view
 from candidate_view import candidate_form_view
 from interviewer import interviewer_view
 from forgot_password_ui import forgot_password_view
@@ -126,6 +125,7 @@ def main():
     elif role == "admin":
         show_admin_panel()
     elif role == "receptionist":
+        from receptionist import receptionist_view
         receptionist_view()
     elif role == "interviewer":
         interviewer_view()
