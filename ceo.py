@@ -50,7 +50,7 @@ def _fetch_users():
     with conn, conn.cursor() as cur:
         cur.execute("""
             SELECT id, email, role,
-                   can_view_cv, can_upload_cv, can_edit_cv, can_delete_candidate,
+                   can_view_cvs, can_upload_cv, can_edit_cv, can_delete_candidate,
                    can_grant_delete, can_manage_users, can_add_candidates,
                    can_edit_candidates, can_view_all_candidates,
                    can_schedule_interviews, can_view_interview_feedback,
