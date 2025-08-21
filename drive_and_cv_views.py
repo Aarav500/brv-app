@@ -111,3 +111,37 @@ def download_cv_ui(candidate_id: str, prefix: str = "cvdl") -> None:
         file_name=filename or f"{candidate_id}",
         key=f"dl_only_{prefix}_{candidate_id}",
     )
+def upload_cv_ui(candidate_id: str) -> None:
+    """UI to upload a CV for a candidate."""
+    uploaded_file = st.file_uploader("Upload CV", type=["pdf", "doc", "docx"], key=f"upload_{candidate_id}")
+    if uploaded_file is not None:
+        try:
+            conn = get_conn()
+            with conn, conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE candidates
+                    SET cv_file = %s, cv_filename = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE candidate_id = %s
+                """, (uploaded_file.read(), uploaded_file.name, candidate_id))
+            conn.close()
+            st.success("CV uploaded successfully.")
+            st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Failed to upload CV: {e}")
+
+def delete_cv_ui(candidate_id: str) -> None:
+    """UI to delete a CV for a candidate."""
+    try:
+        conn = get_conn()
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE candidates
+                SET cv_file = NULL, cv_filename = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE candidate_id = %s
+            """, (candidate_id,))
+        conn.close()
+        st.success("CV deleted successfully.")
+        st.experimental_rerun()
+    except Exception as e:
+        st.error(f"Failed to delete CV: {e}")
+
