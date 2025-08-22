@@ -12,11 +12,12 @@ from auth import get_current_user
 from db_postgres import (
     get_user_permissions,
     get_all_candidates,
-    get_candidate_cv,
+    get_candidate_cv_secure,   # ✅ new
     save_candidate_cv,
     clear_candidate_cv,
     get_candidate_by_id,
 )
+
 
 # ---------- Permission helpers
 
@@ -73,19 +74,24 @@ def drive_and_cv_view():
     candidate_id = sel.split(" — ")[0]
 
     # Current CV state
+    # Current CV state
     try:
-        cv_bytes, cv_name = get_candidate_cv(candidate_id)
+        cv_bytes, cv_name, reason = get_candidate_cv_secure(candidate_id, user.get("id"))
     except Exception as e:
         st.error(f"Error fetching CV: {e}")
         return
 
     st.subheader("Current CV")
-    if not cv_bytes:
+    if reason == "no_permission":
+        st.error("🚫 You don’t have permission to view this CV.")
+        return
+    elif reason == "not_found":
         st.write("No CV uploaded for this candidate.")
     else:
         st.write(f"Filename: {cv_name or 'unknown'}")
         mime = mimetypes.guess_type(cv_name or "")[0] or "application/octet-stream"
         st.download_button("Download CV", data=cv_bytes, file_name=cv_name or f"{candidate_id}_cv", mime=mime)
+        ...
 
         if _can_delete_cv(perms):
             if st.button("🗑️ Delete CV for candidate"):
@@ -121,45 +127,42 @@ def drive_and_cv_view():
 # ---------- Lightweight building blocks (reuse these in other pages)
 
 def preview_cv_ui(candidate_id: str):
-    """Show minimal CV preview + download button (permission checks should be done by the caller).
-    If no blob is stored, fall back to displaying resume_link (if present).
-    """
+    """Show minimal CV preview + download button (permission checks included)."""
+    from auth import get_current_user
+    user = get_current_user()
+    actor_id = user.get("id") if user else 0
+
     try:
-        file_bytes, filename = get_candidate_cv(candidate_id)
+        file_bytes, filename, reason = get_candidate_cv_secure(candidate_id, actor_id)
     except Exception as e:
         st.error(f"Error fetching CV: {e}")
         return
 
-    if not file_bytes:
-        # Fallback: try resume_link from candidate row
+    if reason == "no_permission":
+        st.warning("🚫 You don’t have permission to view this CV.")
+        return
+    elif reason == "not_found":
         try:
             rec = get_candidate_by_id(candidate_id)
-        except Exception as e:
+        except Exception:
             rec = None
         link = (rec or {}).get("resume_link") if isinstance(rec, dict) else None
         if link:
             st.success("CV link available")
-            try:
-                # Prefer native link_button if present
-                st.link_button("Open CV (external)", url=link)
-            except Exception:
-                # Fallback to markdown link for older/new environments
-                st.markdown(f"[Open CV (external)]({link})")
-            st.caption("Note: This CV is stored externally (e.g., Drive). Download preview is not available.")
-            return
-        st.info("No CV uploaded.")
+            st.markdown(f"[Open CV (external)]({link})")
+            st.caption("Note: External CV (e.g., Google Drive). No inline preview.")
+        else:
+            st.info("No CV uploaded.")
         return
 
+    # success path
     st.success(f"CV found: {filename or 'unnamed'}")
     mime = mimetypes.guess_type(filename or "")[0] or "application/octet-stream"
-    # Inline preview for PDFs
     if mime == "application/pdf":
         try:
             b64 = base64.b64encode(file_bytes).decode("utf-8")
             html = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>'
             st.components.v1.html(html, height=620)
-            # Provide an explicit open link in case iframe is blocked by browser
-            st.markdown(f"[Open PDF in new tab](data:application/pdf;base64,{b64})")
         except Exception:
             st.caption("Inline preview unavailable; use Download instead.")
     else:
