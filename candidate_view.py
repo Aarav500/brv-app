@@ -171,14 +171,14 @@ def candidate_form_view():
         st.markdown("---")
         if st.button("Submit Application"):
             # Basic validations (you can extend)
-            if not form_data.get("full_name") or not form_data.get("phone"):
+            if not form_data.get("name") or not form_data.get("phone"):
                 st.error("Full Name and Phone are required.")
                 return
 
             candidate_id = _gen_candidate_code()
             rec = create_candidate_in_db(
                 candidate_id=candidate_id,
-                name=form_data.get("full_name", ""),
+                name=form_data.get("name", ""),
                 address=form_data.get("current_address", ""),  # store current as base address column
                 dob=form_data.get("dob", None),
                 caste=form_data.get("caste", ""),

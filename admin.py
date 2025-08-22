@@ -11,7 +11,7 @@ from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
     get_all_candidates, get_total_cv_storage_usage, get_candidate_statistics,
-    delete_candidate, get_user_permissions
+    delete_candidate, get_user_permissions, create_user_in_db
 )
 
 # -------------------------
@@ -171,6 +171,35 @@ def show_admin_panel():
     # USER ACCOUNT MANAGEMENT
     # -------------------------
     if is_ceo:
+        st.subheader("Create New User")
+        with st.form("create_user_form"):
+            new_email = st.text_input("Email", key="create_user_email")
+            new_role = st.selectbox("Role", ["candidate", "receptionist", "interviewer", "hr", "admin", "ceo"], index=0)
+            colp1, colp2 = st.columns(2)
+            with colp1:
+                new_pw1 = st.text_input("Password", type="password", key="create_user_pw1")
+            with colp2:
+                new_pw2 = st.text_input("Confirm Password", type="password", key="create_user_pw2")
+            create_submitted = st.form_submit_button("Create User")
+        if create_submitted:
+            if not _valid_email(new_email):
+                st.error("Invalid email format.")
+            elif not new_pw1:
+                st.error("Password is required.")
+            elif new_pw1 != new_pw2:
+                st.error("Passwords do not match.")
+            else:
+                try:
+                    ok = create_user_in_db(new_email.strip(), new_pw1, new_role)
+                    if ok:
+                        st.success("User created successfully.")
+                        st.rerun()
+                    else:
+                        st.error("User already exists or creation failed.")
+                except Exception as e:
+                    st.error(f"Failed to create user: {e}")
+
+        st.markdown("---")
         st.subheader("All Users")
         users = _fetch_users()
         for u in users:

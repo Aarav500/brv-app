@@ -92,7 +92,7 @@ def _render_candidate_summary(c: Dict[str, Any]):
         st.write(f"- Age / DOB: {form.get('dob','N/A')}")
         st.write(f"- Highest qualification: {form.get('highest_qualification','N/A')}")
         st.write(f"- Work experience: {form.get('work_experience','N/A')}")
-        st.write(f"- Ready for holidays: {form.get('ready_festivals_national_holidays','N/A')}")
+        st.write(f"- Ready for holidays: {form.get('ready_festivals','N/A')}")
         st.write(f"- Ready for late nights: {form.get('ready_late_nights','N/A')}")
 
 

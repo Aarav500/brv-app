@@ -36,7 +36,7 @@ def sidebar_navigation():
         st.sidebar.write(f"**Role:** {role.capitalize()}")
 
     # Core nav items
-    pages = {"Profile": "profile"}
+    pages = {}
 
     # Role-based pages
     if role == "ceo":
@@ -60,16 +60,10 @@ def router(page: str):
     if page == "auth":
         auth_router()
 
-    elif page == "profile":
-        require_login()
-        st.title("👤 My Profile")
-        st.write("See your details under the profile tab in auth.py.")
-
-        if st.button("Logout"):
-            logout()
 
     elif page == "manage_users":
-        manage_users_view()
+        require_login()
+        admin.show_admin_panel()
 
     elif page == "ceo":
         require_login()
