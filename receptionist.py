@@ -11,15 +11,12 @@ from db_postgres import (
     get_conn,
     find_candidates_by_name,
     get_all_candidates,
-    get_candidate_cv,
-    delete_candidate,   # ✅ Updated
+    delete_candidate,   # ✅ Still used
     set_candidate_permission,
     get_user_permissions,
     save_receptionist_assessment,
+    get_candidate_cv_secure,   # ✅ Final one
 )
-
-# Reuse UI bricks from dedicated module (clean separation)
-from drive_and_cv_views import preview_cv_ui
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
@@ -162,17 +159,48 @@ def receptionist_view():
 
             # ---------------- CV section (permission protected) ----------------
             # Refresh permissions right before sensitive CV access
-            live_perms = get_user_permissions(current_user["id"]) or {}
-            live_role = (live_perms.get("role") or "").lower()
-            if not (live_perms.get("can_view_cvs") or live_role in ("admin", "ceo")):
-                st.warning("You do not have permission to view CVs.")
-            else:
-                try:
-                    # minimal preview + download using shared helper
-                    preview_cv_ui(c["candidate_id"])
-                except Exception as e:
-                    st.error(f"Error fetching CV: {e}")
-            st.markdown("---")
+            user = get_current_user()
+            actor_id = user.get("id") if user else 0
+
+            try:
+                cv_bytes, cv_name, reason = get_candidate_cv_secure(c["candidate_id"], actor_id)
+
+                if reason == "no_permission":
+                    st.warning("🚫 You don’t have permission to view this CV.")
+                elif reason == "not_found":
+                    resume_link = (c or {}).get("resume_link")
+                    if resume_link:
+                        st.markdown(f"[Open CV (external)]({resume_link})")
+                        st.caption("Note: External CV link provided (e.g., Google Drive)")
+                    else:
+                        st.info("ℹ️ No CV uploaded for this candidate.")
+                elif reason == "ok" and cv_bytes:
+                    try:
+                        import tempfile, base64, os
+                        suffix = ".pdf" if (cv_name or "").lower().endswith(".pdf") else ""
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                        tmp.write(cv_bytes)
+                        tmp.flush()
+                        tmp.close()
+
+                        if suffix == ".pdf":
+                            with open(tmp.name, "rb") as f:
+                                b64_pdf = base64.b64encode(f.read()).decode("utf-8")
+                            st.markdown(
+                                f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
+                                f'width="700" height="500" type="application/pdf"></iframe>',
+                                unsafe_allow_html=True,
+                            )
+                    except Exception as e:
+                        st.error(f"Error previewing CV: {e}")
+
+                    st.download_button(
+                        "📄 Download CV",
+                        data=cv_bytes,
+                        file_name=cv_name or f"{c['candidate_id']}_cv.bin",
+                    )
+            except Exception as e:
+                st.error(f"Error fetching CV: {e}")
 
             # ---------------- Receptionist assessment block ----------------
             st.markdown("### Receptionist Assessment")

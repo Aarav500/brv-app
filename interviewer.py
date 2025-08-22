@@ -293,17 +293,54 @@ def interviewer_view():
                 else:
                     st.caption("No application data available.")
 
-            # CV preview (full width)
+            # CV preview (full width; permission-aware)
             st.markdown("---")
             st.subheader("📄 Resume Preview")
-            if bool(user_perms.get("can_view_cvs", False)) or (role in ("admin", "ceo")):
-                try:
-                    preview_cv_ui(cid)
-                    # download handled inside preview_cv_ui
-                except Exception as e:
-                    st.error(f"Error showing CV: {e}")
-            else:
-                st.warning("🚫 You don't have permission to view CVs.")
+
+            from db_postgres import get_candidate_cv_secure
+
+            user = get_current_user()
+            actor_id = user.get("id") if user else 0
+
+            try:
+                cv_bytes, cv_name, reason = get_candidate_cv_secure(cid, actor_id)
+
+                if reason == "no_permission":
+                    st.warning("🚫 You don’t have permission to view this CV.")
+                elif reason == "not_found":
+                    resume_link = (cand or {}).get("resume_link")
+                    if resume_link:
+                        st.markdown(f"[Open CV (external)]({resume_link})")
+                        st.caption("Note: External CV link provided (e.g., Google Drive)")
+                    else:
+                        st.info("ℹ️ No CV uploaded for this candidate.")
+                elif reason == "ok" and cv_bytes:
+                    try:
+                        import tempfile, base64, os
+                        suffix = ".pdf" if (cv_name or "").lower().endswith(".pdf") else ""
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                        tmp.write(cv_bytes)
+                        tmp.flush()
+                        tmp.close()
+
+                        if suffix == ".pdf":
+                            with open(tmp.name, "rb") as f:
+                                b64_pdf = base64.b64encode(f.read()).decode("utf-8")
+                            st.markdown(
+                                f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
+                                f'width="700" height="500" type="application/pdf"></iframe>',
+                                unsafe_allow_html=True,
+                            )
+                    except Exception as e:
+                        st.error(f"Error previewing CV: {e}")
+
+                    st.download_button(
+                        "📄 Download CV",
+                        data=cv_bytes,
+                        file_name=cv_name or f"{cid}_cv.bin",
+                    )
+            except Exception as e:
+                st.error(f"Error fetching candidate CV: {e}")
 
             # History timeline
             st.markdown("---")

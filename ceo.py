@@ -15,14 +15,15 @@ from datetime import datetime
 from db_postgres import (
     get_all_users_with_permissions,
     update_user_permissions,
+    get_candidate_cv_secure,
+    save_candidate_cv,
+    clear_candidate_cv,
     get_user_permissions,
-    get_all_candidates,
-    get_candidate_by_id,
-    get_candidate_cv,
-    get_candidate_history,
-    delete_candidate,
     get_candidate_statistics,
+    get_all_candidates,
+    delete_candidate,
     set_candidate_permission,
+    get_candidate_history,
     set_user_permission,
 )
 
@@ -306,87 +307,64 @@ def show_ceo_panel():
             # split into left (details) and right (actions)
             left, right = st.columns([3, 1])
             with left:
+                # Candidate details
                 try:
                     _render_candidate_summary(c)
                 except Exception as e:
-                    # Fallback without printing entire raw JSON
                     st.error("Error rendering candidate details (truncated).")
                     st.write(f"Name: {c.get('name', '—')}")
                     st.write(f"Candidate ID: {c.get('candidate_id', '—')}")
                     st.write(f"Created At: {_format_datetime(c.get('created_at'))}")
                     st.caption("Full record available in logs if needed.")
-                    # log exception to console (not to UI)
                     import logging
                     logging.exception("ceo: render candidate error: %s", e)
 
-                    # Candidate CV (permission-aware)
-                    try:
-                        cid = c.get("candidate_id")
-                        # use permission-aware fetch: we'll call DB helper that checks permissions (see db_postgres changes)
-                        from db_postgres import get_candidate_cv, get_user_permissions
+                # Candidate CV (secure + permission aware)
+                try:
+                    cid = c.get("candidate_id")
+                    user = get_current_user()
+                    actor_id = user.get("id") if user else 0
 
-                        # Retrieve current user id safely
-                        user = get_current_user()
-                        actor_id = user.get("id") if user else None
+                    cv_bytes, cv_name, reason = get_candidate_cv_secure(cid, actor_id)
 
-                        # permission check
-                        perms = get_user_permissions(actor_id or 0) or {}
-                        role = (perms.get("role") or "").lower()
-                        can_view = role in ("ceo", "admin") or bool(perms.get("can_view_cvs", False))
-
-                        if not can_view:
-                            st.warning("You don’t have permission to view CVs for this candidate.")
-                        else:
-                            cv_bytes, cv_name = get_candidate_cv(cid)
-                            if cv_bytes:
-                                # Inline preview for PDFs (works if bytes are PDF)
-                                try:
-                                    # Streamlit can display PDFs via an iframe if we write to a temp file
-                                    import tempfile, base64, os
-                                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=(
-                                        ".pdf" if (cv_name or "").lower().endswith(".pdf") else ""))
-                                    tmp.write(cv_bytes)
-                                    tmp.flush()
-                                    tmp.close()
-                                    # show Download and embed if it's a PDF
-                                    st.download_button("Download CV", data=cv_bytes,
-                                                       file_name=cv_name or f"{cid}_cv.bin")
-                                    if cv_name and cv_name.lower().endswith(".pdf"):
-                                        # embed PDF
-                                        pdf_path = tmp.name
-                                        with open(pdf_path, "rb") as f:
-                                            b64 = base64.b64encode(f.read()).decode()
-                                        pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600px" type="application/pdf"></iframe>'
-                                        st.components.v1.html(pdf_display, height=650)
-                                    else:
-                                        # Non-PDF: provide download and message
-                                        st.info("CV uploaded — use Download CV to open it locally.")
-                                except Exception as e:
-                                    st.write("CV preview error:", e)
-                                    st.download_button("Download CV", data=cv_bytes,
-                                                       file_name=cv_name or f"{cid}_cv.bin")
-                            else:
-                                resume_link = (c or {}).get("resume_link")
-                                if resume_link:
-                                    st.markdown(f"[Open CV (external)]({resume_link})")
-                                    st.caption("Note: External CV link provided (e.g., Google Drive)")
-                                else:
-                                    st.write("No CV uploaded.")
-                    except Exception as e:
-                        st.write("CV: (error fetching)", e)
-
-                    else:
-                        # Fallback to resume_link if available
+                    if reason == "no_permission":
+                        st.warning("❌ You don’t have permission to view CVs for this candidate.")
+                    elif reason == "not_found":
                         resume_link = (c or {}).get("resume_link")
                         if resume_link:
-                            st.link_button("Open CV (external)", url=resume_link, key=f"linkcv_{cid}")
+                            st.markdown(f"[Open CV (external)]({resume_link})")
                             st.caption("Note: External CV link provided (e.g., Google Drive)")
                         else:
-                            st.write("No CV uploaded.")
-                except Exception as e:
-                    st.write("CV: (error fetching)", e)
+                            st.info("ℹ️ No CV uploaded for this candidate.")
+                    elif reason == "ok" and cv_bytes:
+                        try:
+                            import tempfile, base64, os
+                            suffix = ".pdf" if (cv_name or "").lower().endswith(".pdf") else ""
+                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                            tmp.write(cv_bytes)
+                            tmp.flush()
+                            tmp.close()
 
-                # Interview history (from DB helper)
+                            if suffix == ".pdf":
+                                with open(tmp.name, "rb") as f:
+                                    b64_pdf = base64.b64encode(f.read()).decode("utf-8")
+                                st.markdown(
+                                    f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
+                                    f'width="700" height="500" type="application/pdf"></iframe>',
+                                    unsafe_allow_html=True,
+                                )
+                        except Exception as e:
+                            st.error(f"Error previewing CV: {e}")
+
+                        st.download_button(
+                            "📄 Download CV",
+                            data=cv_bytes,
+                            file_name=cv_name or f"{cid}_cv.bin",
+                        )
+                except Exception as e:
+                    st.error(f"Error fetching candidate CV: {e}")
+
+                # Interview history
                 try:
                     history = get_candidate_history(c.get("candidate_id"))
                     _render_interview_history(history)
