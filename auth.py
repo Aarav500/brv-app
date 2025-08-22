@@ -95,6 +95,38 @@ def reset_password(email: str, new_password: str) -> bool:
 create_user = register_user
 
 
+def get_current_user(refresh: bool = True) -> dict:
+    """Return the current logged-in user, refreshing from DB to ensure up-to-date role and permissions.
+    If no user is logged in, returns {}.
+    """
+    _init_session()
+    sess_user = st.session_state.get("user") or {}
+    if not sess_user or not sess_user.get("id"):
+        return {}
+
+    if not refresh:
+        return dict(sess_user)
+
+    try:
+        # Pull the latest user record (role and flags) by ID
+        db_user = get_user_by_id(sess_user["id"]) or {}
+        # Fallback to session values if any field missing
+        merged = {
+            "id": db_user.get("id", sess_user.get("id")),
+            "email": db_user.get("email", sess_user.get("email")),
+            "role": (db_user.get("role") or sess_user.get("role") or "").strip(),
+            "can_view_cvs": bool(db_user.get("can_view_cvs", sess_user.get("can_view_cvs", False))),
+            "can_delete_records": bool(db_user.get("can_delete_records", sess_user.get("can_delete_records", False))),
+            "can_grant_delete": bool(db_user.get("can_grant_delete", sess_user.get("can_grant_delete", False))),
+        }
+        # Persist back to session to keep it consistent across pages
+        st.session_state.user = merged
+        return dict(merged)
+    except Exception:
+        # If DB refresh fails, return the session snapshot
+        return dict(sess_user)
+
+
 # === STREAMLIT UI VIEWS ===
 
 def login_view():

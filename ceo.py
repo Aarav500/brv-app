@@ -27,7 +27,7 @@ from db_postgres import (
 )
 
 # Import auth helpers
-from auth import require_login
+from auth import require_login, get_current_user
 
 # -------------------------
 # Helpers
@@ -127,7 +127,10 @@ def _render_interview_history(history: List[Dict[str, Any]]):
 # -------------------------
 def show_ceo_panel():
     require_login()
-    current_user = st.session_state.get("user") or {}
+    current_user = get_current_user()
+    if not current_user:
+        st.error("No active user session. Please log in.")
+        st.stop()
     # only allow admin/ceo roles to manage users
     role = (current_user.get("role") or "").lower()
     # fetch permissions for configurable access control
@@ -338,7 +341,7 @@ def show_ceo_panel():
 
             with right:
                 st.markdown("### Actions")
-                user = st.session_state.get("user", {})
+                user = get_current_user()
                 role_lower = (user.get("role") or "").lower()
                 can_delete_records = role_lower in ("admin", "ceo") or bool(perms.get("can_delete_records")) or bool(perms.get("can_grant_delete"))
                 if not can_delete_records:

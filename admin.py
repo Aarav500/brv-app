@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import streamlit as st
 
+from auth import get_current_user
 from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
@@ -98,7 +99,7 @@ def _human_bytes(n: int) -> str:
 def show_admin_panel():
     st.header("⚙️ Admin — Administration Panel")
 
-    current_user = st.session_state.get("user")
+    current_user = get_current_user()
     if not current_user:
         st.error("No active user session. Please log in.")
         return

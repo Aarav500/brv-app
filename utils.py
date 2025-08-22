@@ -1,12 +1,14 @@
 # utils.py
 import streamlit as st
+from auth import get_current_user
 
 VALID_ROLES = {"ceo","admin","hr","receptionist","interviewer","candidate"}
 
 def require_login():
-    if "user" not in st.session_state:
+    user = get_current_user()
+    if not user:
         st.warning("Please login first.")
         st.stop()
 
 def get_user():
-    return st.session_state.get("user")
+    return get_current_user()

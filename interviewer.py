@@ -4,6 +4,7 @@ from datetime import datetime, date, time
 from typing import Dict, Any, List, Optional
 
 import streamlit as st
+from auth import get_current_user
 from db_postgres import (
     get_all_candidates,
     search_candidates_by_name_or_email,
@@ -210,7 +211,7 @@ def interviewer_view():
     )
 
     # validate session user
-    current_user = st.session_state.get("user")
+    current_user = get_current_user()
     if not current_user:
         st.error("No active user session. Please log in.")
         return
@@ -404,7 +405,8 @@ def interviewer_view():
 
             # Schedule/record interview (permission guarded)
             st.markdown("### ➕ Schedule / Record Interview")
-            if bool(user_perms.get("can_schedule_interviews", False)):
+            can_schedule = (role in ("interviewer", "admin", "ceo")) or bool(user_perms.get("can_view_cvs", False))
+            if can_schedule:
                 d: date = st.date_input("Interview Date", key=f"d_{cid}")
                 t: time = st.time_input("Interview Time", key=f"t_{cid}")
                 interviewer_name = st.text_input("Interviewer Name", key=f"iv_{cid}")

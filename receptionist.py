@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Tuple
 
 import streamlit as st
 
+from auth import get_current_user
 from db_postgres import (
     get_conn,
     find_candidates_by_name,
@@ -129,7 +130,7 @@ def receptionist_view():
     st.header("Receptionist — Candidate Management")
 
     # Current user & permissions
-    current_user = st.session_state.get("user")
+    current_user = get_current_user()
     if not current_user:
         st.error("No active user session. Please log in.")
         return

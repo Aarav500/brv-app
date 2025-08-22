@@ -7,6 +7,7 @@ from auth import (
     require_login,
     seed_users_if_needed,
     manage_users_view,
+    get_current_user,
 )
 import ceo
 import interviewer
@@ -27,8 +28,8 @@ def sidebar_navigation():
     if not is_logged_in():
         return "auth"
 
-    user = st.session_state.user
-    role = user.get("role", "").lower()
+    user = get_current_user()
+    role = (user.get("role", "") if user else "").lower()
 
     st.sidebar.write(f"**Logged in as:** {user['email']}")
     # hide explicit role for CEO (or show role for others)

@@ -8,6 +8,7 @@ import mimetypes
 import base64
 import streamlit as st
 
+from auth import get_current_user
 from db_postgres import (
     get_user_permissions,
     get_all_candidates,
@@ -43,7 +44,7 @@ def _can_edit_cv(perms: dict) -> bool:
 
 def drive_and_cv_view():
     """Standalone CV manager page."""
-    user = st.session_state.get("user", {}) or {}
+    user = get_current_user()
     if not user:
         st.error("No active session.")
         return
