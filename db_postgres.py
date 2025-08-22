@@ -606,6 +606,138 @@ def get_all_interviews() -> List[Dict[str, Any]]:
 
 
 # -----------------------------
+# New helpers added: HISTORY + INTERVIEWER STATS
+# -----------------------------
+def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
+    """
+    Return a merged chronological timeline for a candidate.
+    Each item is a dict: { event: str, details: str, created_at: datetime, actor: Optional[str] }
+    Events included:
+      - candidate creation / updates (from candidates.updated_at / created_at)
+      - receptionist assessments (receptionist_assessments.created_at)
+      - interviews (interviews.created_at or scheduled_at)
+    If candidate not found, returns [].
+    """
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # ensure candidate exists
+            cur.execute("SELECT candidate_id, name, created_at, updated_at FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            cand = cur.fetchone()
+            if not cand:
+                return []
+
+            timeline: List[Dict[str, Any]] = []
+
+            # candidate created/updated events
+            if cand.get("created_at"):
+                timeline.append({
+                    "event": "candidate_created",
+                    "details": f"Candidate record created ({cand.get('name')})",
+                    "created_at": cand.get("created_at"),
+                    "actor": cand.get("created_by") if cand.get("created_by") else None
+                })
+            if cand.get("updated_at") and cand.get("updated_at") != cand.get("created_at"):
+                timeline.append({
+                    "event": "candidate_updated",
+                    "details": f"Candidate record updated",
+                    "created_at": cand.get("updated_at"),
+                    "actor": None
+                })
+
+            # receptionist assessments
+            cur.execute("""
+                SELECT id, speed_test, accuracy_test, work_commitment, english_understanding, comments, created_at
+                FROM receptionist_assessments
+                WHERE candidate_id=%s
+                ORDER BY created_at DESC
+            """, (candidate_id,))
+            for r in cur.fetchall():
+                details = f"Speed: {r.get('speed_test')}, Accuracy: {r.get('accuracy_test')}"
+                if r.get("work_commitment"):
+                    details += f", Commitment: {r.get('work_commitment')}"
+                if r.get("english_understanding"):
+                    details += f", English: {r.get('english_understanding')}"
+                if r.get("comments"):
+                    details += f", Notes: {r.get('comments')}"
+                timeline.append({
+                    "event": "receptionist_assessment",
+                    "details": details,
+                    "created_at": r.get("created_at"),
+                    "actor": "receptionist"
+                })
+
+            # interviews (include scheduled_at as the event time if present; fallback to created_at)
+            cur.execute("""
+                SELECT id, scheduled_at, created_at, result, interviewer, notes
+                FROM interviews
+                WHERE candidate_id=%s
+            """, (candidate_id,))
+            for iv in cur.fetchall():
+                ev_time = iv.get("scheduled_at") or iv.get("created_at")
+                details = f"Result: {iv.get('result') or 'unspecified'}"
+                if iv.get("notes"):
+                    details += f", Notes: {iv.get('notes')}"
+                timeline.append({
+                    "event": "interview",
+                    "details": details,
+                    "created_at": ev_time,
+                    "actor": iv.get("interviewer")
+                })
+
+            # sort timeline newest first (if created_at missing, keep at end)
+            timeline_sorted = sorted(
+                timeline,
+                key=lambda x: x.get("created_at") or datetime(1970, 1, 1),
+                reverse=True
+            )
+            return timeline_sorted
+    finally:
+        conn.close()
+
+
+def get_interviewer_performance_stats(interviewer_id: str) -> Dict[str, Any]:
+    """
+    Return simple interviewer performance stats for a given interviewer identifier (string).
+    Returns:
+      {
+        "total_interviews": int,
+        "scheduled": int,            # result == 'scheduled' (case-insensitive)
+        "completed": int,            # result IN ('completed','pass','fail') (case-insensitive)
+        "passed": int,               # result == 'pass'
+        "success_rate": int          # percentage passed/completed (0 if completed==0)
+      }
+    """
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    COUNT(*)::int AS total_interviews,
+                    SUM(CASE WHEN LOWER(result) = 'scheduled' THEN 1 ELSE 0 END)::int AS scheduled,
+                    SUM(CASE WHEN LOWER(result) IN ('completed','pass','fail') THEN 1 ELSE 0 END)::int AS completed,
+                    SUM(CASE WHEN LOWER(result) = 'pass' THEN 1 ELSE 0 END)::int AS passed
+                FROM interviews
+                WHERE interviewer = %s
+            """, (interviewer_id,))
+            row = cur.fetchone() or {}
+            total = int(row.get("total_interviews") or 0)
+            scheduled = int(row.get("scheduled") or 0)
+            completed = int(row.get("completed") or 0)
+            passed = int(row.get("passed") or 0)
+            success_rate = int((passed / completed) * 100) if completed > 0 else 0
+            return {
+                "total_interviews": total,
+                "scheduled": scheduled,
+                "completed": completed,
+                "passed": passed,
+                "success_rate": success_rate,
+            }
+    finally:
+        conn.close()
+
+
+# -----------------------------
 # Search helpers
 # -----------------------------
 def search_candidates_by_name_or_email(query: str) -> List[Dict[str, Any]]:
