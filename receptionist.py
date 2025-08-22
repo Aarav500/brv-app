@@ -135,6 +135,7 @@ def receptionist_view():
         return
 
     perms = get_user_permissions(current_user["id"]) or {}
+    role = (perms.get("role") or "").lower()
 
     # Search section
     st.subheader("Search Candidates (all fields)")
@@ -160,7 +161,7 @@ def receptionist_view():
 
             # ---------------- CV section (permission protected) ----------------
             st.markdown("### Resume / CV")
-            if not (perms.get("can_view_cv") or (perms.get("role") or "").lower() in ("admin", "ceo")):
+            if not (perms.get("can_view_cvs") or role in ("admin", "ceo")):
                 st.warning("You do not have permission to view CVs.")
             else:
                 try:
@@ -235,7 +236,7 @@ def receptionist_view():
                 # Re-fetch perms to reflect changes during session (optional)
                 live_perms = get_user_permissions(current_user["id"]) or {}
                 ui_can_delete = (
-                    live_perms.get("can_delete_candidate")
+                    live_perms.get("can_delete_records")
                     or live_perms.get("can_grant_delete")
                     or (live_perms.get("role") or "").lower() in ("admin", "ceo")
                 )
@@ -245,7 +246,7 @@ def receptionist_view():
                 else:
                     if st.button("🗑️ Delete Candidate", key=f"del_{c['candidate_id']}"):
                         try:
-                            ok = delete_candidate(c["candidate_id"], user["id"])
+                            ok = delete_candidate(c["candidate_id"], current_user["id"])
                             if ok:
                                 st.success("✅ Candidate deleted.")
                                 st.rerun()

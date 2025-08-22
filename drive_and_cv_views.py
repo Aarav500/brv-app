@@ -21,17 +21,20 @@ def _is_admin_or_ceo(perms: dict) -> bool:
     return (perms.get("role") or "").lower() in ("admin", "ceo")
 
 def _can_view_cv(perms: dict) -> bool:
-    return bool(perms.get("can_view_cv")) or _is_admin_or_ceo(perms)
+    # DB-backed flag is can_view_cvs
+    return bool(perms.get("can_view_cvs")) or _is_admin_or_ceo(perms)
 
 def _can_upload_cv(perms: dict) -> bool:
-    return bool(perms.get("can_upload_cv")) or _is_admin_or_ceo(perms)
+    # No dedicated DB flag; allow upload if can_view_cvs or admin/ceo
+    return bool(perms.get("can_view_cvs")) or _is_admin_or_ceo(perms)
 
 def _can_delete_cv(perms: dict) -> bool:
-    # reuse existing delete knobs (delete candidate or grant delete) + admin/ceo
-    return bool(perms.get("can_delete_candidate")) or bool(perms.get("can_grant_delete")) or _is_admin_or_ceo(perms)
+    # Use delete candidate/grant delete or admin/ceo
+    return bool(perms.get("can_delete_records")) or bool(perms.get("can_grant_delete")) or _is_admin_or_ceo(perms)
 
 def _can_edit_cv(perms: dict) -> bool:
-    return bool(perms.get("can_edit_cv")) or _is_admin_or_ceo(perms)
+    # No dedicated DB flag; reuse view/admin rights
+    return bool(perms.get("can_view_cvs")) or _is_admin_or_ceo(perms)
 
 
 # ---------- Full-page CV manager
@@ -143,13 +146,10 @@ def upload_cv_ui(candidate_id: str):
 
 
 def delete_cv_ui(candidate_id: str):
-    """Delete CV (caller should have checked delete permissions)."""
-    if st.button("Delete CV", key=f"delcv_{candidate_id}"):
-        ok = delete_candidate_cv(candidate_id)
-        if ok:
-            st.success("CV deleted.")
-        else:
-            st.error("Failed to delete CV.")
+    """Delete CV (caller should have checked delete permissions).
+    Note: This project does not implement a standalone 'delete CV' endpoint; use candidate deletion in privileged panels.
+    """
+    st.info("CV deletion is managed by admin/CEO via candidate deletion. No direct CV delete available here.")
 
 
 # Optional: used by delete flow elsewhere; kept as a no-op hook for external storage

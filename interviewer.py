@@ -16,7 +16,7 @@ from db_postgres import (
     get_candidate_history,
     get_interviewer_performance_stats,
 )
-from drive_and_cv_views import preview_cv_ui, download_cv_ui  # reuse CV UI
+from drive_and_cv_views import preview_cv_ui  # reuse CV UI
 
 
 # -------------------- Helpers --------------------
@@ -119,7 +119,9 @@ def _history_timeline(candidate_id: str):
 # -------------------- CEO/Admin permission manager (embedded small panel) --------------------
 
 def _permissions_manager_ui():
-    """Small inline UI that lets CEO/admin adjust user permissions relevant to interview flows."""
+    """Small inline UI that lets CEO/admin adjust interviewer-related permissions.
+    Note: Only core DB-backed permissions are persisted: can_view_cvs, can_delete_records, can_grant_delete.
+    """
     st.subheader("🔑 Manage Interviewer Permissions (Admin)")
     try:
         users = get_all_users_with_permissions()
@@ -131,21 +133,28 @@ def _permissions_manager_ui():
         st.info("No users found.")
         return
 
+    # UI fields (some are informational only and not stored in DB directly)
     PERMISSION_FIELDS = [
-        "can_view_cv",
-        "can_schedule_interviews",
-        "can_view_interview_feedback",
-        "can_edit_interview_feedback",
-        "can_delete_candidate",
+        "can_view_cv",                 # maps to users.can_view_cvs
+        "can_schedule_interviews",    # UI only (not stored)
+        "can_view_interview_feedback",# UI only (not stored)
+        "can_edit_interview_feedback",# UI only (not stored)
+        "can_delete_candidate",       # maps to users.can_delete_records
+        "can_grant_delete",           # maps to users.can_grant_delete
     ]
 
     for user in users:
         with st.expander(f"👤 {user.get('email')} — {user.get('role')}", expanded=False):
-            updated_perms: Dict[str, bool] = {}
+            updated_ui: Dict[str, bool] = {}
             for field in PERMISSION_FIELDS:
-                # safe extraction: fallback False if key missing
-                current = bool(user.get(field, False))
-                updated_perms[field] = st.checkbox(
+                # derive current value from DB where applicable
+                if field == "can_view_cv":
+                    current = bool(user.get("can_view_cvs", False))
+                elif field == "can_delete_candidate":
+                    current = bool(user.get("can_delete_records", False))
+                else:
+                    current = bool(user.get(field, False))
+                updated_ui[field] = st.checkbox(
                     field.replace("_", " ").title(),
                     value=current,
                     key=f"{user['id']}_{field}"
@@ -153,7 +162,13 @@ def _permissions_manager_ui():
 
             if st.button(f"💾 Save Permissions for {user.get('email')}", key=f"save_perm_{user['id']}"):
                 try:
-                    ok = set_user_permission(user["id"], **updated_perms)
+                    # Map UI fields to DB-backed flags
+                    ok = set_user_permission(
+                        user["id"],
+                        can_view=bool(updated_ui.get("can_view_cv", False)),
+                        can_delete=bool(updated_ui.get("can_delete_candidate", False)),
+                        can_grant_delete=bool(updated_ui.get("can_grant_delete", False)),
+                    )
                     if ok:
                         st.success("Permissions updated.")
                         st.rerun()
@@ -224,11 +239,16 @@ def interviewer_view():
                 st.write(f"**Created:** {cand.get('created_at', '—')}")
 
                 # Delete candidate (permission-guarded)
-                if bool(user_perms.get("can_delete_candidate", False)):
+                ui_can_delete = (
+                    bool(user_perms.get("can_delete_records"))
+                    or bool(user_perms.get("can_grant_delete"))
+                    or (role in ("admin", "ceo"))
+                )
+                if ui_can_delete:
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
                         user_id = current_user.get("id")
                         try:
-                            if user_id and delete_candidate_by_actor(cid, user_id):
+                            if user_id and delete_candidate(cid, user_id):
                                 st.success("Candidate deleted successfully.")
                                 st.rerun()
                             else:
@@ -251,11 +271,10 @@ def interviewer_view():
             # CV preview (full width)
             st.markdown("---")
             st.subheader("📄 Resume Preview")
-            if bool(user_perms.get("can_view_cv", False)):
+            if bool(user_perms.get("can_view_cvs", False)) or (role in ("admin", "ceo")):
                 try:
                     preview_cv_ui(cid)
-                    # also provide download link if available
-                    download_cv_ui(cid)
+                    # download handled inside preview_cv_ui
                 except Exception as e:
                     st.error(f"Error showing CV: {e}")
             else:

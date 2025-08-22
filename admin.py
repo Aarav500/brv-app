@@ -11,7 +11,7 @@ from db_postgres import (
     get_conn, update_user_password,
     get_all_users_with_permissions, set_user_permission,
     get_all_candidates, get_total_cv_storage_usage, get_candidate_statistics,
-    delete_candidate_by_actor, get_user_permissions
+    delete_candidate, get_user_permissions
 )
 
 # -------------------------
@@ -144,7 +144,7 @@ def show_admin_panel():
 
                     col1, col2 = st.columns(2)
                     with col1:
-                        can_view = st.checkbox("Can View CVs", value=u.get("can_view_cv", False), key=f"view_{u['id']}")
+                        can_view = st.checkbox("Can View CVs", value=u.get("can_view_cvs", False), key=f"view_{u['id']}")
                     with col2:
                         can_delete = st.checkbox("Can Delete Candidate Records", value=u.get("can_delete_records", False), key=f"delete_{u['id']}")
 
@@ -262,7 +262,7 @@ def show_admin_panel():
                 else:
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
                         try:
-                            ok = delete_candidate_by_actor(c["candidate_id"], current_user["id"])
+                            ok = delete_candidate(c["candidate_id"], current_user["id"])
                             if ok:
                                 st.success("Candidate deleted successfully.")
                                 st.rerun()

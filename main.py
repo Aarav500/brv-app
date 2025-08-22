@@ -12,6 +12,7 @@ import ceo
 import interviewer
 import receptionist
 import candidate_view
+import admin
 
 
 # === INIT ===
@@ -72,23 +73,23 @@ def router(page: str):
 
     elif page == "ceo":
         require_login()
-        ceo.ceo_dashboard()
+        ceo.show_ceo_panel()
 
     elif page == "hr":
         require_login()
-        hr.hr_dashboard()
+        admin.show_admin_panel()
 
     elif page == "interviewer":
         require_login()
-        interviewer.interviewer_dashboard()
+        interviewer.interviewer_view()
 
     elif page == "receptionist":
         require_login()
-        receptionist.receptionist_dashboard()
+        receptionist.receptionist_view()
 
     elif page == "candidate":
         require_login()
-        candidate.candidate_portal()
+        candidate_view.candidate_view()
 
     else:
         st.error("Page not found.")

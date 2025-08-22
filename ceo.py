@@ -314,7 +314,7 @@ def show_ceo_panel():
                         st.error("🚫 You do not have permission to delete candidate records.")
                     else:
                         try:
-                            ok = delete_candidate(candidate_id, user["id"])
+                            ok = delete_candidate(c.get("candidate_id"), user["id"])
                             if ok:
                                 st.success("Candidate deleted.")
                                 st.rerun()
