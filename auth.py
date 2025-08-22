@@ -3,13 +3,14 @@ import streamlit as st
 import os
 import secrets
 import time
+import jwt
+import datetime
 from db_postgres import (
     get_user_by_email, get_user_by_id,
     create_user_in_db, update_user_password,
     verify_password, seed_sample_users,
     get_all_users_with_permissions
 )
-
 
 # === SESSION HELPERS ===
 
@@ -210,3 +211,52 @@ def auth_router():
 def seed_users_if_needed():
     """Create initial test accounts."""
     seed_sample_users()
+
+
+# === PASSWORD RESET TOKEN HELPERS ===
+
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key")
+RESET_TOKEN_EXPIRY = 3600  # 1 hour
+
+
+def create_reset_token(email: str) -> str:
+    """Generate a password reset JWT token for a given user email."""
+    payload = {
+        "email": email,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=RESET_TOKEN_EXPIRY)
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+
+def verify_reset_token(token: str):
+    """Verify token and return email if valid, else None."""
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        return decoded.get("email")
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+def send_reset_email(to_email: str, token: str) -> bool:
+    """Send reset email with token link."""
+    import smtplib
+    from email.mime.text import MIMEText
+
+    reset_link = f"http://localhost:8501/reset-password?token={token}"
+    msg = MIMEText(f"Click this link to reset your password: {reset_link}")
+    msg["Subject"] = "Password Reset"
+    msg["From"] = os.getenv("EMAIL_FROM", "noreply@example.com")
+    msg["To"] = to_email
+
+    try:
+        with smtplib.SMTP(os.getenv("SMTP_SERVER", "localhost"), int(os.getenv("SMTP_PORT", 25))) as server:
+            if os.getenv("SMTP_USER") and os.getenv("SMTP_PASS"):
+                server.starttls()
+                server.login(os.getenv("SMTP_USER"), os.getenv("SMTP_PASS"))
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print("Email sending failed:", e)
+        return False
