@@ -8,7 +8,7 @@ def forgot_password_view():
 
     # Back to login button
     if st.button("⬅ Back to Login"):
-        st.session_state.page = None
+        st.session_state.auth_mode = None
         st.rerun()
 
     try:
@@ -21,11 +21,11 @@ def forgot_password_view():
                 st.error("No user with that email")
             else:
                 token = create_reset_token(email)
-                ok, msg = send_reset_email(email, token)
+                ok = send_reset_email(email, token)
                 if ok:
-                    st.success("Reset token sent (or printed to console).")
+                    st.success("Reset token sent. Please check your email (or console log in dev).")
                 else:
-                    st.error(f"Failed to send: {msg}")
+                    st.error("Failed to send reset email. Please verify email settings.")
 
         st.markdown("---")
         st.subheader("Perform password reset")
@@ -65,11 +65,11 @@ def create_user_view():
             if not email or not password:
                 st.error("Please fill in all fields")
             else:
-                user, error = create_user(email, password, role)
-                if user:
+                ok = register_user(email, password, role)
+                if ok:
                     st.success(f"User created successfully: {email} with role {role}")
                 else:
-                    st.error(f"Failed to create user: {error}")
+                    st.error("Failed to create user; it may already exist.")
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")

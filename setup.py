@@ -166,7 +166,7 @@ def show_summary():
         ("admin@bluematrixit.com", "AdminPass123!", "admin"),
         ("ceo@bluematrixit.com", "CeoPass123!", "ceo"),
         ("interviewer@bluematrixit.com", "IntPass123!", "interviewer"),
-            ("receptionist@bluematrixit.com", "RecPass123!", "receptionist"),
+        ("receptionist@bluematrixit.com", "RecPass123!", "receptionist"),
         ("candidate@example.com", "CandPass123!", "candidate")
     ]
 

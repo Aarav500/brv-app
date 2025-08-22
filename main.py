@@ -35,6 +35,10 @@ def sidebar_navigation():
     if role and role.lower() != "ceo":
         st.sidebar.write(f"**Role:** {role.capitalize()}")
 
+    # Add a persistent Logout button in sidebar
+    if st.sidebar.button("Logout"):
+        logout()
+
     # Core nav items
     pages = {}
 

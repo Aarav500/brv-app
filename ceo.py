@@ -23,6 +23,7 @@ from db_postgres import (
     delete_candidate,
     get_candidate_statistics,
     set_candidate_permission,
+    set_user_permission,
 )
 
 # Import auth helpers
@@ -200,18 +201,40 @@ def show_ceo_panel():
                     with cols[1]:
                         # force password reset toggle/button
                         if st.button("Force Reset Password", key=f"force_reset_{u.get('id')}"):
-                            # We assume DB has a column force_password_reset which set_user_permission/other functions may toggle.
                             try:
-                                # toggle the DB flag directly using update_user_permissions with no-perm change
-                                # We do a direct DB call: update_user_password flag not exposed here, so use get_user_permissions & set via set_user_permission-like function if exists.
-                                # For safety we do a best-effort SQL via update_user_permissions with same values & set force_password_reset via a direct SQL in db_postgres if available.
-                                # If you have a helper, replace the below with that helper call; otherwise skip and show instruction.
                                 st.info("Force Reset requested. If your DB supports force_password_reset toggle, implement the helper in db_postgres and call it here.")
                             except Exception as e:
                                 st.error(f"Could not set force reset: {e}")
 
                     # small spacing
                     st.markdown("")
+
+        # Focused panel to grant/revoke Interview Access for Interviewers
+        with st.expander("Interviewer Access Management", expanded=True):
+            st.caption("Grant or revoke interview access (CV viewing) for interviewer accounts.")
+            interviewers = [u for u in (users or []) if (u.get("role") or "").lower() == "interviewer"]
+            if not interviewers:
+                st.info("No interviewer accounts found.")
+            else:
+                for iu in interviewers:
+                    colA, colB, colC = st.columns([3, 1, 1])
+                    with colA:
+                        st.write(iu.get("email"))
+                        st.caption(f"User ID: {iu.get('id')}")
+                    with colB:
+                        current = bool(iu.get("can_view_cvs", False))
+                        new_val = st.toggle("Interview Access", value=current, key=f"ivacc_{iu.get('id')}")
+                    with colC:
+                        if st.button("Save", key=f"save_ivacc_{iu.get('id')}"):
+                            try:
+                                ok = set_user_permission(iu.get("id"), can_view=bool(new_val))
+                                if ok:
+                                    st.success("Updated.")
+                                    st.rerun()
+                                else:
+                                    st.error("No change or failed to update.")
+                            except Exception as e:
+                                st.error(f"Error updating: {e}")
 
         st.markdown("---")
     else:

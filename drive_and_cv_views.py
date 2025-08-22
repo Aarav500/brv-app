@@ -5,6 +5,7 @@ Or open the full manager via drive_and_cv_view().
 """
 
 import mimetypes
+import base64
 import streamlit as st
 
 from db_postgres import (
@@ -145,6 +146,16 @@ def preview_cv_ui(candidate_id: str):
 
     st.success(f"CV found: {filename or 'unnamed'}")
     mime = mimetypes.guess_type(filename or "")[0] or "application/octet-stream"
+    # Inline preview for PDFs
+    if mime == "application/pdf":
+        try:
+            b64 = base64.b64encode(file_bytes).decode("utf-8")
+            html = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>'
+            st.components.v1.html(html, height=620)
+        except Exception:
+            st.caption("Inline preview unavailable; use Download instead.")
+    else:
+        st.caption(f"Preview not available for {mime}. Use download below.")
     st.download_button("Download CV", file_bytes, file_name=filename or f"{candidate_id}.pdf", mime=mime)
 
 

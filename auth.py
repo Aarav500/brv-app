@@ -21,6 +21,9 @@ def _init_session():
         st.session_state.auth_token = None
     if "flash" not in st.session_state:
         st.session_state.flash = None
+    # track auth view mode (e.g., 'forgot')
+    if "auth_mode" not in st.session_state:
+        st.session_state.auth_mode = None
 
 
 def _flash(msg, level="info"):
@@ -113,7 +116,13 @@ def login_view():
             _flash("Invalid credentials.", "error")
             st.rerun()
 
-    st.caption("Don’t have an account? Contact admin or register if allowed.")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Forgot Password?"):
+            st.session_state.auth_mode = "forgot"
+            st.rerun()
+    with col2:
+        st.caption("Don’t have an account? Contact admin or register if allowed.")
 
 
 def register_view():
@@ -212,7 +221,16 @@ def auth_router():
     """Show appropriate auth view based on session/user."""
     _init_session()
     if not is_logged_in():
-        login_view()
+        # route to forgot password UI if requested
+        if st.session_state.get("auth_mode") == "forgot":
+            try:
+                import forgot_password_ui
+                forgot_password_ui.forgot_password_view()
+            except Exception as e:
+                st.error(f"Failed to load forgot password UI: {e}")
+                login_view()
+        else:
+            login_view()
     else:
         user_profile_view()
 
