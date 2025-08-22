@@ -283,17 +283,24 @@ def show_ceo_panel():
                 # Candidate CV (nicely formatted)
                 st.markdown("### Candidate CV")
                 try:
-                    cv_bytes, cv_name = get_candidate_cv(c.get("candidate_id"))
+                    cid = c.get("candidate_id")
+                    cv_bytes, cv_name = get_candidate_cv(cid)
                     if cv_bytes:
                         st.download_button(
                             "Download CV",
                             data=cv_bytes,
-                            file_name=cv_name or f"{c.get('candidate_id')}_cv.bin",
+                            file_name=cv_name or f"{cid}_cv.bin",
                             mime="application/octet-stream",
-                            key=f"dlcv_{c.get('candidate_id')}",
+                            key=f"dlcv_{cid}",
                         )
                     else:
-                        st.write("No CV uploaded.")
+                        # Fallback to resume_link if available
+                        resume_link = (c or {}).get("resume_link")
+                        if resume_link:
+                            st.link_button("Open CV (external)", url=resume_link, key=f"linkcv_{cid}")
+                            st.caption("Note: External CV link provided (e.g., Google Drive)")
+                        else:
+                            st.write("No CV uploaded.")
                 except Exception as e:
                     st.write("CV: (error fetching)", e)
 

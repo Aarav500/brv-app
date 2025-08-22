@@ -13,6 +13,7 @@ from db_postgres import (
     get_candidate_cv,
     save_candidate_cv,
     delete_candidate,   # make sure this exists in db_postgres.py
+    get_candidate_by_id,
 )
 
 # ---------- Permission helpers
@@ -118,7 +119,9 @@ def drive_and_cv_view():
 # ---------- Lightweight building blocks (reuse these in other pages)
 
 def preview_cv_ui(candidate_id: str):
-    """Show minimal CV preview + download button (permission checks should be done by the caller)."""
+    """Show minimal CV preview + download button (permission checks should be done by the caller).
+    If no blob is stored, fall back to displaying resume_link (if present).
+    """
     try:
         file_bytes, filename = get_candidate_cv(candidate_id)
     except Exception as e:
@@ -126,6 +129,17 @@ def preview_cv_ui(candidate_id: str):
         return
 
     if not file_bytes:
+        # Fallback: try resume_link from candidate row
+        try:
+            rec = get_candidate_by_id(candidate_id)
+        except Exception as e:
+            rec = None
+        link = (rec or {}).get("resume_link") if isinstance(rec, dict) else None
+        if link:
+            st.success("CV link available")
+            st.link_button("Open CV (external)", url=link)
+            st.caption("Note: This CV is stored externally (e.g., Drive). Download preview is not available.")
+            return
         st.info("No CV uploaded.")
         return
 
