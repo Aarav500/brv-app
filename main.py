@@ -9,10 +9,9 @@ from auth import (
     manage_users_view,
 )
 import ceo
-import hr
 import interviewer
 import receptionist
-import candidate
+import candidate_view
 
 
 # === INIT ===
