@@ -268,7 +268,8 @@ def show_admin_panel():
     # -------------------------
     st.subheader("Candidate Records")
 
-    if perms.get("can_delete_records") or is_ceo:
+    # Admin/CEO only can access delete actions
+    if role in ("admin", "ceo"):
         candidates = get_all_candidates()
         if not candidates:
             st.caption("No candidates found.")
@@ -278,15 +279,8 @@ def show_admin_panel():
                 st.write(f"**Phone:** {c.get('phone','—')}")
                 st.write(f"**Created At:** {c.get('created_at','—')}")
 
-                # UI-level check before exposing delete action
-                ui_can_delete = (
-                    current_user and (
-                        current_user.get("can_delete_records", False)
-                        or current_user.get("can_grant_delete", False)
-                        or (current_user.get("role") or "").lower() in ("admin", "ceo")
-                    )
-                )
-                if not ui_can_delete:
+                # Admin/CEO only delete action
+                if role not in ("admin", "ceo"):
                     st.info("🔒 You do not have permission to delete candidates.")
                 else:
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
@@ -296,7 +290,7 @@ def show_admin_panel():
                                 st.success("Candidate deleted successfully.")
                                 st.rerun()
                             else:
-                                st.error("Deletion failed.")
+                                st.error("Deletion failed (permission or DB error).")
                         except Exception as e:
                             st.error(f"Deletion failed: {e}")
 

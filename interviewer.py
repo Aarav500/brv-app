@@ -63,7 +63,9 @@ def _as_readable_form(form_data: Any) -> Dict[str, Any]:
 
 
 def _structured_notes_ui(prefix: str) -> Dict[str, str]:
-    """Organized Interview Questions UI with consistent formatting and placeholders."""
+    """Organized Interview Questions UI with consistent formatting and placeholders.
+    Adds a Rich Notes (Markdown) area for cleaner bullets and spacing.
+    """
     notes: Dict[str, str] = {}
     st.markdown("### Interview Questions & Notes")
 
@@ -86,6 +88,14 @@ def _structured_notes_ui(prefix: str) -> Dict[str, str]:
         notes["project_fit"] = st.text_area("Suitable for which project", key=f"{prefix}_project", placeholder="Teams or projects", height=80)
 
     notes["other_notes"] = st.text_area("Other Notes", key=f"{prefix}_othernotes", placeholder="Any additional observations…", height=100)
+
+    # Rich Markdown notes input for bullets and clean formatting
+    notes["rich_notes_md"] = st.text_area(
+        "Rich Notes (Markdown)",
+        key=f"{prefix}_rich",
+        placeholder="Use Markdown: - bullets, 1. numbered, **bold**, _italic_\nExample:\n- Strengths: ...\n- Concerns: ...",
+        height=140,
+    )
 
     return notes
 
@@ -187,6 +197,18 @@ def _permissions_manager_ui():
 def interviewer_view():
     st.header("📝 Interviewer Dashboard")
 
+    # Minimal typography tweaks for cleaner notes display
+    st.markdown(
+        """
+        <style>
+        .markdown-text p { line-height: 1.4; }
+        .markdown-text ul { margin-top: 0.25rem; }
+        .markdown-text li { margin: 0.15rem 0; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # validate session user
     current_user = st.session_state.get("user")
     if not current_user:
@@ -242,12 +264,8 @@ def interviewer_view():
                 st.write(f"**Phone:** {cand.get('phone', '—')}")
                 st.write(f"**Created:** {cand.get('created_at', '—')}")
 
-                # Delete candidate (permission-guarded)
-                ui_can_delete = (
-                    bool(user_perms.get("can_delete_records"))
-                    or bool(user_perms.get("can_grant_delete"))
-                    or (role in ("admin", "ceo"))
-                )
+                # Delete candidate (Admin/CEO only)
+                ui_can_delete = (role in ("admin", "ceo"))
                 if ui_can_delete:
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
                         user_id = current_user.get("id")
@@ -256,7 +274,7 @@ def interviewer_view():
                                 st.success("Candidate deleted successfully.")
                                 st.rerun()
                             else:
-                                st.error("Failed to delete candidate (permission or error).")
+                                st.error("Failed to delete candidate (permission or DB error).")
                         except Exception as e:
                             st.error(f"Error deleting candidate: {e}")
                 else:
@@ -335,6 +353,15 @@ def interviewer_view():
                                     "grasping","other_notes"
                                 ]
                                 with st.expander("Notes", expanded=False):
+                                    # Rich Markdown section (if provided)
+                                    try:
+                                        rich_md = j.get("rich_notes_md")
+                                    except Exception:
+                                        rich_md = None
+                                    if rich_md:
+                                        st.markdown("#### Rich Notes")
+                                        st.markdown(str(rich_md))
+                                        st.markdown("---")
                                     colL, colR = st.columns(2)
                                     for idx, key in enumerate(ORDER):
                                         val = j.get(key, "")

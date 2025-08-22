@@ -336,13 +336,12 @@ def show_ceo_panel():
 
             with right:
                 st.markdown("### Actions")
-                # Delete button (permission-aware)
-                if st.button("🗑️ Delete Candidate", key=f"del_btn_{c.get('candidate_id')}"):
-                    # UI permission check
-                    user = st.session_state.get("user", {})
-                    if not user.get("can_delete_records", False) and not user.get("can_grant_delete", False) and (user.get("role") or "").lower() not in ("admin","ceo"):
-                        st.error("🚫 You do not have permission to delete candidate records.")
-                    else:
+                user = st.session_state.get("user", {})
+                role_lower = (user.get("role") or "").lower()
+                if role_lower not in ("admin", "ceo"):
+                    st.info("🚫 You do not have permission to delete candidate records.")
+                else:
+                    if st.button("🗑️ Delete Candidate", key=f"del_btn_{c.get('candidate_id')}"):
                         try:
                             ok = delete_candidate(c.get("candidate_id"), user["id"])
                             if ok:

@@ -300,13 +300,12 @@ def user_can_manage_delete(user_id: int) -> bool:
 
 
 def user_can_delete(user_id: int) -> bool:
+    """Return True only for Admin or CEO roles.
+    Per policy, candidate deletion is restricted strictly to Admin/CEO.
+    """
     p = get_user_permissions(user_id)
     r = (p.get("role") or "").lower()
-    # Allow delete if:
-    # - Admin/CEO
-    # - can_delete_records flag
-    # - can_grant_delete flag (UI also treats this as privileged for delete)
-    return r in ("ceo", "admin") or bool(p.get("can_delete_records")) or bool(p.get("can_grant_delete"))
+    return r in ("ceo", "admin")
 
 
 # -----------------------------
