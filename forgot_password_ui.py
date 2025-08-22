@@ -1,5 +1,5 @@
 import streamlit as st
-from auth import create_reset_token, send_reset_email, verify_reset_token, create_user
+from auth import create_reset_token, send_reset_email, verify_reset_token, register_user
 from db_postgres import get_user_by_email, update_user_password, hash_password
 
 
