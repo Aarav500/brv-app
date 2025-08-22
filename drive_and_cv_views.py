@@ -138,7 +138,12 @@ def preview_cv_ui(candidate_id: str):
         link = (rec or {}).get("resume_link") if isinstance(rec, dict) else None
         if link:
             st.success("CV link available")
-            st.link_button("Open CV (external)", url=link)
+            try:
+                # Prefer native link_button if present
+                st.link_button("Open CV (external)", url=link)
+            except Exception:
+                # Fallback to markdown link for older/new environments
+                st.markdown(f"[Open CV (external)]({link})")
             st.caption("Note: This CV is stored externally (e.g., Drive). Download preview is not available.")
             return
         st.info("No CV uploaded.")
@@ -152,6 +157,8 @@ def preview_cv_ui(candidate_id: str):
             b64 = base64.b64encode(file_bytes).decode("utf-8")
             html = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>'
             st.components.v1.html(html, height=620)
+            # Provide an explicit open link in case iframe is blocked by browser
+            st.markdown(f"[Open PDF in new tab](data:application/pdf;base64,{b64})")
         except Exception:
             st.caption("Inline preview unavailable; use Download instead.")
     else:

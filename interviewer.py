@@ -63,25 +63,29 @@ def _as_readable_form(form_data: Any) -> Dict[str, Any]:
 
 
 def _structured_notes_ui(prefix: str) -> Dict[str, str]:
-    """Organized Interview Questions UI with all text inputs/areas."""
+    """Organized Interview Questions UI with consistent formatting and placeholders."""
     notes: Dict[str, str] = {}
     st.markdown("### Interview Questions & Notes")
 
-    notes["age"] = st.text_input("Age", key=f"{prefix}_age")
-    notes["education"] = st.text_input("Education", key=f"{prefix}_education")
-    notes["family_background"] = st.text_area("Family background", key=f"{prefix}_family")
-    notes["english"] = st.text_area("English understanding", key=f"{prefix}_english")
-    notes["experience_salary"] = st.text_area("Past work experience & salary", key=f"{prefix}_experience")
-    notes["attitude"] = st.text_area("Attitude", key=f"{prefix}_attitude")
-    notes["commitment"] = st.text_area("Commitment", key=f"{prefix}_commitment")
-    notes["no_festival_leave"] = st.text_area("No leaves for festivals", key=f"{prefix}_festivals")
-    notes["own_pc"] = st.text_area("Own PC or laptop", key=f"{prefix}_ownpc")
-    notes["continuous_night"] = st.text_area("Continuous night shift", key=f"{prefix}_contnight")
-    notes["rotational_night"] = st.text_area("Rotational night shift", key=f"{prefix}_rotnight")
-    notes["profile_fit"] = st.text_area("Profile fit", key=f"{prefix}_profilefit")
-    notes["project_fit"] = st.text_area("Suitable for which project", key=f"{prefix}_project")
-    notes["grasping"] = st.text_area("Grasping", key=f"{prefix}_grasping")
-    notes["other_notes"] = st.text_area("Other Notes", key=f"{prefix}_othernotes")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        notes["age"] = st.text_input("Age", key=f"{prefix}_age", placeholder="e.g., 25")
+        notes["education"] = st.text_input("Education", key=f"{prefix}_education", placeholder="e.g., B.Sc. Computer Science")
+        notes["attitude"] = st.text_area("Attitude", key=f"{prefix}_attitude", placeholder="Professional, proactive, etc.", height=80)
+        notes["commitment"] = st.text_area("Commitment", key=f"{prefix}_commitment", placeholder="Notice period, long-term interest…", height=80)
+        notes["profile_fit"] = st.text_area("Profile fit", key=f"{prefix}_profilefit", placeholder="Role alignment and strengths", height=80)
+        notes["grasping"] = st.text_area("Grasping", key=f"{prefix}_grasping", placeholder="Learning speed, understanding", height=80)
+    with col_b:
+        notes["family_background"] = st.text_area("Family background", key=f"{prefix}_family", placeholder="Summary", height=80)
+        notes["english"] = st.text_area("English understanding", key=f"{prefix}_english", placeholder="Fluency, comprehension", height=80)
+        notes["experience_salary"] = st.text_area("Past work experience & salary", key=f"{prefix}_experience", placeholder="Years, domains, last CTC", height=80)
+        notes["no_festival_leave"] = st.text_area("No leaves for festivals", key=f"{prefix}_festivals", placeholder="Acceptance / concerns", height=80)
+        notes["own_pc"] = st.text_area("Own PC or laptop", key=f"{prefix}_ownpc", placeholder="Specs / Availability", height=80)
+        notes["continuous_night"] = st.text_area("Continuous night shift", key=f"{prefix}_contnight", placeholder="Willingness / constraints", height=80)
+        notes["rotational_night"] = st.text_area("Rotational night shift", key=f"{prefix}_rotnight", placeholder="Willingness / constraints", height=80)
+        notes["project_fit"] = st.text_area("Suitable for which project", key=f"{prefix}_project", placeholder="Teams or projects", height=80)
+
+    notes["other_notes"] = st.text_area("Other Notes", key=f"{prefix}_othernotes", placeholder="Any additional observations…", height=100)
 
     return notes
 
@@ -306,11 +310,48 @@ def interviewer_view():
                         if notes:
                             try:
                                 j = json.loads(notes)
+                                # Pretty, consistent 2-column display with friendly labels
+                                LABELS = {
+                                    "age": "Age",
+                                    "education": "Education",
+                                    "family_background": "Family Background",
+                                    "english": "English Understanding",
+                                    "experience_salary": "Experience & Salary",
+                                    "attitude": "Attitude",
+                                    "commitment": "Commitment",
+                                    "no_festival_leave": "No Festival Leave",
+                                    "own_pc": "Own PC/Laptop",
+                                    "continuous_night": "Continuous Night Shift",
+                                    "rotational_night": "Rotational Night Shift",
+                                    "profile_fit": "Profile Fit",
+                                    "project_fit": "Project Fit",
+                                    "grasping": "Grasping",
+                                    "other_notes": "Other Notes",
+                                }
+                                ORDER = [
+                                    "age","education","family_background","english","experience_salary",
+                                    "attitude","commitment","no_festival_leave","own_pc",
+                                    "continuous_night","rotational_night","profile_fit","project_fit",
+                                    "grasping","other_notes"
+                                ]
                                 with st.expander("Notes", expanded=False):
-                                    for k, v in j.items():
-                                        st.write(f"- **{k.replace('_',' ').title()}**: {v}")
+                                    colL, colR = st.columns(2)
+                                    for idx, key in enumerate(ORDER):
+                                        val = j.get(key, "")
+                                        if val:
+                                            label = LABELS.get(key, key.replace('_',' ').title())
+                                            if idx % 2 == 0:
+                                                with colL:
+                                                    st.markdown(f"**{label}:**  ")
+                                                    st.markdown(str(val).replace("\n","  \n"))
+                                            else:
+                                                with colR:
+                                                    st.markdown(f"**{label}:**  ")
+                                                    st.markdown(str(val).replace("\n","  \n"))
                             except Exception:
-                                st.write(f"**Notes:** {notes}")
+                                # Fallback for plain text notes
+                                with st.expander("Notes", expanded=False):
+                                    st.markdown(str(notes).replace("\n","  \n"))
                         st.divider()
             else:
                 st.caption("No previous interviews found.")
