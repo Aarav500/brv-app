@@ -64,40 +64,35 @@ def _as_readable_form(form_data: Any) -> Dict[str, Any]:
 
 
 def _structured_notes_ui(prefix: str) -> Dict[str, str]:
-    """Organized Interview Questions UI with consistent formatting and placeholders.
-    Adds a Rich Notes (Markdown) area for cleaner bullets and spacing.
-    """
+    """Improved Interview Notes UI with Markdown formatting for readability."""
     notes: Dict[str, str] = {}
-    st.markdown("### Interview Questions & Notes")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        notes["age"] = st.text_input("Age", key=f"{prefix}_age", placeholder="e.g., 25")
-        notes["education"] = st.text_input("Education", key=f"{prefix}_education", placeholder="e.g., B.Sc. Computer Science")
-        notes["attitude"] = st.text_area("Attitude", key=f"{prefix}_attitude", placeholder="Professional, proactive, etc.", height=80)
-        notes["commitment"] = st.text_area("Commitment", key=f"{prefix}_commitment", placeholder="Notice period, long-term interest…", height=80)
-        notes["profile_fit"] = st.text_area("Profile fit", key=f"{prefix}_profilefit", placeholder="Role alignment and strengths", height=80)
-        notes["grasping"] = st.text_area("Grasping", key=f"{prefix}_grasping", placeholder="Learning speed, understanding", height=80)
-    with col_b:
-        notes["family_background"] = st.text_area("Family background", key=f"{prefix}_family", placeholder="Summary", height=80)
-        notes["english"] = st.text_area("English understanding", key=f"{prefix}_english", placeholder="Fluency, comprehension", height=80)
-        notes["experience_salary"] = st.text_area("Past work experience & salary", key=f"{prefix}_experience", placeholder="Years, domains, last CTC", height=80)
-        notes["no_festival_leave"] = st.text_area("No leaves for festivals", key=f"{prefix}_festivals", placeholder="Acceptance / concerns", height=80)
-        notes["own_pc"] = st.text_area("Own PC or laptop", key=f"{prefix}_ownpc", placeholder="Specs / Availability", height=80)
-        notes["continuous_night"] = st.text_area("Continuous night shift", key=f"{prefix}_contnight", placeholder="Willingness / constraints", height=80)
-        notes["rotational_night"] = st.text_area("Rotational night shift", key=f"{prefix}_rotnight", placeholder="Willingness / constraints", height=80)
-        notes["project_fit"] = st.text_area("Suitable for which project", key=f"{prefix}_project", placeholder="Teams or projects", height=80)
+    st.markdown("### 📝 Interview Questions & Notes")
 
-    notes["other_notes"] = st.text_area("Other Notes", key=f"{prefix}_othernotes", placeholder="Any additional observations…", height=100)
-
-    # Rich Markdown notes input for bullets and clean formatting
-    notes["rich_notes_md"] = st.text_area(
-        "Rich Notes (Markdown)",
-        key=f"{prefix}_rich",
-        placeholder="Use Markdown: - bullets, 1. numbered, **bold**, _italic_\nExample:\n- Strengths: ...\n- Concerns: ...",
-        height=140,
+    # A single rich multiline area for an overall structured summary (Markdown allowed)
+    # interviewer.py — REPLACE lines 73–90
+    notes["summary"] = st.text_area(
+        "Overall Summary",
+        key=f"{prefix}_summary",
+        placeholder="Write key points in Markdown (use - for bullets, **bold** for highlights)...",
+        height=200,
     )
 
+    # Optional additional structured fields
+    notes["attitude"] = st.text_area(
+        "Attitude (optional)", key=f"{prefix}_attitude", placeholder="Professional, proactive, etc.", height=80
+    )
+    # Save under the key the renderer expects ("experience_salary")
+    notes["experience_salary"] = st.text_area(
+        "Experience / Salary (optional)", key=f"{prefix}_experience", placeholder="Years / domains / last CTC",
+        height=80
+    )
+
+    # Ensure renderer shows the nice Markdown block
+    notes["rich_notes_md"] = notes.get("summary", "")
+
+    st.markdown("---")
+    st.info("💡 Use Markdown in the 'Overall Summary' box: `- bullets`, `**bold**`, `_italic_` to keep notes clean.")
     return notes
 
 
@@ -265,12 +260,15 @@ def interviewer_view():
                 st.write(f"**Phone:** {cand.get('phone', '—')}")
                 st.write(f"**Created:** {cand.get('created_at', '—')}")
 
-                # Delete candidate (permission-based)
+                # Delete candidate (permission-based; re-fetch live permissions)
+                live_perms = get_user_permissions(current_user["id"]) or {}
+                live_role = (live_perms.get("role") or "").lower()
                 ui_can_delete = (
-                    (role in ("admin", "ceo"))
-                    or bool(user_perms.get("can_delete_records"))
-                    or bool(user_perms.get("can_grant_delete"))
+                        (live_role in ("admin", "ceo"))
+                        or bool(live_perms.get("can_delete_records"))
+                        or bool(live_perms.get("can_grant_delete"))
                 )
+
                 if ui_can_delete:
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
                         user_id = current_user.get("id")

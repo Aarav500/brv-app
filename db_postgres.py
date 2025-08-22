@@ -433,29 +433,33 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
         conn.close()
 
 
-def delete_candidate(candidate_id: str, actor_user_id: int) -> bool:
+def delete_candidate(candidate_id: str, actor_user_id: int) -> (bool, str):
     """
     Deletes a candidate record (including CV) if actor_user_id has the right permissions.
-    Uses user_can_delete() to enforce server-side access control.
+    Returns (success, reason) where reason is one of:
+      - "ok"
+      - "no_permission"
+      - "not_found"
+      - "db_error"
     """
-    # Check if the actor has permission to delete candidates
-    if not user_can_delete(actor_user_id):
-        logger.warning(
-            "User %s attempted to delete candidate %s without permissions",
-            actor_user_id,
-            candidate_id
-        )
-        return False
+    # Server-side permission check
+    p = get_user_permissions(actor_user_id) or {}
+    role = (p.get("role") or "").lower()
+    has_permission = role in ("ceo", "admin") or bool(p.get("can_delete_records", False)) or bool(p.get("can_grant_delete", False))
+    if not has_permission:
+        logger.warning("User %s attempted to delete candidate %s without permissions", actor_user_id, candidate_id)
+        return False, "no_permission"
 
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
-            # Delete candidate — ON DELETE CASCADE will also delete assessments, interviews, etc.
             cur.execute("DELETE FROM candidates WHERE candidate_id=%s", (candidate_id,))
-            return cur.rowcount > 0
+            if cur.rowcount == 0:
+                return False, "not_found"
+            return True, "ok"
     except Exception:
-        logger.exception(f"Error deleting candidate {candidate_id}")
-        return False
+        logger.exception("Error deleting candidate %s", candidate_id)
+        return False, "db_error"
     finally:
         conn.close()
 
@@ -498,15 +502,24 @@ def clear_candidate_cv(candidate_id: str) -> bool:
         conn.close()
 
 
-def get_candidate_cv(candidate_id: str) -> Tuple[Optional[bytes], Optional[str]]:
+def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
+    """
+    Return CV if actor has permission. Returns (file_bytes, filename, reason).
+    reason ∈ {"ok", "no_permission", "not_found"}
+    """
+    perms = get_user_permissions(actor_user_id)
+    role = (perms.get("role") or "").lower()
+    if not (role in ("ceo","admin") or perms.get("can_view_cvs")):
+        return None, None, "no_permission"
+
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
             cur.execute("SELECT cv_file, cv_filename FROM candidates WHERE candidate_id=%s", (candidate_id,))
             row = cur.fetchone()
-            if row and row[0]:
-                return bytes(row[0]), row[1]
-            return None, None
+            if not row or not row[0]:
+                return None, None, "not_found"
+            return bytes(row[0]), row[1], "ok"
     finally:
         conn.close()
 
@@ -884,21 +897,3 @@ def seed_sample_users():
     finally:
         conn.close()
 
-def get_user_permissions(user_id: int):
-    conn = get_conn()
-    try:
-        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT role,
-                       can_delete_records,
-                       can_grant_delete,
-                       can_view_cvs
-                FROM users
-                WHERE id = %s
-            """, (user_id,))
-            return cur.fetchone() or {}
-    except Exception:
-        logger.exception(f"Error fetching permissions for user {user_id}")
-        return {}
-    finally:
-        conn.close()

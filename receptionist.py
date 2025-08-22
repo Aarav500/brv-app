@@ -161,8 +161,10 @@ def receptionist_view():
             st.write(f"**Created:** {c.get('created_at','—')}")
 
             # ---------------- CV section (permission protected) ----------------
-            st.markdown("### Resume / CV")
-            if not (perms.get("can_view_cvs") or role in ("admin", "ceo")):
+            # Refresh permissions right before sensitive CV access
+            live_perms = get_user_permissions(current_user["id"]) or {}
+            live_role = (live_perms.get("role") or "").lower()
+            if not (live_perms.get("can_view_cvs") or live_role in ("admin", "ceo")):
                 st.warning("You do not have permission to view CVs.")
             else:
                 try:
@@ -170,7 +172,6 @@ def receptionist_view():
                     preview_cv_ui(c["candidate_id"])
                 except Exception as e:
                     st.error(f"Error fetching CV: {e}")
-
             st.markdown("---")
 
             # ---------------- Receptionist assessment block ----------------

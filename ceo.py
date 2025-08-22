@@ -98,7 +98,7 @@ def _render_candidate_summary(c: Dict[str, Any]):
 
 
 def _render_interview_history(history: List[Dict[str, Any]]):
-    """Render interview history in structured blocks."""
+    """Render interview history in structured blocks with preserved formatting (Markdown)."""
     st.markdown("### Interview History")
     if not history:
         st.write("No interview history found.")
@@ -106,19 +106,30 @@ def _render_interview_history(history: List[Dict[str, Any]]):
 
     for idx, ev in enumerate(history):
         with st.container():
-            st.markdown(f"**{idx + 1}. {ev.get('event','activity').title()}**")
+            st.markdown(f"**{idx + 1}. { (ev.get('event') or 'activity').title() }**")
             created_at = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at")
             st.write(f"- When: {_format_datetime(created_at)}")
             actor = ev.get("actor") or ev.get("interviewer") or ev.get("actor")
             if actor:
                 st.write(f"- By: {actor}")
+
             details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
+            # If details is a dict, pretty print bullet list
             if isinstance(details, dict):
-                # pretty print small dicts as bullet list
                 for k, v in details.items():
                     st.write(f"  - **{k}:** {v}")
             else:
-                st.write(f"- Details: {details}")
+                # Preserve line breaks & allow Markdown in notes
+                try:
+                    if isinstance(details, str):
+                        # Convert plain newlines to markdown line breaks
+                        md = details.replace("\r\n", "\n").replace("\n", "  \n")
+                        st.markdown(f"**Details:**  \n{md}")
+                    else:
+                        st.write(f"- Details: {details}")
+                except Exception:
+                    st.write(f"- Details: {details}")
+
             st.markdown("---")
 
 
@@ -308,19 +319,62 @@ def show_ceo_panel():
                     import logging
                     logging.exception("ceo: render candidate error: %s", e)
 
-                # Candidate CV (nicely formatted)
-                st.markdown("### Candidate CV")
-                try:
-                    cid = c.get("candidate_id")
-                    cv_bytes, cv_name = get_candidate_cv(cid)
-                    if cv_bytes:
-                        st.download_button(
-                            "Download CV",
-                            data=cv_bytes,
-                            file_name=cv_name or f"{cid}_cv.bin",
-                            mime="application/octet-stream",
-                            key=f"dlcv_{cid}",
-                        )
+                    # Candidate CV (permission-aware)
+                    try:
+                        cid = c.get("candidate_id")
+                        # use permission-aware fetch: we'll call DB helper that checks permissions (see db_postgres changes)
+                        from db_postgres import get_candidate_cv, get_user_permissions
+
+                        # Retrieve current user id safely
+                        user = get_current_user()
+                        actor_id = user.get("id") if user else None
+
+                        # permission check
+                        perms = get_user_permissions(actor_id or 0) or {}
+                        role = (perms.get("role") or "").lower()
+                        can_view = role in ("ceo", "admin") or bool(perms.get("can_view_cvs", False))
+
+                        if not can_view:
+                            st.warning("You don’t have permission to view CVs for this candidate.")
+                        else:
+                            cv_bytes, cv_name = get_candidate_cv(cid)
+                            if cv_bytes:
+                                # Inline preview for PDFs (works if bytes are PDF)
+                                try:
+                                    # Streamlit can display PDFs via an iframe if we write to a temp file
+                                    import tempfile, base64, os
+                                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=(
+                                        ".pdf" if (cv_name or "").lower().endswith(".pdf") else ""))
+                                    tmp.write(cv_bytes)
+                                    tmp.flush()
+                                    tmp.close()
+                                    # show Download and embed if it's a PDF
+                                    st.download_button("Download CV", data=cv_bytes,
+                                                       file_name=cv_name or f"{cid}_cv.bin")
+                                    if cv_name and cv_name.lower().endswith(".pdf"):
+                                        # embed PDF
+                                        pdf_path = tmp.name
+                                        with open(pdf_path, "rb") as f:
+                                            b64 = base64.b64encode(f.read()).decode()
+                                        pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600px" type="application/pdf"></iframe>'
+                                        st.components.v1.html(pdf_display, height=650)
+                                    else:
+                                        # Non-PDF: provide download and message
+                                        st.info("CV uploaded — use Download CV to open it locally.")
+                                except Exception as e:
+                                    st.write("CV preview error:", e)
+                                    st.download_button("Download CV", data=cv_bytes,
+                                                       file_name=cv_name or f"{cid}_cv.bin")
+                            else:
+                                resume_link = (c or {}).get("resume_link")
+                                if resume_link:
+                                    st.markdown(f"[Open CV (external)]({resume_link})")
+                                    st.caption("Note: External CV link provided (e.g., Google Drive)")
+                                else:
+                                    st.write("No CV uploaded.")
+                    except Exception as e:
+                        st.write("CV: (error fetching)", e)
+
                     else:
                         # Fallback to resume_link if available
                         resume_link = (c or {}).get("resume_link")
