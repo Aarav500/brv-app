@@ -12,7 +12,7 @@ from db_postgres import (
     update_candidate_form_data,
     get_candidate_by_id,
     save_candidate_cv,
-    get_candidate_cv,
+    get_candidate_cv_secure,   # ✅ REPLACE
 )
 
 # --------------------------------
@@ -170,7 +170,7 @@ def candidate_form_view():
         form_data = _pre_interview_fields()
         st.markdown("---")
         if st.button("Submit Application"):
-            # Basic validations (you can extend)
+            # Basic validations
             if not form_data.get("name") or not form_data.get("phone"):
                 st.error("Full Name and Phone are required.")
                 return
@@ -208,14 +208,22 @@ def candidate_form_view():
             existing_form = rec.get("form_data") or {}
             st.info(f"Welcome back, {rec.get('name','Candidate')}")
 
-            # Only allow update if can_edit is True
+            # Permission-aware CV fetch
+            from auth import get_current_user
+            user = get_current_user()
+            actor_id = user.get("id") if user else 0
+
+            # If editing disabled
             if not rec.get("can_edit", False):
                 st.warning("Editing is currently disabled for your application. Please contact the receptionist.")
-                # Still allow CV upload (if you want to allow always). If you prefer to restrict, gate this too.
                 _cv_uploader(candidate_code.strip())
-                # Allow download/preview of existing CV
-                file_bytes, filename = get_candidate_cv(candidate_code.strip())
-                if file_bytes:
+
+                file_bytes, filename, reason = get_candidate_cv_secure(candidate_code.strip(), actor_id)
+                if reason == "no_permission":
+                    st.warning("🚫 You don’t have permission to view this CV.")
+                elif reason == "not_found":
+                    st.info("No CV uploaded yet.")
+                elif file_bytes:
                     st.download_button(
                         "Download CV",
                         data=file_bytes,
@@ -225,6 +233,7 @@ def candidate_form_view():
                     )
                 return
 
+            # If editing enabled
             st.success("Editing is enabled for your application.")
             updated = _pre_interview_fields(initial=existing_form)
             st.markdown("---")
