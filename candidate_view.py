@@ -33,37 +33,55 @@ def _safe_json(o: Any) -> Any:
         return {}
 
 
+# ------------------------------
+# Replace _pre_interview_fields starting at line 36
+# ------------------------------
 def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Renders the Pre-Interview form, returning the dict of values.
-    Fields per your spec (plus common basics):
-      - full_name, email, phone
-      - current_address, permanent_address
-      - dob, caste, sub_caste
-      - marital_status
-      - highest_qualification
-      - work_experience (years / text)
-      - referral (text)
-      - ready_festivals_national_holidays (yes/no)
-      - ready_late_nights (yes/no)
+    Renders the Pre-Interview form, returning a dict with keys that match the DB layer:
+      - name, email, phone
+      - current_address (stored as address), permanent_address
+      - dob (ISO string)
+      - caste, sub_caste, marital_status
+      - highest_qualification, work_experience, referral
+      - ready_festivals (Yes/No), ready_late_nights (Yes/No)
+    NOTE: Accepts older keys in `initial` (e.g. 'full_name') for backwards compatibility.
     """
     data = initial or {}
 
     st.subheader("Pre-Interview Form")
 
+    # pick up name (backwards-compatible: prefer 'name', fallback to 'full_name')
+    initial_name = data.get("name") or data.get("full_name") or ""
+
     # Basics
-    full_name = st.text_input("Full Name", value=data.get("full_name", ""))
+    name = st.text_input("Full Name", value=initial_name)
     email = st.text_input("Email", value=data.get("email", ""))
     phone = st.text_input("Phone", value=data.get("phone", ""))
 
     # Addresses
-    current_address = st.text_area("Current Address", value=data.get("current_address", ""))
+    current_address = st.text_area("Current Address", value=data.get("current_address", "") or data.get("address",""))
     permanent_address = st.text_area("Permanent Address", value=data.get("permanent_address", ""))
 
     # Personal details
     col1, col2, col3 = st.columns(3)
     with col1:
-        dob = st.date_input("Date of Birth", value=data.get("dob"))
+        # parse DOB if necessary to a date object for st.date_input
+        dob_default = None
+        dob_raw = data.get("dob") or data.get("date_of_birth")
+        if dob_raw:
+            try:
+                # handle isoformat / yyyy-mm-dd strings
+                from datetime import datetime as _dt
+                dob_default = _dt.fromisoformat(dob_raw).date()
+            except Exception:
+                try:
+                    # fallback: parse date-only
+                    from datetime import datetime as _dt
+                    dob_default = _dt.strptime(dob_raw, "%Y-%m-%d").date()
+                except Exception:
+                    dob_default = None
+        dob = st.date_input("Date of Birth", value=dob_default)
     with col2:
         caste = st.text_input("Caste", value=data.get("caste", ""))
     with col3:
@@ -72,13 +90,14 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
     # Marital status & education
     col4, col5 = st.columns(2)
     with col4:
-        marital_status = st.selectbox(
-            "Marital Status",
-            options=["Single", "Married", "Divorced", "Widowed", "Prefer not to say"],
-            index=0 if not data.get("marital_status") else
-            ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"].index(data["marital_status"])
-            if data.get("marital_status") in ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"] else 0
-        )
+        marital_options = ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"]
+        m_index = 0
+        if data.get("marital_status") in marital_options:
+            try:
+                m_index = marital_options.index(data["marital_status"])
+            except Exception:
+                m_index = 0
+        marital_status = st.selectbox("Marital Status", options=marital_options, index=m_index)
     with col5:
         highest_qualification = st.text_input("Highest Qualification", value=data.get("highest_qualification", ""))
 
@@ -89,38 +108,37 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
     # Availability
     col6, col7 = st.columns(2)
     with col6:
-        ready_holidays = st.selectbox(
+        ready_festivals = st.selectbox(
             "Ready to work on festivals and national holidays?",
             options=["No", "Yes"],
-            index=1 if str(data.get("ready_festivals_national_holidays", "")).lower() == "yes" else 0
+            index=1 if str(data.get("ready_festivals","")).lower() == "yes" else 0
         )
     with col7:
         ready_late_nights = st.selectbox(
             "Ready to work late nights if needed?",
             options=["No", "Yes"],
-            index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
+            index=1 if str(data.get("ready_late_nights","")).lower() == "yes" else 0
         )
 
-    # Bundle
+    # Build returned dict with keys matching DB update expectations
     form = {
-        "full_name": full_name.strip(),
+        "name": name.strip(),
         "email": email.strip(),
         "phone": phone.strip(),
         "current_address": current_address.strip(),
         "permanent_address": permanent_address.strip(),
-        "dob": str(dob) if dob else None,
+        "dob": dob.isoformat() if dob else None,
         "caste": caste.strip(),
         "sub_caste": sub_caste.strip(),
         "marital_status": marital_status,
         "highest_qualification": highest_qualification.strip(),
         "work_experience": work_experience.strip(),
         "referral": referral.strip(),
-        "ready_festivals_national_holidays": "Yes" if ready_holidays == "Yes" else "No",
+        "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
         "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
         "updated_at": datetime.utcnow().isoformat(),
     }
     return _safe_json(form)
-
 
 def _cv_uploader(candidate_id: str):
     st.markdown("### Upload/Replace CV")

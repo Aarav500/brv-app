@@ -9,7 +9,7 @@ from db_postgres import (
     search_candidates_by_name_or_email,
     get_interviews_for_candidate,
     create_interview,
-    delete_candidate_by_actor,
+    delete_candidate,
     get_user_permissions,
     get_all_users_with_permissions,
     set_user_permission,

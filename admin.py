@@ -249,12 +249,28 @@ def show_admin_panel():
                 st.write(f"**Phone:** {c.get('phone','—')}")
                 st.write(f"**Created At:** {c.get('created_at','—')}")
 
-                if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
-                    if delete_candidate_by_actor(c["candidate_id"], current_user["id"]):
-                        st.success("Candidate deleted successfully.")
-                        st.rerun()
-                    else:
-                        st.error("Deletion failed.")
+                # UI-level check before exposing delete action
+                ui_can_delete = (
+                    current_user and (
+                        current_user.get("can_delete_records", False)
+                        or current_user.get("can_grant_delete", False)
+                        or (current_user.get("role") or "").lower() in ("admin", "ceo")
+                    )
+                )
+                if not ui_can_delete:
+                    st.info("🔒 You do not have permission to delete candidates.")
+                else:
+                    if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
+                        try:
+                            ok = delete_candidate_by_actor(c["candidate_id"], current_user["id"])
+                            if ok:
+                                st.success("Candidate deleted successfully.")
+                                st.rerun()
+                            else:
+                                st.error("Deletion failed.")
+                        except Exception as e:
+                            st.error(f"Deletion failed: {e}")
+
     else:
         st.info("🔒 You don’t have permission to delete candidates.")
 

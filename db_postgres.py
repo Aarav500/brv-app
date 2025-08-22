@@ -310,39 +310,27 @@ def user_can_delete(user_id: int) -> bool:
 # -----------------------------
 def create_candidate_in_db(candidate_id: str,
                            name: str,
-                           email: str,
-                           phone: str,
-                           current_address: str,
-                           permanent_address: str,
+                           address: str,
                            dob: Optional[str],
                            caste: Optional[str],
-                           sub_caste: Optional[str],
-                           marital_status: Optional[str],
-                           highest_qualification: Optional[str],
-                           work_experience: Optional[str],
-                           referral: Optional[str],
-                           ready_festivals: bool,
-                           ready_late_nights: bool,
+                           email: str,
+                           phone: str,
                            form_data: dict,
                            created_by: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    A simplified candidate create helper (matching candidate_view.py's caller).
+    Stores current_address into current_address column for compatibility.
+    """
     conn = get_conn()
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 INSERT INTO candidates (
-                    candidate_id, name, email, phone,
-                    current_address, permanent_address, dob, caste, sub_caste,
-                    marital_status, highest_qualification, work_experience, referral,
-                    ready_festivals, ready_late_nights,
-                    form_data, created_by, can_edit
+                    candidate_id, name, email, phone, current_address, form_data, created_by, can_edit
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, FALSE)
-                RETURNING *;
-            """, (candidate_id, name, email, phone,
-                  current_address, permanent_address, dob, caste, sub_caste,
-                  marital_status, highest_qualification, work_experience, referral,
-                  ready_festivals, ready_late_nights,
-                  Json(form_data or {}), created_by))
+                VALUES (%s,%s,%s,%s,%s,%s,%s, FALSE)
+                RETURNING *
+            """, (candidate_id, name, email, phone, address, Json(form_data or {}), created_by))
             return cur.fetchone()
     finally:
         conn.close()
@@ -383,11 +371,6 @@ def find_candidates_by_name(q: str) -> List[Dict[str, Any]]:
 
 
 def update_candidate_form_data(candidate_id: str, updates: dict) -> bool:
-    """
-    Supports keys: name, email, phone, current_address, permanent_address,
-    dob, caste, sub_caste, marital_status, highest_qualification, work_experience,
-    referral, ready_festivals, ready_late_nights, form_patch (merged into form_data)
-    """
     allowed_cols = {
         "name", "email", "phone", "current_address", "permanent_address", "dob", "caste",
         "sub_caste", "marital_status", "highest_qualification", "work_experience",
@@ -447,22 +430,34 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
         conn.close()
 
 
-def delete_candidate(candidate_id: str) -> bool:
+def delete_candidate(candidate_id: str, actor_user_id: int) -> bool:
+    """
+    Deletes a candidate record (including CV) if actor_user_id has the right permissions.
+    Uses user_can_delete() to enforce server-side access control.
+    """
+    # Check if the actor has permission to delete candidates
+    if not user_can_delete(actor_user_id):
+        logger.warning(
+            "User %s attempted to delete candidate %s without permissions",
+            actor_user_id,
+            candidate_id
+        )
+        return False
+
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
-            # interviews / assessments cascade due to FK ON DELETE CASCADE
+            # Delete candidate — ON DELETE CASCADE will also delete assessments, interviews, etc.
             cur.execute("DELETE FROM candidates WHERE candidate_id=%s", (candidate_id,))
             return cur.rowcount > 0
+    except Exception:
+        logger.exception(f"Error deleting candidate {candidate_id}")
+        return False
     finally:
         conn.close()
 
 
-def delete_candidate_by_actor(candidate_id: str, actor_user_id: int) -> bool:
-    if not user_can_delete(actor_user_id):
-        logger.warning("User %s lacks permission to delete.", actor_user_id)
-        return False
-    return delete_candidate(candidate_id)
+
 
 
 # -----------------------------
@@ -495,18 +490,6 @@ def get_candidate_cv(candidate_id: str) -> Tuple[Optional[bytes], Optional[str]]
         conn.close()
 
 
-def delete_candidate_cv(candidate_id: str) -> bool:
-    conn = get_conn()
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute("""
-                UPDATE candidates
-                SET cv_file=NULL, cv_filename=NULL, updated_at=CURRENT_TIMESTAMP
-                WHERE candidate_id=%s
-            """, (candidate_id,))
-            return cur.rowcount > 0
-    finally:
-        conn.close()
 
 
 def get_total_cv_storage_usage() -> int:
@@ -606,23 +589,18 @@ def get_all_interviews() -> List[Dict[str, Any]]:
 
 
 # -----------------------------
-# New helpers added: HISTORY + INTERVIEWER STATS
+# New helpers: HISTORY + INTERVIEWER STATS + PERMISSIONS UPDATE
 # -----------------------------
 def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
     """
     Return a merged chronological timeline for a candidate.
     Each item is a dict: { event: str, details: str, created_at: datetime, actor: Optional[str] }
-    Events included:
-      - candidate creation / updates (from candidates.updated_at / created_at)
-      - receptionist assessments (receptionist_assessments.created_at)
-      - interviews (interviews.created_at or scheduled_at)
-    If candidate not found, returns [].
     """
     conn = get_conn()
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             # ensure candidate exists
-            cur.execute("SELECT candidate_id, name, created_at, updated_at FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            cur.execute("SELECT candidate_id, name, created_at, updated_at, created_by FROM candidates WHERE candidate_id=%s", (candidate_id,))
             cand = cur.fetchone()
             if not cand:
                 return []
@@ -685,7 +663,7 @@ def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
                     "actor": iv.get("interviewer")
                 })
 
-            # sort timeline newest first (if created_at missing, keep at end)
+            # sort timeline newest first
             timeline_sorted = sorted(
                 timeline,
                 key=lambda x: x.get("created_at") or datetime(1970, 1, 1),
@@ -699,14 +677,6 @@ def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
 def get_interviewer_performance_stats(interviewer_id: str) -> Dict[str, Any]:
     """
     Return simple interviewer performance stats for a given interviewer identifier (string).
-    Returns:
-      {
-        "total_interviews": int,
-        "scheduled": int,            # result == 'scheduled' (case-insensitive)
-        "completed": int,            # result IN ('completed','pass','fail') (case-insensitive)
-        "passed": int,               # result == 'pass'
-        "success_rate": int          # percentage passed/completed (0 if completed==0)
-      }
     """
     conn = get_conn()
     try:
@@ -733,6 +703,30 @@ def get_interviewer_performance_stats(interviewer_id: str) -> Dict[str, Any]:
                 "passed": passed,
                 "success_rate": success_rate,
             }
+    finally:
+        conn.close()
+
+
+def update_user_permissions(user_id: int, perms: Dict[str, Any]) -> bool:
+    """
+    Update a user's permission booleans in the users table.
+    perms is a dict like: { "can_view_cvs": True/False, "can_delete_records": True/False, "can_grant_delete": True/False }
+    Returns True if update affected rows.
+    """
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET can_view_cvs=%s, can_delete_records=%s, can_grant_delete=%s, updated_at=CURRENT_TIMESTAMP
+                WHERE id=%s
+            """, (
+                bool(perms.get("can_view_cvs", False)),
+                bool(perms.get("can_delete_records", False)),
+                bool(perms.get("can_grant_delete", False)),
+                int(user_id)
+            ))
+            return cur.rowcount > 0
     finally:
         conn.close()
 
@@ -866,5 +860,24 @@ def seed_sample_users():
                         INSERT INTO users (email, password_hash, role)
                         VALUES (%s,%s,%s)
                     """, (email, hash_password(pw), role))
+    finally:
+        conn.close()
+
+def get_user_permissions(user_id: int):
+    conn = get_conn()
+    try:
+        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT role,
+                       can_delete_records,
+                       can_grant_delete,
+                       can_view_cvs
+                FROM users
+                WHERE id = %s
+            """, (user_id,))
+            return cur.fetchone() or {}
+    except Exception:
+        logger.exception(f"Error fetching permissions for user {user_id}")
+        return {}
     finally:
         conn.close()

@@ -1,4 +1,3 @@
-# receptionist.py
 import os
 import re
 import smtplib
@@ -12,11 +11,14 @@ from db_postgres import (
     find_candidates_by_name,
     get_all_candidates,
     get_candidate_cv,
-    delete_candidate_by_actor,
-    set_candidate_permission,            # present in your DB layer
-    get_user_permissions,                # used for permission checks
-    save_receptionist_assessment,        # save assessment block
+    delete_candidate,   # ✅ Updated
+    set_candidate_permission,
+    get_user_permissions,
+    save_receptionist_assessment,
 )
+
+# Reuse UI bricks from dedicated module (clean separation)
+from drive_and_cv_views import preview_cv_ui
 
 EMAIL_RE = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
@@ -54,20 +56,18 @@ def _search_candidates_all_fields(q: str) -> List[Dict[str, Any]]:
             )
             rows = cur.fetchall()
         conn.close()
-        res: List[Dict[str, Any]] = []
-        for r in rows:
-            res.append(
-                {
-                    "id": r[0],
-                    "candidate_id": r[1],
-                    "name": r[2],
-                    "email": r[3],
-                    "phone": r[4],
-                    "created_at": r[5],
-                    "form_data": r[6],
-                }
-            )
-        return res
+        return [
+            {
+                "id": r[0],
+                "candidate_id": r[1],
+                "name": r[2],
+                "email": r[3],
+                "phone": r[4],
+                "created_at": r[5],
+                "form_data": r[6],
+            }
+            for r in rows
+        ]
     except Exception:
         # legacy fallback
         return find_candidates_by_name(q)
@@ -122,36 +122,9 @@ BRV Recruitment
         return True, "Printed to console (SMTP not configured)."
 
 
-def _cv_preview_and_download(candidate_id: str):
-    """
-    Local CV preview + download. Respects permission checks done by caller.
-    """
-    cv_file, cv_filename = get_candidate_cv(candidate_id)
-    if not cv_file:
-        st.info("No CV uploaded yet.")
-        return
-
-    st.success(f"✅ CV on file: {cv_filename or 'unnamed'}")
-    st.download_button(
-        label="Download CV",
-        data=cv_file,
-        file_name=cv_filename or f"{candidate_id}_cv.bin",
-        mime="application/octet-stream",
-        key=f"dlcv_{candidate_id}",
-    )
-    # Lightweight inline PDF preview if filename looks like PDF
-    if (cv_filename or "").lower().endswith(".pdf"):
-        try:
-            st.caption("Inline preview (PDF):")
-            st.pdf(cv_file)  # Streamlit 1.36+; if your version lacks st.pdf, ignore silently
-        except Exception:
-            pass
-
-
 # ----------------------------
 # Main Receptionist view
 # ----------------------------
-
 def receptionist_view():
     st.header("Receptionist — Candidate Management")
 
@@ -160,6 +133,8 @@ def receptionist_view():
     if not current_user:
         st.error("No active user session. Please log in.")
         return
+
+    perms = get_user_permissions(current_user["id"]) or {}
 
     # Search section
     st.subheader("Search Candidates (all fields)")
@@ -185,12 +160,12 @@ def receptionist_view():
 
             # ---------------- CV section (permission protected) ----------------
             st.markdown("### Resume / CV")
-            perms = get_user_permissions(current_user["id"]) or {}
-            if not perms.get("can_view_cvs", False):
+            if not (perms.get("can_view_cv") or (perms.get("role") or "").lower() in ("admin", "ceo")):
                 st.warning("You do not have permission to view CVs.")
             else:
                 try:
-                    _cv_preview_and_download(c["candidate_id"])
+                    # minimal preview + download using shared helper
+                    preview_cv_ui(c["candidate_id"])
                 except Exception as e:
                     st.error(f"Error fetching CV: {e}")
 
@@ -216,6 +191,7 @@ def receptionist_view():
                     )
                 comments = st.text_area("Comments", placeholder="Any brief observations…")
                 submitted = st.form_submit_button("Save Assessment")
+
             if submitted:
                 ok = save_receptionist_assessment(
                     c["candidate_id"],
@@ -256,15 +232,29 @@ def receptionist_view():
                     (st.success if ok else st.error)(msg)
 
             with colD:
-                # Permission-aware delete
-                if st.button("🗑️ Delete Candidate", key=f"del_{c['candidate_id']}"):
-                    if not perms.get("can_delete_records", False):
-                        st.error("You do not have permission to delete candidate records.")
-                    else:
-                        if delete_candidate_by_actor(c["candidate_id"], current_user["id"]):
-                            st.success("Candidate deleted.")
-                            st.rerun()
-                        else:
-                            st.error("Failed to delete candidate (or not permitted).")
+                # Re-fetch perms to reflect changes during session (optional)
+                live_perms = get_user_permissions(current_user["id"]) or {}
+                ui_can_delete = (
+                    live_perms.get("can_delete_candidate")
+                    or live_perms.get("can_grant_delete")
+                    or (live_perms.get("role") or "").lower() in ("admin", "ceo")
+                )
 
-    st.caption("Note: Receptionist can assess candidates, manage edit permission, and email codes. Creation of candidates is not shown here.")
+                if not ui_can_delete:
+                    st.info("🚫 You do not have permission to delete candidates.")
+                else:
+                    if st.button("🗑️ Delete Candidate", key=f"del_{c['candidate_id']}"):
+                        try:
+                            ok = delete_candidate(c["candidate_id"], user["id"])
+                            if ok:
+                                st.success("✅ Candidate deleted.")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to delete candidate (server-side permission or DB issue).")
+                        except Exception as e:
+                            st.error(f"Delete failed: {e}")
+
+    st.caption(
+        "Note: Receptionist can assess candidates, manage edit permission, and email codes. "
+        "Creation of candidates is done elsewhere."
+    )

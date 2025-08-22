@@ -9,7 +9,7 @@ from db_postgres import (
     get_user_by_email, get_user_by_id,
     create_user_in_db, update_user_password,
     verify_password, seed_sample_users,
-    get_all_users_with_permissions
+    get_all_users_with_permissions, get_user_permissions
 )
 
 # === SESSION HELPERS ===
@@ -68,6 +68,7 @@ def login_user(email: str, password: str) -> bool:
 
     # Generate session token
     st.session_state.auth_token = secrets.token_hex(16)
+    # fetch fresh user with permission flags
     st.session_state.user = {
         "id": user["id"],
         "email": user["email"],
@@ -85,6 +86,10 @@ def register_user(email: str, password: str, role: str = "candidate") -> bool:
 
 def reset_password(email: str, new_password: str) -> bool:
     return update_user_password(email, new_password)
+
+
+# Backwards compatibility: some modules import create_user
+create_user = register_user
 
 
 # === STREAMLIT UI VIEWS ===
@@ -187,7 +192,11 @@ def manage_users_view():
         return
 
     for u in users:
-        with st.expander(f"{u['email']} — {u['role']}"):
+        label = u.get("email", "(no email)")
+        role_val = (u.get("role") or "").strip().lower()
+        if role_val and role_val != "ceo":
+            label = f"{label} — {u.get('role')}"
+        with st.expander(label):
             st.write(f"ID: {u['id']}")
             st.write(f"Role: {u['role']}")
             st.json({
