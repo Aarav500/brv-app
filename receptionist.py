@@ -236,9 +236,10 @@ def receptionist_view():
                 # Re-fetch perms to reflect changes during session (optional)
                 live_perms = get_user_permissions(current_user["id"]) or {}
                 role_lower = (live_perms.get("role") or "").lower()
+                can_delete_records = role_lower in ("admin", "ceo") or bool(live_perms.get("can_delete_records")) or bool(live_perms.get("can_grant_delete"))
 
-                if role_lower not in ("admin", "ceo"):
-                    st.info("🚫 You do not have permission to delete candidates.")
+                if not can_delete_records:
+                    st.info("🚫 You don’t have permission to delete this record.")
                 else:
                     if st.button("🗑️ Delete Candidate", key=f"del_{c['candidate_id']}"):
                         try:
@@ -247,7 +248,7 @@ def receptionist_view():
                                 st.success("✅ Candidate deleted.")
                                 st.rerun()
                             else:
-                                st.error("❌ Failed to delete candidate (permission or DB error).")
+                                st.error("You don’t have permission to delete this record.")
                         except Exception as e:
                             st.error(f"Delete failed: {e}")
 

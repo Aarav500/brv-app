@@ -264,8 +264,12 @@ def interviewer_view():
                 st.write(f"**Phone:** {cand.get('phone', '—')}")
                 st.write(f"**Created:** {cand.get('created_at', '—')}")
 
-                # Delete candidate (Admin/CEO only)
-                ui_can_delete = (role in ("admin", "ceo"))
+                # Delete candidate (permission-based)
+                ui_can_delete = (
+                    (role in ("admin", "ceo"))
+                    or bool(user_perms.get("can_delete_records"))
+                    or bool(user_perms.get("can_grant_delete"))
+                )
                 if ui_can_delete:
                     if st.button("🗑️ Delete Candidate", key=f"delcand_{cid}"):
                         user_id = current_user.get("id")
@@ -274,11 +278,11 @@ def interviewer_view():
                                 st.success("Candidate deleted successfully.")
                                 st.rerun()
                             else:
-                                st.error("Failed to delete candidate (permission or DB error).")
+                                st.error("You don’t have permission to delete this record.")
                         except Exception as e:
                             st.error(f"Error deleting candidate: {e}")
                 else:
-                    st.caption("🚫 You do not have permission to delete candidates.")
+                    st.caption("🚫 You don’t have permission to delete this record.")
 
             # Right column: application form data
             with right:
@@ -352,7 +356,15 @@ def interviewer_view():
                                     "continuous_night","rotational_night","profile_fit","project_fit",
                                     "grasping","other_notes"
                                 ]
-                                with st.expander("Notes", expanded=False):
+                                # Build expander label with interviewer and timestamp for clarity
+                                try:
+                                    created_at_val = row.get("created_at")
+                                except Exception:
+                                    created_at_val = None
+                                ts_str = str(created_at_val or sch or "")
+                                interviewer_name = row.get("interviewer", "—")
+                                exp_label = f"Notes — {interviewer_name} • {ts_str}" if (interviewer_name or ts_str) else "Notes"
+                                with st.expander(exp_label, expanded=False):
                                     # Rich Markdown section (if provided)
                                     try:
                                         rich_md = j.get("rich_notes_md")
@@ -377,7 +389,14 @@ def interviewer_view():
                                                     st.markdown(str(val).replace("\n","  \n"))
                             except Exception:
                                 # Fallback for plain text notes
-                                with st.expander("Notes", expanded=False):
+                                try:
+                                    created_at_val = row.get("created_at")
+                                except Exception:
+                                    created_at_val = None
+                                ts_str = str(created_at_val or sch or "")
+                                interviewer_name = row.get("interviewer", "—")
+                                exp_label = f"Notes — {interviewer_name} • {ts_str}" if (interviewer_name or ts_str) else "Notes"
+                                with st.expander(exp_label, expanded=False):
                                     st.markdown(str(notes).replace("\n","  \n"))
                         st.divider()
             else:

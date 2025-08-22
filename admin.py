@@ -268,8 +268,9 @@ def show_admin_panel():
     # -------------------------
     st.subheader("Candidate Records")
 
-    # Admin/CEO only can access delete actions
-    if role in ("admin", "ceo"):
+    # Candidate delete access (Admin/CEO or configured delete rights)
+    can_delete_records = bool(perms.get("can_delete_records")) or bool(perms.get("can_grant_delete")) or role in ("admin", "ceo")
+    if can_delete_records:
         candidates = get_all_candidates()
         if not candidates:
             st.caption("No candidates found.")
@@ -279,23 +280,18 @@ def show_admin_panel():
                 st.write(f"**Phone:** {c.get('phone','—')}")
                 st.write(f"**Created At:** {c.get('created_at','—')}")
 
-                # Admin/CEO only delete action
-                if role not in ("admin", "ceo"):
-                    st.info("🔒 You do not have permission to delete candidates.")
-                else:
-                    if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
-                        try:
-                            ok = delete_candidate(c["candidate_id"], current_user["id"])
-                            if ok:
-                                st.success("Candidate deleted successfully.")
-                                st.rerun()
-                            else:
-                                st.error("Deletion failed (permission or DB error).")
-                        except Exception as e:
-                            st.error(f"Deletion failed: {e}")
-
+                if st.button("🗑️ Delete Candidate", key=f"delcand_{c['candidate_id']}"):
+                    try:
+                        ok = delete_candidate(c["candidate_id"], current_user["id"])
+                        if ok:
+                            st.success("Candidate deleted successfully.")
+                            st.rerun()
+                        else:
+                            st.error("You don’t have permission to delete this record.")
+                    except Exception as e:
+                        st.error(f"Deletion failed: {e}")
     else:
-        st.info("🔒 You don’t have permission to delete candidates.")
+        st.info("🔒 You don’t have permission to delete this record.")
 
     st.markdown("---")
     st.caption("Admin panel actions depend on CEO-granted rights. CEO always has full access.")

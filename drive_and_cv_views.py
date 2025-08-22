@@ -13,7 +13,7 @@ from db_postgres import (
     get_all_candidates,
     get_candidate_cv,
     save_candidate_cv,
-    delete_candidate,   # make sure this exists in db_postgres.py
+    clear_candidate_cv,
     get_candidate_by_id,
 )
 
@@ -89,7 +89,7 @@ def drive_and_cv_view():
         if _can_delete_cv(perms):
             if st.button("🗑️ Delete CV for candidate"):
                 try:
-                    ok = delete_candidate(candidate_id, user.get("id"))
+                    ok = clear_candidate_cv(candidate_id)
                     if ok:
                         st.success("CV deleted.")
                         st.rerun()
@@ -98,7 +98,7 @@ def drive_and_cv_view():
                 except Exception as e:
                     st.error(f"Error deleting CV: {e}")
         else:
-            st.info("You do not have permission to delete CVs.")
+            st.info("You don’t have permission to delete this CV.")
 
     st.subheader("Upload / Replace CV")
     if _can_upload_cv(perms) or _can_edit_cv(perms):

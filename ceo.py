@@ -130,6 +130,8 @@ def show_ceo_panel():
     current_user = st.session_state.get("user") or {}
     # only allow admin/ceo roles to manage users
     role = (current_user.get("role") or "").lower()
+    # fetch permissions for configurable access control
+    perms = get_user_permissions(current_user.get("id")) or {}
 
     st.title("CEO Control Panel")
     st.caption("Manage users, permissions and candidate records. Changes apply immediately.")
@@ -338,8 +340,9 @@ def show_ceo_panel():
                 st.markdown("### Actions")
                 user = st.session_state.get("user", {})
                 role_lower = (user.get("role") or "").lower()
-                if role_lower not in ("admin", "ceo"):
-                    st.info("🚫 You do not have permission to delete candidate records.")
+                can_delete_records = role_lower in ("admin", "ceo") or bool(perms.get("can_delete_records")) or bool(perms.get("can_grant_delete"))
+                if not can_delete_records:
+                    st.info("🚫 You don’t have permission to delete this record.")
                 else:
                     if st.button("🗑️ Delete Candidate", key=f"del_btn_{c.get('candidate_id')}"):
                         try:
@@ -348,7 +351,7 @@ def show_ceo_panel():
                                 st.success("Candidate deleted.")
                                 st.rerun()
                             else:
-                                st.error("Failed to delete candidate (permission or DB error).")
+                                st.error("You don’t have permission to delete this record.")
                         except Exception as e:
                             st.error(f"Delete failed: {e}")
 
