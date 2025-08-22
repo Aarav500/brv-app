@@ -125,7 +125,7 @@ def upload_cv_ui(candidate_id: str) -> None:
                 """, (uploaded_file.read(), uploaded_file.name, candidate_id))
             conn.close()
             st.success("CV uploaded successfully.")
-            st.experimental_rerun()
+            st.rerun()
         except Exception as e:
             st.error(f"Failed to upload CV: {e}")
 
@@ -141,7 +141,7 @@ def delete_cv_ui(candidate_id: str) -> None:
             """, (candidate_id,))
         conn.close()
         st.success("CV deleted successfully.")
-        st.experimental_rerun()
+        st.rerun()
     except Exception as e:
         st.error(f"Failed to delete CV: {e}")
 

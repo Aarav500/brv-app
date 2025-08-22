@@ -263,7 +263,7 @@ def receptionist_view():
                     else:
                         if delete_candidate_by_actor(c["candidate_id"], current_user["id"]):
                             st.success("Candidate deleted.")
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("Failed to delete candidate (or not permitted).")
 

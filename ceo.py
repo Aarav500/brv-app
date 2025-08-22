@@ -232,7 +232,7 @@ def show_ceo_panel():
                     if st.button("Update Permissions", key=f"perm_{u['id']}"):
                         if set_user_permission(u["id"], can_view=can_view, can_delete=can_delete, can_grant_delete=can_grant_delete):
                             st.success("Permissions updated.")
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("Failed to update permissions.")
                 with colp2:
@@ -242,7 +242,7 @@ def show_ceo_panel():
                             cur.execute("UPDATE users SET force_password_reset = TRUE WHERE id = %s", (u["id"],))
                         conn.close()
                         st.success("Password reset flag set.")
-                        st.experimental_rerun()
+                        st.rerun()
 
     # -------------------------
     # USER MANAGEMENT
@@ -262,7 +262,7 @@ def show_ceo_panel():
                 else:
                     if _update_email(u["id"], new_email):
                         st.success("Email updated.")
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("Failed to update email.")
 
@@ -272,7 +272,7 @@ def show_ceo_panel():
             with col2:
                 if st.button("Generate Strong Password", key=f"gen_{u['id']}"):
                     st.session_state[f"pw_{u['id']}"] = _random_password()
-                    st.experimental_rerun()
+                    st.rerun()
             if st.button("Reset Password", key=f"reset_{u['id']}"):
                 pw = st.session_state.get(f"pw_{u['id']}", new_pw)
                 if not pw:
@@ -287,7 +287,7 @@ def show_ceo_panel():
             if st.button("Remove User", type="secondary", key=f"del_{u['id']}"):
                 if _delete_user_by_id(u["id"]):
                     st.success("User removed.")
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("Failed to remove user.")
 

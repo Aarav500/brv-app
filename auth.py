@@ -53,7 +53,7 @@ def logout():
     st.session_state.user = None
     st.session_state.auth_token = None
     _flash("You have been logged out.", "success")
-    st.experimental_rerun()
+    st.rerun()
 
 
 # === AUTH LOGIC ===
@@ -103,10 +103,10 @@ def login_view():
     if submitted:
         if login_user(email.strip(), password.strip()):
             _flash("Login successful.", "success")
-            st.experimental_rerun()
+            st.rerun()
         else:
             _flash("Invalid credentials.", "error")
-            st.experimental_rerun()
+            st.rerun()
 
     st.caption("Don’t have an account? Contact admin or register if allowed.")
 

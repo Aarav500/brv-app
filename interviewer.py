@@ -156,7 +156,7 @@ def _permissions_manager_ui():
                     ok = set_user_permission(user["id"], **updated_perms)
                     if ok:
                         st.success("Permissions updated.")
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("Failed to update permissions.")
                 except Exception as e:
