@@ -1,66 +1,55 @@
 # ceo.py
 """
-CEO Control Panel (refined, feature-complete; Streamlit-only, no Flask assumptions)
+CEO Control Panel (feature-complete, cleaned + modular)
 
-What you get:
-- CEO Dashboard with stats + Candidate Management:
-    • Search, pagination, delete, toggle edit, CV controls (preview/download/new-tab).
-    • CV Previews:
-        - PDF in base64 iframe (works like streamlit-pdf-viewer).
-        - If Brave/Firefox blocks → fallback to “Open in new tab” or “Download CV.”
-        - Supports .pdf, .docx, .txt, .jpg/.jpeg/.png gracefully.
-          · .pdf -> iframe + fallbacks
-          · .txt -> inline text viewer
-          · .jpg/.jpeg/.png -> st.image
-          · .docx -> best-effort extract text (if python-docx available), else download hint
-    • Interview Notes:
-        - Skips system/creation/import events.
-        - Card-style layout (When, By, Result, Details).
-        - Preserves structured JSON detail fields (= dicts rendered as key: value lines).
+What’s included (and preserved):
+- CEO Dashboard: candidate search, pagination, CV preview/download with fallbacks,
+  formatted interview history (skips system/creation events),
+  toggle candidate edit permission, delete (single + NEW: multi-select batch delete),
+  refresh.
+- User Management: permissions ONLY (no candidate UI here). Cleaner display.
+- CV Preview: base64 <iframe> for PDFs, automatic fallback to "Open in new tab" or download.
+  Graceful handling for .txt (render as text), .jpg/.jpeg/.png (render as image),
+  .docx/.doc (no inline viewer -> provide new tab + download).
+- Robust UI state via session_state. Helpful messages, safe exception handling.
 
-- User Management:
-    • ONLY user permissions (no candidate operations here).
-    • Same update flow; cleaner display.
-    • Uses the same delete-like feedback UX (success/unchanged/error).
-      (Note: no user deletion here, per your instruction; it manages permissions only.)
-
-Permissions/Assumptions (same as your existing file):
+Assumptions about helper functions (unchanged):
 - get_all_users_with_permissions() -> List[Dict]
 - update_user_permissions(user_id, perms_dict) -> True/False
-- get_candidate_cv_secure(candidate_id, actor_id)
-      -> (bytes_or_none, filename_or_none, reason_str) where reason in ("ok","no_permission","not_found")
+- get_candidate_cv_secure(candidate_id, actor_id) ->
+      (bytes_or_none, filename_or_none, reason_str) where reason in ("ok","no_permission","not_found")
 - get_user_permissions(user_id) -> Dict[str, bool]
 - get_candidate_statistics() -> Dict with keys: total_candidates, candidates_today, total_interviews, total_assessments
-- get_all_candidates() -> List[Dict] with fields: (id, candidate_id, name, email, phone, cv_file/resume_link, form_data, created_at, updated_at, can_edit)
+- get_all_candidates() -> List[Dict] with fields (id, candidate_id, name, email, phone, cv_file/resume_link,
+      form_data, created_at, updated_at, can_edit)
 - delete_candidate(candidate_id, actor_id) -> (ok_bool, reason_str)
 - set_candidate_permission(candidate_id, bool_val) -> True/False
 - get_candidate_history(candidate_id) -> List[Dict] representing events/interviews
 - require_login() ; get_current_user(refresh=True) -> Dict
-
-Notes:
-- No framework assumptions beyond Streamlit. No Flask imports.
-- Uses st.session_state for lightweight cache/toggles.
 """
+
+from __future__ import annotations
 
 import base64
 import json
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Iterable
 from datetime import datetime
 import uuid
 import mimetypes
 import traceback
+import re
 
 import streamlit as st
 import streamlit.components.v1 as components
 
-# --- Optional import for .docx preview (best-effort text extraction) ---
+# ---- IMPORTANT: set page config once (safe even if main() routes later)
 try:
-    from docx import Document  # python-docx
-    _HAS_DOCX = True
+    st.set_page_config(page_title="CEO Control Panel", layout="wide")
 except Exception:
-    _HAS_DOCX = False
+    # Streamlit may raise if called twice in same runtime; ignore
+    pass
 
-# --- Project helpers (as in your file; unchanged names) ---
+# --- Project helpers (unchanged imports expected in your repo)
 from db_postgres import (
     get_all_users_with_permissions,
     update_user_permissions,
@@ -75,11 +64,11 @@ from db_postgres import (
 from auth import require_login, get_current_user
 
 
-# =========================================================
+# =============================================================================
 # Utility helpers
-# =========================================================
+# =============================================================================
+
 def _format_datetime(v) -> str:
-    """Normalize various datetime formats to a display string."""
     if not v:
         return "N/A"
     if isinstance(v, str):
@@ -96,6 +85,16 @@ def _format_datetime(v) -> str:
 
 def _safe_lower(s: Optional[str]) -> str:
     return (s or "").lower()
+
+
+def _titleize_key(k: str) -> str:
+    # turn snake_case / lower / underscored keys into Title Case phrases
+    k = (k or "").strip()
+    k = k.replace("_", " ").replace("-", " ")
+    k = re.sub(r"\s+", " ", k)
+    if not k:
+        return "Field"
+    return k[:1].upper() + k[1:]
 
 
 def _detect_mimetype_from_name(name: Optional[str]) -> str:
@@ -126,9 +125,6 @@ def _b64_data_uri(bytes_data: bytes, mimetype: str) -> str:
 
 
 def _safe_get_candidate_cv(candidate_id: str, actor_id: int) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
-    """
-    Adapter for get_candidate_cv_secure; normalize to (bytes_or_none, filename_or_none, reason_str).
-    """
     try:
         res = get_candidate_cv_secure(candidate_id, actor_id)
         if isinstance(res, tuple) and len(res) >= 3:
@@ -141,16 +137,13 @@ def _safe_get_candidate_cv(candidate_id: str, actor_id: int) -> Tuple[Optional[b
         return None, None, "error"
 
 
-# =========================================================
+# =============================================================================
 # CV Preview Helpers & Fallbacks
-# =========================================================
-def _embed_pdf_iframe(bytes_data: bytes, height: int = 700) -> bool:
-    """
-    Primary method: embed a base64 data URI inside an iframe (PDF).
-    Some browsers (e.g., Brave/Firefox with strict settings) may block this — we provide fallbacks.
-    """
+# =============================================================================
+
+def _embed_pdf_iframe(bytes_data: bytes, height: int = 720) -> bool:
+    """Primary inline preview for PDFs using base64 data URI in <iframe>."""
     if not bytes_data:
-        st.info("No data to preview.")
         return False
     try:
         src = _b64_data_uri(bytes_data, "application/pdf")
@@ -158,104 +151,99 @@ def _embed_pdf_iframe(bytes_data: bytes, height: int = 700) -> bool:
         components.html(html, height=height + 20)
         return True
     except Exception:
-        st.write("Inline preview failed (browser may block embedded PDFs).")
         return False
 
 
-def _open_in_new_tab_link(bytes_data: bytes, mimetype: str, label: str = "Open in new tab"):
+def _open_file_new_tab(bytes_data: bytes, mimetype: str, label: str = "Open in new tab") -> bool:
     """
-    Secondary fallback: provide an <a> anchor that opens the data URI in a new tab.
+    Generic open-in-new-tab fallback using a data URI anchor injected via components.html.
+    Works immediately without rerun; if a strict browser blocks it, user can Download.
     """
     try:
         src = _b64_data_uri(bytes_data, mimetype)
-        aid = f"openfile_{uuid.uuid4().hex}"
-        html = f'<a id="{aid}" href="{src}" target="_blank" rel="noopener noreferrer">{label}</a>'
-        st.markdown(html, unsafe_allow_html=True)
+        aid = f"open_{uuid.uuid4().hex}"
+        html = f'''
+            <a id="{aid}" href="{src}" target="_blank" rel="noopener noreferrer">{label}</a>
+            <script>
+              (function() {{
+                var a = document.getElementById("{aid}");
+                if (a) {{
+                  // auto click to avoid extra step; comment this if undesired.
+                  a.click();
+                }}
+              }})();
+            </script>
+        '''
+        components.html(html, height=0)
+        st.caption("If a new tab didn't open (strict browser), use Download below.")
         return True
     except Exception:
         return False
 
 
 def _preview_text(bytes_data: bytes, max_chars: int = 30_000):
-    """Preview plain-text files safely."""
     try:
         text = bytes_data.decode("utf-8", errors="replace")
     except Exception:
         text = str(bytes_data)[:max_chars]
     if len(text) > max_chars:
-        st.code(text[:max_chars] + "\n\n... (truncated)", language=None)
+        st.code(text[:max_chars] + "\n\n... (truncated)")
     else:
-        st.code(text, language=None)
+        st.code(text)
 
 
 def _preview_image(bytes_data: bytes, caption: Optional[str] = None):
-    """Inline image preview for jpeg/png."""
     try:
         st.image(bytes_data, caption=caption, use_column_width=True)
     except Exception:
-        st.info("Image preview failed. Please use 'Download' to view the file.")
+        st.info("Unable to render image inline. Please use Download.")
 
 
-def _preview_docx_text(bytes_data: bytes, max_chars: int = 40_000):
-    """
-    Best-effort .docx preview: extract plain text if python-docx is available; else prompt to download.
-    """
-    if not _HAS_DOCX:
-        st.info("Preview for .docx not available (python-docx not installed). Please use 'Open in new tab' or 'Download'.")
-        return
-    # Try reading from bytes via temporary file in memory
-    try:
-        # python-docx requires a file-like path or stream; bytesIO works
-        from io import BytesIO
-        doc = Document(BytesIO(bytes_data))
-        parts = []
-        for p in doc.paragraphs:
-            if p.text:
-                parts.append(p.text)
-        text = "\n".join(parts).strip()
-        if not text:
-            st.info("No extractable text in .docx (it might be mostly tables/images). Try downloading.")
-            return
-        if len(text) > max_chars:
-            st.text(text[:max_chars] + "\n\n... (truncated)")
-        else:
-            st.text(text)
-    except Exception:
-        st.info("Could not render .docx inline. Please use 'Open in new tab' or 'Download'.")
+# =============================================================================
+# Interview helpers (formatting, filtering)
+# =============================================================================
+
+SYSTEM_HINT_WORDS = ("candidate record created", "record created", "created", "system", "import")
 
 
-# =========================================================
-# Interview formatting helpers
-# =========================================================
 def _is_system_event(ev: Dict[str, Any]) -> bool:
-    """
-    Decide whether an event is a system/creation event which we should skip from "Interview" list.
-    """
     title = str(ev.get("title") or ev.get("event") or "").lower()
     actor = str(ev.get("actor") or ev.get("source") or ev.get("actor_type") or "").lower()
-    if "created" in title and ("candidate" in title or "record" in title):
+    etype = str(ev.get("type") or "").lower()
+    if any(w in title for w in SYSTEM_HINT_WORDS):
         return True
     if actor and ("portal" in actor or "candidate_portal" in actor or "system" in actor):
         return True
-    if str(ev.get("type") or "").lower() in ("system", "created", "import"):
+    if etype in ("system", "created", "import"):
         return True
     return False
 
 
+def _render_kv_block(d: Dict[str, Any]):
+    for k, v in d.items():
+        if v is None or v == "":
+            continue
+        if isinstance(v, (dict, list)):
+            try:
+                v = json.dumps(v, ensure_ascii=False)
+            except Exception:
+                v = str(v)
+        st.write(f"- **{_titleize_key(k)}:** {v}")
+
+
 def _render_interview_card(idx: int, ev: Dict[str, Any]):
-    """
-    Render a single interview/event as a clean card.
-    """
     when = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at") or ev.get("date") or ev.get("timestamp")
     interviewer = ev.get("actor") or ev.get("interviewer") or ev.get("actor_name") or ev.get("by") or "—"
 
+    # Normalize details/result/notes whether dict or JSON string
     raw_details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
     result = None
-    notes = None
+    notes: Any = None
+
     if isinstance(raw_details, dict):
         result = raw_details.get("result") or raw_details.get("status")
         notes = raw_details.get("notes") or raw_details.get("comment") or raw_details
-    elif isinstance(raw_details, str):
+    elif isinstance(raw_details, str) and raw_details.strip():
         try:
             parsed = json.loads(raw_details)
             if isinstance(parsed, dict):
@@ -268,23 +256,19 @@ def _render_interview_card(idx: int, ev: Dict[str, Any]):
 
     title = ev.get("title") or ev.get("summary") or f"Interview #{idx}"
 
+    # Card layout
     left, right = st.columns([3, 1])
     with left:
-        st.markdown(f"**{title}**")
+        st.markdown(f"### {title}")
         st.write(f"- **When:** {_format_datetime(when)}")
         st.write(f"- **By:** {interviewer}")
         if result:
-            st.write(f"- **Result:** {result}")
-
+            badge = "✅ Pass" if str(result).lower() in ("pass", "passed", "yes", "true", "selected") else f"🛈 {result}"
+            st.write(f"- **Result:** {badge}")
+        # Render notes
         if isinstance(notes, dict):
             st.markdown("**Details:**")
-            for k, v in notes.items():
-                if isinstance(v, (dict, list)):
-                    try:
-                        v = json.dumps(v, ensure_ascii=False)
-                    except Exception:
-                        v = str(v)
-                st.write(f"- {k}: {v}")
+            _render_kv_block(notes)
         elif isinstance(notes, str) and notes.strip():
             md = notes.replace("\r\n", "\n").replace("\n", "  \n")
             st.markdown(f"**Details:**  \n{md}")
@@ -296,9 +280,10 @@ def _render_interview_card(idx: int, ev: Dict[str, Any]):
     st.markdown("---")
 
 
-# =========================================================
-# Candidate summary renderer (keeps old fields)
-# =========================================================
+# =============================================================================
+# Candidate summary
+# =============================================================================
+
 def _render_candidate_summary(c: Dict[str, Any]):
     st.markdown(f"### {c.get('name') or '—'}")
     st.write(f"**Candidate ID:** {c.get('candidate_id') or c.get('id')}")
@@ -310,17 +295,29 @@ def _render_candidate_summary(c: Dict[str, Any]):
 
     form = c.get("form_data") or {}
     if isinstance(form, dict) and form:
-        st.markdown("**Application summary**")
-        st.write(f"- Age / DOB: {form.get('dob','N/A')}")
-        st.write(f"- Highest qualification: {form.get('highest_qualification','N/A')}")
-        st.write(f"- Work experience: {form.get('work_experience','N/A')}")
-        st.write(f"- Ready for holidays: {form.get('ready_festivals','N/A')}")
-        st.write(f"- Ready for late nights: {form.get('ready_late_nights','N/A')}")
+        st.markdown("**Application Summary**")
+        # Display common fields if present, else a compact kv listing
+        displayed = False
+        for label_key in (
+            "dob", "highest_qualification", "work_experience",
+            "ready_festivals", "ready_late_nights"
+        ):
+            if form.get(label_key) is not None:
+                displayed = True
+        if displayed:
+            st.write(f"- Age / DOB: {form.get('dob','N/A')}")
+            st.write(f"- Highest qualification: {form.get('highest_qualification','N/A')}")
+            st.write(f"- Work experience: {form.get('work_experience','N/A')}")
+            st.write(f"- Ready for holidays: {form.get('ready_festivals','N/A')}")
+            st.write(f"- Ready for late nights: {form.get('ready_late_nights','N/A')}")
+        else:
+            _render_kv_block(form)
 
 
-# =========================================================
+# =============================================================================
 # CEO Dashboard (main)
-# =========================================================
+# =============================================================================
+
 def show_ceo_panel():
     require_login()
     user = get_current_user(refresh=True)
@@ -329,11 +326,10 @@ def show_ceo_panel():
         st.error("You do not have permission to view this page.")
         st.stop()
 
-    st.set_page_config(page_title="CEO Dashboard", layout="wide")
     st.title("CEO Dashboard")
-    st.caption("Candidate statistics and candidate management (all candidate operations live here).")
+    st.caption("Candidate statistics and candidate management.")
 
-    # Stats
+    # Top stats
     try:
         stats = get_candidate_statistics() or {}
     except Exception:
@@ -352,33 +348,36 @@ def show_ceo_panel():
 
     st.markdown("---")
 
-    # Candidate management: search/filter/pagination
+    # Candidate management header
     st.header("Candidate Management")
-    q_col1, q_col2, q_col3 = st.columns([3, 1, 1])
-    with q_col1:
+
+    q1, q2, q3, q4 = st.columns([3, 1, 1, 1])
+    with q1:
         search_q = st.text_input(
-            "Search candidates by name / email / candidate_id (partial matches allowed)",
-            key="ceo_search",
+            "Search by name / email / candidate_id (partial allowed)",
+            key="ceo_search"
         )
-    with q_col2:
-        if st.button("Refresh List"):
+    with q2:
+        show_only_no_cv = st.checkbox("Only without CV", value=False, key="ceo_filter_no_cv")
+    with q3:
+        select_all_toggle = st.checkbox("Select all on page", value=False, key="ceo_select_all_toggle")
+    with q4:
+        if st.button("Refresh List", help="Reload candidates and stats"):
             st.session_state.pop("last_candidates_loaded", None)
             st.rerun()
-    with q_col3:
-        show_only_no_cv = st.checkbox("Only without CV", value=False, key="ceo_filter_no_cv")
 
-    # Load candidates once per session interaction
+    # Load candidates (cached per session run)
     try:
         if "last_candidates_loaded" not in st.session_state:
             st.session_state["last_candidates_loaded"] = get_all_candidates() or []
-        candidates = st.session_state["last_candidates_loaded"]
+        candidates: List[Dict[str, Any]] = st.session_state["last_candidates_loaded"]
     except Exception as e:
         st.error(f"Failed to load candidates: {e}")
         candidates = []
 
-    # Apply search filter
-    filtered: List[Dict[str, Any]] = []
+    # Search/filter
     sq = (search_q or "").strip().lower()
+    filtered: List[Dict[str, Any]] = []
     for c in (candidates or []):
         if sq:
             if (
@@ -386,44 +385,75 @@ def show_ceo_panel():
                 or (c.get("email") or "").lower().find(sq) != -1
                 or (c.get("candidate_id") or "").lower().find(sq) != -1
             ):
-                filtered.append(c)
-        else:
-            filtered.append(c)
-
-    if show_only_no_cv:
-        filtered = [x for x in filtered if not x.get("cv_file") and not x.get("resume_link")]
+                pass
+            else:
+                continue
+        if show_only_no_cv and (c.get("cv_file") or c.get("resume_link")):
+            continue
+        filtered.append(c)
 
     if not filtered:
         st.info("No candidates match your criteria.")
         return
 
-    # Ensure preview toggles exist
+    # Selection state
+    selected_set: set[str] = st.session_state.setdefault("selected_candidates", set())
+
+    # Ensure preview flags exist per candidate
     for c in filtered:
         cid = c.get("candidate_id") or str(c.get("id"))
-        preview_key = f"preview_{cid}"
-        if preview_key not in st.session_state:
-            st.session_state[preview_key] = False
+        st.session_state.setdefault(f"preview_{cid}", False)
 
     # Pagination
-    per_page = 15
+    per_page = 12
     total = len(filtered)
     pages = (total + per_page - 1) // per_page
-    page_idx = st.number_input(
-        "Page", min_value=1, max_value=max(1, pages), value=1, step=1, key="ceo_page"
-    )
+    page_idx = st.number_input("Page", min_value=1, max_value=max(1, pages), value=1, step=1, key="ceo_page")
     start = (page_idx - 1) * per_page
     end = start + per_page
     page_items = filtered[start:end]
+    st.caption(f"Showing {start+1}–{min(end, total)} of {total} candidates")
 
-    st.caption(f"Showing {start+1} - {min(end, total)} of {total} candidates")
+    # Batch delete UI (top)
+    can_delete_records = False
+    try:
+        _perms = get_user_permissions(user.get("id")) or {}
+        can_delete_records = bool(_perms.get("can_delete_records", False))
+    except Exception:
+        pass
 
-    # Candidate expanders
+    bb1, bb2 = st.columns([1, 6])
+    with bb1:
+        if can_delete_records:
+            if st.button(f"🗑️ Delete Selected ({len(selected_set)})", disabled=len(selected_set) == 0):
+                _batch_delete_candidates(sorted(selected_set))
+                # after deletion, refresh once
+                st.session_state.pop("last_candidates_loaded", None)
+                st.session_state["selected_candidates"] = set()
+                st.rerun()
+        else:
+            st.caption("No permission to delete.")
+
+    # Render candidate expanders
     for c in page_items:
         cid = c.get("candidate_id") or str(c.get("id"))
         label = f"{c.get('name') or 'Unnamed'} — {cid}"
+
+        # selection checkbox row header
+        sel_cols = st.columns([0.06, 0.94])
+        with sel_cols[0]:
+            checked = select_all_toggle or (cid in selected_set)
+            new_checked = st.checkbox("", value=checked, key=f"sel_{cid}")
+            if new_checked:
+                selected_set.add(cid)
+            else:
+                selected_set.discard(cid)
+        with sel_cols[1]:
+            pass  # space for the expander
+
         with st.expander(label, expanded=False):
-            left, right = st.columns([3, 1])
-            with left:
+            main_left, main_right = st.columns([3, 1])
+            with main_left:
                 # Summary
                 try:
                     _render_candidate_summary(c)
@@ -431,58 +461,57 @@ def show_ceo_panel():
                     st.error("Error rendering candidate summary.")
                     st.write(json.dumps(c, default=str))
 
-                # CV access & preview logic
+                # CV access & preview
                 try:
                     current_user = get_current_user(refresh=True)
                     actor_id = current_user.get("id") if current_user else 0
                     cv_bytes, cv_name, reason = _safe_get_candidate_cv(cid, actor_id)
-
                     current_perms = get_user_permissions(current_user.get("id")) or {}
                     can_view_cvs = bool(current_perms.get("can_view_cvs", False))
 
                     if reason == "no_permission":
                         st.warning("❌ You don’t have permission to view CVs for this candidate.")
-                    elif reason == "not_found":
+                    elif reason == "not_found" or not cv_bytes:
                         st.info("No CV uploaded yet.")
                     elif reason == "ok" and cv_bytes:
                         if not can_view_cvs:
                             st.warning("🔒 You do not have permission to view or download CVs.")
                         else:
-                            col_a, col_b, col_c = st.columns([1, 1, 1])
-                            with col_a:
-                                if st.button("🔍 Preview CV", key=f"preview_btn_{cid}"):
+                            mimetype = _detect_mimetype_from_name(cv_name)
+                            a, b, ccol = st.columns([1, 1, 1])
+                            with a:
+                                if st.button("🔍 Preview", key=f"prev_{cid}"):
                                     st.session_state[f"preview_{cid}"] = True
-                            with col_b:
+                            with b:
                                 st.download_button(
-                                    "📄 Download CV",
+                                    "📄 Download",
                                     data=cv_bytes,
                                     file_name=cv_name or f"{cid}_cv.bin",
-                                    key=f"download_{cid}",
+                                    key=f"dl_{cid}",
                                 )
-                            with col_c:
-                                if st.button("↗️ Open in new tab", key=f"open_newtab_{cid}"):
-                                    mimetype = _detect_mimetype_from_name(cv_name)
-                                    _open_in_new_tab_link(cv_bytes, mimetype, label="Open CV in new tab")
+                            with ccol:
+                                if st.button("↗️ Open in new tab", key=f"newtab_{cid}"):
+                                    ok = _open_file_new_tab(cv_bytes, mimetype)
+                                    if not ok:
+                                        st.info("Your browser blocked new tab. Please use Download.")
 
-                            # Render preview (on-demand)
+                            # Render preview area
                             if st.session_state.get(f"preview_{cid}", False):
-                                mimetype = _detect_mimetype_from_name(cv_name)
                                 st.markdown("**Preview**")
                                 if mimetype == "application/pdf":
-                                    ok = _embed_pdf_iframe(cv_bytes, height=700)
+                                    ok = _embed_pdf_iframe(cv_bytes)
                                     if not ok:
-                                        opened = _open_in_new_tab_link(cv_bytes, mimetype)
-                                        if not opened:
-                                            st.info("Your browser blocked inline preview. Please download the CV to view it.")
-                                elif mimetype.startswith("text/") or mimetype == "text/plain":
+                                        if not _open_file_new_tab(cv_bytes, mimetype):
+                                            st.info("Preview blocked. Please use Download.")
+                                elif mimetype.startswith("text/"):
                                     _preview_text(cv_bytes)
                                 elif mimetype.startswith("image/"):
-                                    _preview_image(cv_bytes, caption=cv_name)
+                                    _preview_image(cv_bytes, caption=cv_name or cid)
                                 elif mimetype in (
                                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     "application/msword",
                                 ):
-                                    _preview_docx_text(cv_bytes)
+                                    st.info("Inline preview for Word docs is not supported. Use Open in New Tab or Download.")
                                 else:
                                     st.info("Preview isn't available for this file type. Please download to view.")
                     else:
@@ -508,72 +537,102 @@ def show_ceo_panel():
                     st.error("Interview history: (error fetching)")
                     st.write(traceback.format_exc())
 
-            with right:
-                # Actions (permission-aware)
+            with main_right:
                 st.markdown("### Actions")
                 current_user = get_current_user(refresh=True)
                 _perms = get_user_permissions(current_user.get("id")) or {}
                 can_delete_records = bool(_perms.get("can_delete_records", False))
 
-                # Quick metadata
                 st.caption(f"ID: {c.get('id')}")
-                st.caption(f"Candidate ID: {c.get('candidate_id')}")
+                st.caption(f"Candidate ID: {cid}")
                 st.caption(f"Created: {_format_datetime(c.get('created_at'))}")
 
-                # Delete candidate
+                # Single delete (optimized: no extra round trips after success; cache edited then rerun once)
                 if not can_delete_records:
-                    st.info("🚫 You don’t have permission to delete this record.")
+                    st.info("🚫 You can’t delete this record.")
                 else:
-                    if st.button("🗑️ Delete Candidate", key=f"del_btn_{cid}"):
+                    if st.button("🗑️ Delete Candidate", key=f"del_one_{cid}"):
+                        ok, reason = False, "error"
                         try:
                             ok, reason = delete_candidate(cid, current_user["id"])
-                            if ok:
-                                st.success("Candidate deleted.")
-                                st.session_state.pop("last_candidates_loaded", None)
-                                st.rerun()
-                            else:
-                                if reason == "no_permission":
-                                    st.error("❌ You don’t have permission to delete this record.")
-                                elif reason == "not_found":
-                                    st.warning("Candidate already deleted.")
-                                else:
-                                    st.error("Delete failed (DB error).")
                         except Exception as e:
                             st.error(f"Delete failed: {e}")
-                            st.write(traceback.format_exc())
+
+                        if ok:
+                            st.success("Candidate deleted.")
+                            # Update cached list locally to avoid extra fetch
+                            if "last_candidates_loaded" in st.session_state:
+                                st.session_state["last_candidates_loaded"] = [
+                                    x for x in st.session_state["last_candidates_loaded"]
+                                    if (x.get("candidate_id") or str(x.get("id"))) != cid
+                                ]
+                            # remove from selections if present
+                            st.session_state["selected_candidates"].discard(cid)
+                            st.rerun()
+                        else:
+                            if reason == "no_permission":
+                                st.error("❌ You don’t have permission to delete this record.")
+                            elif reason == "not_found":
+                                st.warning("Candidate already deleted.")
+                            else:
+                                st.error("Delete failed (DB error).")
 
                 # Toggle candidate edit permission
                 try:
                     current_can_edit = bool(c.get("can_edit", False))
-                    toggle_label = ("🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit")
+                    toggle_label = "🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit"
                     if st.button(toggle_label, key=f"toggle_edit_{cid}"):
                         try:
-                            new_val = not current_can_edit
-                            ok = set_candidate_permission(cid, new_val)
+                            ok = set_candidate_permission(cid, not current_can_edit)
                             if ok:
-                                c['can_edit'] = new_val
-                                st.success(f"Set candidate can_edit = {new_val}")
+                                c["can_edit"] = not current_can_edit
+                                # Update cache entry in-place
                                 if "last_candidates_loaded" in st.session_state:
                                     for i, cand in enumerate(st.session_state["last_candidates_loaded"]):
                                         if (cand.get("candidate_id") or str(cand.get("id"))) == cid:
-                                            st.session_state["last_candidates_loaded"][i]['can_edit'] = new_val
+                                            st.session_state["last_candidates_loaded"][i]["can_edit"] = not current_can_edit
                                             break
+                                st.success(f"Set candidate can_edit = {not current_can_edit}")
                             else:
                                 st.error("Failed to update candidate permission in DB.")
-                        except Exception:
-                            st.error("Failed to toggle edit permission:")
+                        except Exception as e:
+                            st.error(f"Failed to toggle permission: {e}")
                             st.write(traceback.format_exc())
-                except Exception:
-                    st.error("Failed to render toggle.")
-                    st.write(traceback.format_exc())
+                except Exception as e:
+                    st.error(f"Failed to render toggle: {e}")
 
+    # Footer tip
     st.markdown("---")
-    st.caption("Tip: If inline PDF preview is blocked by your browser, use 'Open in new tab' or 'Download CV'.")
+    st.caption("Tip: If inline PDF preview is blocked by your browser, use 'Open in new tab' or 'Download'.")
 
 
-# =========================================================
-# User management panel (permissions only)
-# =========================================================
+def _batch_delete_candidates(candidate_ids: Iterable[str]):
+    """Delete multiple candidates in one action; suppress repeated reruns."""
+    current_user = get_current_user(refresh=True) or {}
+    actor_id = current_user.get("id")
+    successes, failures = 0, []
+
+    for cid in candidate_ids:
+        try:
+            ok, reason = delete_candidate(cid, actor_id)
+            if ok:
+                successes += 1
+            else:
+                failures.append((cid, reason or "unknown"))
+        except Exception as e:
+            failures.append((cid, str(e)))
+
+    if successes:
+        st.success(f"Deleted {successes} candidate(s).")
+    if failures:
+        msgs = ", ".join([f"{cid} ({why})" for cid, why in failures])
+        st.error(f"Failed to delete: {msgs}")
+
+
+# =============================================================================
+# User management (permissions ONLY — NO candidate UI here)
+# =============================================================================
+
 def show_user_management_panel():
     require_login()
     current_user = get_current_user(refresh=True)
@@ -583,7 +642,7 @@ def show_user_management_panel():
         st.stop()
 
     st.title("User Management")
-    st.caption("Manage user permissions only (no candidate controls here).")
+    st.caption("Manage user permissions. (No candidate operations here.)")
 
     try:
         users = get_all_users_with_permissions() or []
@@ -595,31 +654,25 @@ def show_user_management_panel():
         st.info("No users found.")
         return
 
+    # Removed any "Candidate Records" section — ONLY permission controls remain
     for u in users:
         with st.expander(u.get("email") or "(no email)"):
             idx_key = f"user_{u.get('id')}"
             new_perms = _render_user_permissions_block(u, idx_key)
-
-            # Save
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("Update Permissions", key=f"saveperm_{u.get('id')}"):
-                    try:
-                        ok = update_user_permissions(u.get("id"), new_perms)
-                        if ok:
-                            st.success("Permissions updated.")
-                            # Not strictly necessary, but keep UI fresh if perms influence other pages.
-                            st.session_state.pop("last_candidates_loaded", None)
-                            st.rerun()
-                        else:
-                            st.info("No changes were detected or update failed.")
-                    except Exception as e:
-                        st.error(f"Failed to update permissions: {e}")
-                        st.write(traceback.format_exc())
+            if st.button("Update Permissions", key=f"saveperm_{u.get('id')}"):
+                try:
+                    ok = update_user_permissions(u.get("id"), new_perms)
+                    if ok:
+                        st.success("Permissions updated.")
+                        st.rerun()
+                    else:
+                        st.info("No changes were detected or update failed.")
+                except Exception as e:
+                    st.error(f"Failed to update permissions: {e}")
+                    st.write(traceback.format_exc())
 
 
 def _render_user_permissions_block(user_row: Dict[str, Any], index_key: str):
-    base = index_key
     st.markdown(f"**{user_row.get('email','(no email)')}**")
     role = (user_row.get("role") or "").strip()
     if role and role.lower() != "ceo":
@@ -628,12 +681,9 @@ def _render_user_permissions_block(user_row: Dict[str, Any], index_key: str):
     st.write(f"ID: {user_row.get('id')}  |  Created: {_format_datetime(user_row.get('created_at'))}")
     st.write(f"Force Password Reset: {bool(user_row.get('force_password_reset', False))}")
 
-    c1 = st.checkbox("Can View CVs", value=bool(user_row.get("can_view_cvs", False)), key=f"{base}_cv")
-    c2 = st.checkbox(
-        "Can Delete Candidate Records",
-        value=bool(user_row.get("can_delete_records", False)),
-        key=f"{base}_del",
-    )
+    c1 = st.checkbox("Can View CVs", value=bool(user_row.get("can_view_cvs", False)), key=f"{index_key}_cv")
+    c2 = st.checkbox("Can Delete Candidate Records", value=bool(user_row.get("can_delete_records", False)),
+                     key=f"{index_key}_del")
 
     return {
         "can_view_cvs": bool(c1),
@@ -641,9 +691,10 @@ def _render_user_permissions_block(user_row: Dict[str, Any], index_key: str):
     }
 
 
-# =========================================================
+# =============================================================================
 # Entrypoint / Router
-# =========================================================
+# =============================================================================
+
 def main():
     require_login()
     user = get_current_user(refresh=True)
@@ -651,19 +702,20 @@ def main():
 
     pages = {
         "CEO Dashboard": show_ceo_panel,
-        "User Management": show_user_management_panel,
+        "Manage Users": show_user_management_panel,  # wording matches your sidebar screenshot
     }
 
     if role not in ("ceo", "admin"):
         st.error("You do not have permission to access this app.")
         st.stop()
 
-    st.sidebar.title("Admin")
-    choice = st.sidebar.radio("Page", list(pages.keys()), index=0)
+    # Sidebar
+    st.sidebar.title("Navigation")
+    st.sidebar.caption(f"Logged in as:\n{user.get('email') or '—'}")
     st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        "**Helpful:**\n- Use `Refresh List` after bulk import.\n- If CV preview is blocked, try `Open in new tab` or `Download CV`."
-    )
+    choice = st.sidebar.radio("Go to", list(pages.keys()), index=0)
+    st.sidebar.markdown("---")
+    st.sidebar.caption("Admin panel actions depend on CEO-granted rights. CEO always has full access.")
     pages[choice]()
 
 
