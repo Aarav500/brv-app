@@ -125,20 +125,52 @@ def _b64_data_uri(bytes_data: bytes, mimetype: str) -> str:
 
 
 def _safe_get_candidate_cv(candidate_id: str, actor_id: int) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
-    """Return (cv_bytes, filename, reason)."""
+    """
+    Adapter: normalize different shapes returned by get_candidate_cv_secure.
+
+    Possible shapes handled:
+      - (bytes, filename, reason)
+      - (bytes, filename, mime_type, reason)
+      - bytes only
+    Returns: (file_bytes_or_none, filename_or_none, reason_str)
+    reason ∈ {"ok", "no_permission", "not_found", "error"}
+    """
     try:
         res = get_candidate_cv_secure(candidate_id, actor_id)
-        if isinstance(res, tuple):
-            # db_postgres.get_candidate_cv_secure returns (bytes, filename, mime, reason)
-            if len(res) >= 4:
-                return res[0], res[1], res[3]
-            if len(res) == 3:
-                # If an older 3-tuple (bytes, filename, reason) was returned
-                return res[0], res[1], res[2]
+
+        # Nothing returned
+        if not res:
+            return None, None, "not_found"
+
+        # If helper returned raw bytes
         if isinstance(res, (bytes, bytearray)):
             return bytes(res), f"{candidate_id}.bin", "ok"
-        return None, None, "not_found"
+
+        # If tuple/list — normalize common shapes
+        if isinstance(res, (tuple, list)):
+            # If the last element is a known reason string, use it
+            last = res[-1] if len(res) >= 1 else None
+            if isinstance(last, str) and last in ("ok", "no_permission", "not_found", "error"):
+                file_bytes = res[0] if len(res) >= 1 else None
+                filename = res[1] if len(res) >= 2 else f"{candidate_id}.bin"
+                return (bytes(file_bytes) if file_bytes is not None else None, filename, last)
+
+            # If shape looks like (bytes, filename, mime_type) -> treat as OK
+            if len(res) >= 3 and isinstance(res[2], str) and res[2].startswith("application/"):
+                file_bytes = res[0]
+                filename = res[1] if len(res) >= 2 else f"{candidate_id}.bin"
+                return bytes(file_bytes), filename, "ok"
+
+            # Fallback: take first two items and mark ok
+            file_bytes = res[0] if len(res) >= 1 else None
+            filename = res[1] if len(res) >= 2 else f"{candidate_id}.bin"
+            return (bytes(file_bytes) if file_bytes is not None else None, filename, "ok")
+
+        # Unknown shape
+        return None, None, "error"
+
     except Exception as e:
+        # Keep informative error for debugging
         st.error(f"Error while fetching CV: {e}")
         return None, None, "error"
 
@@ -238,51 +270,58 @@ def _render_kv_block(d: Dict[str, Any]):
 
 
 def _render_interview_card(idx: int, ev: Dict[str, Any]):
+    """
+    Render a single interview/event as a clean card.
+    """
+    import re  # ensure re is available in this scope
+    # Extract common fields
     when = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at") or ev.get("date") or ev.get("timestamp")
     interviewer = ev.get("actor") or ev.get("interviewer") or ev.get("actor_name") or ev.get("by") or "—"
 
-    # Normalize details/result/notes whether dict or JSON string
     raw_details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
     result = None
-    notes: Any = None
-
+    notes = None
     if isinstance(raw_details, dict):
         result = raw_details.get("result") or raw_details.get("status")
-        notes = raw_details.get("notes") or raw_details.get("comment") or raw_details
-    elif isinstance(raw_details, str) and raw_details.strip():
-        try:
-            parsed = json.loads(raw_details)
-            if isinstance(parsed, dict):
-                result = parsed.get("result") or parsed.get("status")
-                notes = parsed.get("notes") or parsed
+        notes = raw_details.get("notes") or raw_details.get("details") or ""
+    else:
+        # string
+        notes = str(raw_details or "")
+
+    # Header
+    header = f"**{idx}. {interviewer}**"
+    if result:
+        header += f" — {result}"
+    if when:
+        header += f" • {_format_datetime(when) if ' _format_datetime' in globals() else str(when)}"
+    st.markdown(header)
+
+    # Format notes into Markdown-friendly bullets
+    def _notes_to_markdown(n: str) -> str:
+        if not n:
+            return ""
+        n = n.replace("\r\n", "\n").strip()
+        lines = [ln.strip() for ln in n.split("\n") if ln.strip()]
+        # If single paragraph, return as-is (short)
+        if len(lines) == 1:
+            return lines[0]
+        # Otherwise render as bullets, preserving existing bullet markers
+        out = []
+        for ln in lines:
+            if re.match(r"^[\-\•\*]\s+", ln):
+                out.append(ln)
             else:
-                notes = raw_details
-        except Exception:
-            notes = raw_details
+                out.append(f"- {ln}")
+        return "\n".join(out)
 
-    title = ev.get("title") or ev.get("summary") or f"Interview #{idx}"
+    if notes and notes.strip():
+        md = _notes_to_markdown(notes)
+        st.markdown(f"**Details:**\n\n{md}")
 
-    # Card layout
-    left, right = st.columns([3, 1])
-    with left:
-        st.markdown(f"### {title}")
-        st.write(f"- **When:** {_format_datetime(when)}")
-        st.write(f"- **By:** {interviewer}")
-        if result:
-            badge = "✅ Pass" if str(result).lower() in ("pass", "passed", "yes", "true", "selected") else f"🛈 {result}"
-            st.write(f"- **Result:** {badge}")
-        # Render notes
-        if isinstance(notes, dict):
-            st.markdown("**Details:**")
-            _render_kv_block(notes)
-        elif isinstance(notes, str) and notes.strip():
-            md = notes.replace("\r\n", "\n").replace("\n", "  \n")
-            st.markdown(f"**Details:**  \n{md}")
-    with right:
-        ev_id = ev.get("id") or ev.get("event_id") or "—"
-        actor_id = ev.get("actor_id") or ev.get("user_id") or "—"
-        st.caption(f"Event ID: {ev_id}")
-        st.caption(f"Actor ID: {actor_id}")
+    # show event metadata
+    ev_id = ev.get("id") or ev.get("event_id") or "—"
+    actor_id = ev.get("actor_id") or ev.get("user_id") or "—"
+    st.caption(f"Event ID: {ev_id} • Actor ID: {actor_id}")
     st.markdown("---")
 
 
