@@ -67,15 +67,14 @@ def _render_user_permissions_block(user_row: Dict[str, Any], index_key: str):
     st.write(f"Force Password Reset: {user_row.get('force_password_reset', False)}")
 
     c1 = st.checkbox("Can View CVs", value=bool(user_row.get("can_view_cvs", False)), key=f"{base}_cv")
-    c2 = st.checkbox("Can Delete Candidate Records", value=bool(user_row.get("can_delete_records", False)), key=f"{base}_del")
-    c3 = st.checkbox("Can Grant Delete Rights", value=bool(user_row.get("can_grant_delete", False)), key=f"{base}_grant")
+    c2 = st.checkbox("Can Delete Candidate Records", value=bool(user_row.get("can_delete_records", False)),
+                     key=f"{base}_del")
 
     return {
         "can_view_cvs": bool(c1),
         "can_delete_records": bool(c2),
-        "can_grant_delete": bool(c3),
+        # no grant-delete control in UI anymore
     }
-
 
 def _render_candidate_summary(c: Dict[str, Any]):
     """Render candidate summary fields in a friendly way (no raw JSON dumps)."""
@@ -99,38 +98,33 @@ def _render_candidate_summary(c: Dict[str, Any]):
 
 
 def _render_interview_history(history: List[Dict[str, Any]]):
-    """Render interview history in structured blocks with preserved formatting (Markdown)."""
-    st.markdown("### Interview History")
     if not history:
-        st.write("No interview history found.")
+        st.info("No interview history available.")
         return
 
     for idx, ev in enumerate(history):
         with st.container():
-            st.markdown(f"**{idx + 1}. { (ev.get('event') or 'activity').title() }**")
-            created_at = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at")
-            st.write(f"- When: {_format_datetime(created_at)}")
-            actor = ev.get("actor") or ev.get("interviewer") or ev.get("actor")
-            if actor:
-                st.write(f"- By: {actor}")
+            st.markdown(f"**{idx + 1}. Interview**")
+            when = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at")
+            interviewer = ev.get("actor") or ev.get("interviewer")
+            result = None
+            notes = None
 
-            details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
-            # If details is a dict, pretty print bullet list
-            if isinstance(details, dict):
-                for k, v in details.items():
-                    st.write(f"  - **{k}:** {v}")
-            else:
-                # Preserve line breaks & allow Markdown in notes
-                try:
-                    if isinstance(details, str):
-                        # Convert plain newlines to markdown line breaks
-                        md = details.replace("\r\n", "\n").replace("\n", "  \n")
-                        st.markdown(f"**Details:**  \n{md}")
-                    else:
-                        st.write(f"- Details: {details}")
-                except Exception:
-                    st.write(f"- Details: {details}")
+            raw_details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
+            if isinstance(raw_details, dict):
+                result = raw_details.get("result") or raw_details.get("status")
+                notes = raw_details.get("notes") or raw_details.get("comment")
+            elif isinstance(raw_details, str):
+                notes = raw_details
 
+            st.write(f"- **When:** {_format_datetime(when)}")
+            if interviewer:
+                st.write(f"- **By:** {interviewer}")
+            if result:
+                st.write(f"- **Result:** {result}")
+            if notes:
+                md = str(notes).replace("\r\n", "\n").replace("\n", "  \n")
+                st.markdown(f"- **Details:**  \n{md}")
             st.markdown("---")
 
 
@@ -139,18 +133,11 @@ def _render_interview_history(history: List[Dict[str, Any]]):
 # -------------------------
 def show_ceo_panel():
     require_login()
-    current_user = get_current_user()
-    if not current_user:
-        st.error("No active user session. Please log in.")
-        st.stop()
-    # only allow admin/ceo roles to manage users
-    role = (current_user.get("role") or "").lower()
-    # fetch permissions for configurable access control
-    perms = get_user_permissions(current_user.get("id")) or {}
+    user = get_current_user(refresh=True)
+    role = (user.get("role") or "").lower()
 
-    st.title("CEO Control Panel")
-    st.caption("Manage users, permissions and candidate records. Changes apply immediately.")
-
+    st.title("CEO Dashboard")
+    st.caption("Candidate statistics and candidate management (no user operations here).")
     # -- Top-level stats --
     try:
         stats = get_candidate_statistics()
@@ -169,62 +156,7 @@ def show_ceo_panel():
 
     st.markdown("---")
 
-    # --- User permissions management (only for admin/ceo) ---
-    if role in ("ceo", "admin"):
-        st.header("Manage User Permissions")
-        users = []
-        try:
-            users = get_all_users_with_permissions() or []
-        except Exception as e:
-            st.error(f"Failed to load users: {e}")
-            users = []
 
-        if not users:
-            st.info("No users found.")
-        else:
-            # allow searching/filtering
-            with st.expander("Search / Filter Users", expanded=False):
-                search_q = st.text_input("Search by email or role (leave empty to show all)", "")
-            # show list
-            for u in users:
-                u_email = u.get("email") or "(no-email)"
-                # create expander for each user with a unique key
-                with st.expander(f"{u_email}", expanded=False):
-                    idx_key = f"user_{u.get('id')}"
-                    try:
-                        new_perms = _render_user_permissions_block(u, idx_key)
-                    except Exception as e:
-                        st.write("Error rendering user:", e)
-                        new_perms = {
-                            "can_view_cvs": bool(u.get("can_view_cvs", False)),
-                            "can_delete_records": bool(u.get("can_delete_records", False)),
-                            "can_grant_delete": bool(u.get("can_grant_delete", False)),
-                        }
-
-                    cols = st.columns([1, 1, 1, 1])
-                    with cols[0]:
-                        if st.button("Update Permissions", key=f"saveperm_{u.get('id')}"):
-                            try:
-                                ok = update_user_permissions(u.get("id"), new_perms)
-                                if ok:
-                                    st.success("Permissions updated.")
-                                    # refresh UI to pick up permission changes
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to update permissions (no rows changed).")
-                            except Exception as e:
-                                st.error(f"Update failed: {e}")
-
-                    with cols[1]:
-                        # force password reset toggle/button
-                        if st.button("Force Reset Password", key=f"force_reset_{u.get('id')}"):
-                            try:
-                                st.info("Force Reset requested. If your DB supports force_password_reset toggle, implement the helper in db_postgres and call it here.")
-                            except Exception as e:
-                                st.error(f"Could not set force reset: {e}")
-
-                    # small spacing
-                    st.markdown("")
 
         # Focused panel to grant/revoke Interview Access for Interviewers
         with st.expander("Interviewer Access Management", expanded=True):
@@ -322,7 +254,8 @@ def show_ceo_panel():
                 # Candidate CV (secure + permission aware)
                 try:
                     cid = c.get("candidate_id")
-                    user = get_current_user()
+                    # force permission refresh so revokes apply instantly
+                    user = get_current_user(refresh=True)
                     actor_id = user.get("id") if user else 0
 
                     cv_bytes, cv_name, reason = get_candidate_cv_secure(cid, actor_id)
@@ -330,39 +263,13 @@ def show_ceo_panel():
                     if reason == "no_permission":
                         st.warning("❌ You don’t have permission to view CVs for this candidate.")
                     elif reason == "not_found":
-                        resume_link = (c or {}).get("resume_link")
-                        if resume_link:
-                            st.markdown(f"[Open CV (external)]({resume_link})")
-                            st.caption("Note: External CV link provided (e.g., Google Drive)")
-                        else:
-                            st.info("ℹ️ No CV uploaded for this candidate.")
-                    elif reason == "ok" and cv_bytes:
-                        try:
-                            import tempfile, base64, os
-                            suffix = ".pdf" if (cv_name or "").lower().endswith(".pdf") else ""
-                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                            tmp.write(cv_bytes)
-                            tmp.flush()
-                            tmp.close()
-
-                            if suffix == ".pdf":
-                                with open(tmp.name, "rb") as f:
-                                    b64_pdf = base64.b64encode(f.read()).decode("utf-8")
-                                st.markdown(
-                                    f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
-                                    f'width="700" height="500" type="application/pdf"></iframe>',
-                                    unsafe_allow_html=True,
-                                )
-                        except Exception as e:
-                            st.error(f"Error previewing CV: {e}")
-
+                        st.info("No CV uploaded yet.")
+                    elif cv_bytes:
                         st.download_button(
                             "📄 Download CV",
                             data=cv_bytes,
                             file_name=cv_name or f"{cid}_cv.bin",
                         )
-                except Exception as e:
-                    st.error(f"Error fetching candidate CV: {e}")
 
                 # Interview history
                 try:
@@ -373,20 +280,25 @@ def show_ceo_panel():
 
             with right:
                 st.markdown("### Actions")
-                user = get_current_user()
+                user = get_current_user(refresh=True)
                 role_lower = (user.get("role") or "").lower()
-                can_delete_records = role_lower in ("admin", "ceo") or bool(perms.get("can_delete_records")) or bool(perms.get("can_grant_delete"))
+                _perms = get_user_permissions(user.get("id")) or {}
+                can_delete_records = role_lower in ("admin", "ceo") or bool(_perms.get("can_delete_records"))
                 if not can_delete_records:
                     st.info("🚫 You don’t have permission to delete this record.")
                 else:
                     if st.button("🗑️ Delete Candidate", key=f"del_btn_{c.get('candidate_id')}"):
                         try:
-                            ok = delete_candidate(c.get("candidate_id"), user["id"])
+                            ok, reason = delete_candidate(c.get("candidate_id"), user["id"])
                             if ok:
                                 st.success("Candidate deleted.")
                                 st.rerun()
+                            elif reason == "no_permission":
+                                st.error("❌ You don’t have permission to delete this record.")
+                            elif reason == "not_found":
+                                st.warning("Candidate already deleted.")
                             else:
-                                st.error("You don’t have permission to delete this record.")
+                                st.error("Delete failed (DB error).")
                         except Exception as e:
                             st.error(f"Delete failed: {e}")
 
@@ -404,5 +316,34 @@ def show_ceo_panel():
 
                 # Small hint area
                 st.caption("Delete requires permission. Toggle candidate edit to allow candidate to update their record.")
+
+def show_user_management_panel():
+    """User management only (CEO/Admin). Route to this from a separate menu item."""
+    require_login()
+    current_user = get_current_user(refresh=True)
+    role = (current_user.get("role") or "").lower()
+    if role not in ("ceo", "admin"):
+        st.error("You do not have permission to view this page.")
+        st.stop()
+
+    st.title("User Management")
+    st.caption("Manage user permissions. (No candidate operations here.)")
+
+    users = get_all_users_with_permissions() or []
+    if not users:
+        st.info("No users found.")
+        return
+
+    for u in users:
+        with st.expander(u.get("email") or "(no email)"):
+            idx_key = f"user_{u.get('id')}"
+            new_perms = _render_user_permissions_block(u, idx_key)
+            if st.button("Update Permissions", key=f"saveperm_{u.get('id')}"):
+                ok = update_user_permissions(u.get("id"), new_perms)
+                if ok:
+                    st.success("Permissions updated.")
+                    st.rerun()
+                else:
+                    st.error("No change.")
 
     # End of show_ceo_panel

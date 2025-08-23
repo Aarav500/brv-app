@@ -300,12 +300,10 @@ def user_can_manage_delete(user_id: int) -> bool:
 
 
 def user_can_delete(user_id: int) -> bool:
-    """Return True for Admin/CEO or users explicitly granted delete rights.
-    This matches configurable access control: Admin, CEO, or can_delete_records/can_grant_delete.
-    """
+    """Return True for Admin/CEO or users explicitly granted delete rights (no 'grant' delegation)."""
     p = get_user_permissions(user_id)
     r = (p.get("role") or "").lower()
-    return r in ("ceo", "admin") or bool(p.get("can_delete_records")) or bool(p.get("can_grant_delete"))
+    return r in ("ceo", "admin") or bool(p.get("can_delete_records"))
 
 
 # -----------------------------
@@ -445,7 +443,7 @@ def delete_candidate(candidate_id: str, actor_user_id: int) -> (bool, str):
     # Server-side permission check
     p = get_user_permissions(actor_user_id) or {}
     role = (p.get("role") or "").lower()
-    has_permission = role in ("ceo", "admin") or bool(p.get("can_delete_records", False)) or bool(p.get("can_grant_delete", False))
+    has_permission = role in ("ceo", "admin") or bool(p.get("can_delete_records", False))
     if not has_permission:
         logger.warning("User %s attempted to delete candidate %s without permissions", actor_user_id, candidate_id)
         return False, "no_permission"
@@ -743,23 +741,30 @@ def get_interviewer_performance_stats(interviewer_id: str) -> Dict[str, Any]:
 
 def update_user_permissions(user_id: int, perms: Dict[str, Any]) -> bool:
     """
-    Update a user's permission booleans in the users table.
-    perms is a dict like: { "can_view_cvs": True/False, "can_delete_records": True/False, "can_grant_delete": True/False }
-    Returns True if update affected rows.
+    Update only the provided permission fields.
+    Example payloads:
+      {"can_view_cvs": True}
+      {"can_view_cvs": False, "can_delete_records": True}
     """
+    sets, params = [], []
+    if "can_view_cvs" in perms:
+        sets.append("can_view_cvs=%s")
+        params.append(bool(perms.get("can_view_cvs")))
+    if "can_delete_records" in perms:
+        sets.append("can_delete_records=%s")
+        params.append(bool(perms.get("can_delete_records")))
+    # Intentionally ignore can_grant_delete so UI cannot toggle it anymore
+    if not sets:
+        return False
+    params.append(int(user_id))
+
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
-            cur.execute("""
-                UPDATE users
-                SET can_view_cvs=%s, can_delete_records=%s, can_grant_delete=%s, updated_at=CURRENT_TIMESTAMP
-                WHERE id=%s
-            """, (
-                bool(perms.get("can_view_cvs", False)),
-                bool(perms.get("can_delete_records", False)),
-                bool(perms.get("can_grant_delete", False)),
-                int(user_id)
-            ))
+            cur.execute(
+                f"UPDATE users SET {', '.join(sets)}, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+                tuple(params),
+            )
             return cur.rowcount > 0
     finally:
         conn.close()
