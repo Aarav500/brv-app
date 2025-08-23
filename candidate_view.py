@@ -191,24 +191,8 @@ def candidate_form_view():
             )
             if rec:
                 st.success(f"Application submitted. Your candidate code is: **{candidate_id}**")
-                # keep ID in session to survive reruns
-                st.session_state["just_created_candidate_id"] = candidate_id
-                # Persist across reruns
-                st.session_state["show_new_cv_uploader"] = True
-
-                st.info("You can upload your CV now or skip for later.")
-                cols = st.columns(2)
-                with cols[0]:
-                    if st.button("Upload CV now"):
-                        st.session_state["show_new_cv_uploader"] = True
-                with cols[1]:
-                    if st.button("Skip for now"):
-                        st.session_state["show_new_cv_uploader"] = False
-                        st.info("You can upload your CV later from the Returning candidate section.")
-
-                # Inline uploader (no helper function)
-                if st.session_state.get("show_new_cv_uploader"):
-                    st.markdown("---")
+                # Simple front-end button to upload CV now (no extra session state)
+                if st.button("Upload CV now"):
                     st.markdown("### Upload/Replace CV")
                     file = st.file_uploader(
                         "Upload CV (PDF or DOC/DOCX preferred)",
@@ -224,6 +208,14 @@ def candidate_form_view():
                             st.error("Failed to save CV.")
             else:
                 st.error("Failed to create your application. Please try again.")
+
+    else:
+        st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
+
+        # ---------- candidate_view.py : patched Returning candidate block ----------
+        # Note: ensure these imports exist at file top:
+        # import base64
+        # from db_postgres import get_candidate_by_id, get_candidate_cv_secure, update_candidate_form_data
 
         def _ensure_candidate_cache():
             if "candidates_cache" not in st.session_state:
@@ -321,29 +313,7 @@ def candidate_form_view():
                             st.error("Failed to update your application.")
 
 
-    if mode == "New candidate" and st.session_state.get("just_created_candidate_id"):
-        cid = st.session_state["just_created_candidate_id"]
-        st.markdown("---")
-        st.success(f"Your candidate code: {cid}")
-        cols = st.columns(2)
-        with cols[0]:
-            if st.button("Upload CV now", key="upload_now_rerun"):
-                st.session_state["show_new_cv_uploader"] = True
-        with cols[1]:
-            if st.button("Skip for now", key="skip_now_rerun"):
-                st.session_state["show_new_cv_uploader"] = False
-                st.info("You can upload your CV later from the Returning candidate section.")
-        if st.session_state.get("show_new_cv_uploader"):
-            st.markdown("### Upload/Replace CV")
-            file = st.file_uploader(
-                "Upload CV (PDF or DOC/DOCX preferred)",
-                type=["pdf", "doc", "docx"],
-                key=f"new_cv_uploader_persist_{cid}"
-            )
-            if file is not None:
-                file_bytes = file.read()
-                ok = save_candidate_cv(cid, file_bytes, file.name)
-                if ok:
-                    st.success("CV saved.")
-                else:
-                    st.error("Failed to save CV.")
+# Backward-compatible wrapper some codebases import
+def candidate_view():
+    """Main candidate view function (backward compatibility)"""
+    candidate_form_view()
