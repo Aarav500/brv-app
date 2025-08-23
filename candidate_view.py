@@ -303,9 +303,3 @@ def candidate_form_view():
                             st.success("Your application has been updated.")
                         else:
                             st.error("Failed to update your application.")
-
-
-# Backward-compatible wrapper some codebases import
-def candidate_view():
-    """Main candidate view function (backward compatibility)"""
-    candidate_form_view()
