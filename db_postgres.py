@@ -431,9 +431,10 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
         conn.close()
 
 
-def delete_candidate(candidate_id: str, actor_user_id: int) -> (bool, str):
+def delete_candidate(candidate_ids, actor_user_id: int) -> (bool, str):
     """
-    Deletes a candidate record (including CV) if actor_user_id has the right permissions.
+    Deletes one or more candidate records (including CV) if actor_user_id has the right permissions.
+    Accepts a single candidate_id (str) or a list of candidate_ids.
     Returns (success, reason) where reason is one of:
       - "ok"
       - "no_permission"
@@ -445,18 +446,26 @@ def delete_candidate(candidate_id: str, actor_user_id: int) -> (bool, str):
     role = (p.get("role") or "").lower()
     has_permission = role in ("ceo", "admin") or bool(p.get("can_delete_records", False))
     if not has_permission:
-        logger.warning("User %s attempted to delete candidate %s without permissions", actor_user_id, candidate_id)
+        logger.warning("User %s attempted to delete candidate(s) %s without permissions", actor_user_id, candidate_ids)
         return False, "no_permission"
+
+    # Normalize to list
+    if isinstance(candidate_ids, str):
+        candidate_ids = [candidate_ids]
+    if not candidate_ids:
+        return False, "not_found"
+
+    placeholders = ",".join(["%s"] * len(candidate_ids))
 
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            cur.execute(f"DELETE FROM candidates WHERE candidate_id IN ({placeholders})", tuple(candidate_ids))
             if cur.rowcount == 0:
                 return False, "not_found"
             return True, "ok"
     except Exception:
-        logger.exception("Error deleting candidate %s", candidate_id)
+        logger.exception("Error deleting candidate(s) %s", candidate_ids)
         return False, "db_error"
     finally:
         conn.close()
