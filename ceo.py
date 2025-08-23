@@ -239,6 +239,8 @@ def show_ceo_panel():
                             data=cv_bytes,
                             file_name=cv_name or f"{cid}_cv.bin",
                         )
+                except Exception as e:
+                    st.error(f"Error fetching CV: {e}")
 
                 # Interview history
                 try:
