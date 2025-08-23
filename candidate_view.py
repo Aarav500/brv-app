@@ -191,9 +191,13 @@ def candidate_form_view():
             )
             if rec:
                 st.success(f"Application submitted. Your candidate code is: **{candidate_id}**")
-                st.info("Please save this code to edit or upload your CV later (if permitted).")
+                # keep ID in session to survive reruns
+                st.session_state["just_created_candidate_id"] = candidate_id
+
+                # invite immediate CV upload
+                st.info("You can upload your CV now.")
                 st.markdown("---")
-                _cv_uploader(candidate_id)
+                _cv_uploader(candidate_id)  # reuse your existing uploader for returning candidates
             else:
                 st.error("Failed to create your application. Please try again.")
 
