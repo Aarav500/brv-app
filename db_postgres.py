@@ -105,6 +105,12 @@ def init_db():
                     );
                 """)
 
+                # Ensure legacy/older DBs get the new columns
+                _ensure_column(cur, "candidates", "current_address", "current_address TEXT")
+                _ensure_column(cur, "candidates", "permanent_address", "permanent_address TEXT")
+                _ensure_column(cur, "candidates", "cv_file", "cv_file BYTEA")
+                _ensure_column(cur, "candidates", "cv_filename", "cv_filename TEXT")
+
                 # INTERVIEWS
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS interviews (

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 import streamlit as st
+import base64
 
 from db_postgres import (
     create_candidate_in_db,
@@ -13,6 +14,7 @@ from db_postgres import (
     get_candidate_by_id,
     save_candidate_cv,
     get_candidate_cv_secure,   # ✅ REPLACE
+    get_all_candidates,
 )
 
 # --------------------------------
@@ -197,54 +199,106 @@ def candidate_form_view():
 
     else:
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
+        
+        # ---------- candidate_view.py : patched Returning candidate block ----------
+        # Note: ensure these imports exist at file top:
+        # import base64
+        # from db_postgres import get_candidate_by_id, get_candidate_cv_secure, update_candidate_form_data
+
+        def _ensure_candidate_cache():
+            if "candidates_cache" not in st.session_state:
+                st.session_state.candidates_cache = None
+            if "candidate_selected_ids" not in st.session_state:
+                st.session_state.candidate_selected_ids = set()
+            if "expanded_candidates" not in st.session_state:
+                st.session_state.expanded_candidates = set()
+
+        @st.cache_data(ttl=60)
+        def _load_all_candidates():
+            # replace/get your get_all_candidates() call here
+            try:
+                return get_all_candidates()
+            except Exception:
+                return []
+
+        # Use _ensure_candidate_cache() at top of candidate_list UI
+        _ensure_candidate_cache()
+        # ---------------- Returning candidate logic ----------------
         candidate_code = st.text_input("Candidate Code", key="cand_code")
         if candidate_code.strip():
             rec = get_candidate_by_id(candidate_code.strip())
             if not rec:
                 st.error("No record found for the provided code.")
-                return
+            else:
+                # show data
+                existing_form = rec.get("form_data") or {}
+                st.info(f"Welcome back, {rec.get('name','Candidate')}")
+                from auth import get_current_user
+                user = get_current_user()
+                actor_id = (user.get("id") if user else 0)
 
-            # Show existing data
-            existing_form = rec.get("form_data") or {}
-            st.info(f"Welcome back, {rec.get('name','Candidate')}")
+                # If editing disabled, show read-only details + uploader + cv preview (permission aware)
+                if not rec.get("can_edit", False):
+                    st.warning("Editing is currently disabled for your application. You may upload a CV if permitted.")
+                    _cv_uploader(candidate_code.strip())
 
-            # Permission-aware CV fetch
-            from auth import get_current_user
-            user = get_current_user()
-            actor_id = user.get("id") if user else 0
+                    # NOTE: DB helper may return 4-tuple (bytes, filename, mime_type, reason)
+                    # or older 3-tuple (bytes, filename, reason). Handle both shapes defensively.
+                    res = get_candidate_cv_secure(candidate_code.strip(), actor_id)
+                    # normalize shapes:
+                    file_bytes = filename = mime_type = None
+                    reason = "not_found"
+                    try:
+                        if isinstance(res, tuple) or isinstance(res, list):
+                            if len(res) == 4:
+                                file_bytes, filename, mime_type, reason = res
+                            elif len(res) == 3:
+                                # old shape: (bytes, filename, reason)
+                                file_bytes, filename, reason = res
+                                mime_type = None
+                        elif isinstance(res, (bytes, bytearray)):
+                            file_bytes = bytes(res)
+                            filename = f"{candidate_code}_cv.bin"
+                            mime_type = None
+                            reason = "ok"
+                        else:
+                            reason = "not_found"
+                    except Exception:
+                        reason = "error"
 
-            # If editing disabled
-            if not rec.get("can_edit", False):
-                st.warning("Editing is currently disabled for your application. Please contact the receptionist.")
-                _cv_uploader(candidate_code.strip())
-
-                file_bytes, filename, reason = get_candidate_cv_secure(candidate_code.strip(), actor_id)
-                if reason == "no_permission":
-                    st.warning("🚫 You don’t have permission to view this CV.")
-                elif reason == "not_found":
-                    st.info("No CV uploaded yet.")
-                elif file_bytes:
-                    st.download_button(
-                        "Download CV",
-                        data=file_bytes,
-                        file_name=filename or f"{candidate_code}_cv.bin",
-                        mime="application/octet-stream",
-                        key=f"cand_dlcv_{candidate_code}",
-                    )
-                return
-
-            # If editing enabled
-            st.success("Editing is enabled for your application.")
-            updated = _pre_interview_fields(initial=existing_form)
-            st.markdown("---")
-            _cv_uploader(candidate_code.strip())
-
-            if st.button("Save Changes"):
-                ok = update_candidate_form_data(candidate_code.strip(), updated)
-                if ok:
-                    st.success("Your application has been updated.")
+                    if reason == "no_permission":
+                        st.warning("🚫 You don’t have permission to view this CV.")
+                    elif reason == "not_found":
+                        st.info("No CV uploaded yet.")
+                    elif file_bytes:
+                        st.download_button(
+                            "Download CV",
+                            data=file_bytes,
+                            file_name=filename or f"{candidate_code}_cv.bin",
+                            mime=mime_type or "application/octet-stream",
+                            key=f"cand_dlcv_{candidate_code}",
+                        )
+                        # Inline preview for PDF
+                        if (mime_type == "application/pdf") or (mime_type is None and (filename or "").lower().endswith(".pdf")):
+                            import base64
+                            b64 = base64.b64encode(file_bytes).decode("utf-8")
+                            st.markdown(
+                                f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>',
+                                unsafe_allow_html=True,
+                            )
                 else:
-                    st.error("Failed to update your application.")
+                    # Editing enabled branch
+                    st.success("Editing is enabled for your application.")
+                    updated = _pre_interview_fields(initial=existing_form)
+                    st.markdown("---")
+                    _cv_uploader(candidate_code.strip())
+
+                    if st.button("Save Changes"):
+                        ok = update_candidate_form_data(candidate_code.strip(), updated)
+                        if ok:
+                            st.success("Your application has been updated.")
+                        else:
+                            st.error("Failed to update your application.")
 
 
 # Backward-compatible wrapper some codebases import

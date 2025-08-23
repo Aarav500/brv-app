@@ -25,12 +25,12 @@ def _is_admin_or_ceo(perms: dict) -> bool:
     return (perms.get("role") or "").lower() in ("admin", "ceo")
 
 def _can_view_cv(perms: dict) -> bool:
-    # DB-backed flag is can_view_cvs
-    return bool(perms.get("can_view_cvs")) or _is_admin_or_ceo(perms)
+    # Accept legacy can_view_cv and canonical can_view_cvs
+    return bool(perms.get("can_view_cvs") or perms.get("can_view_cv")) or _is_admin_or_ceo(perms)
 
 def _can_upload_cv(perms: dict) -> bool:
-    # No dedicated DB flag; allow upload if can_view_cvs or admin/ceo
-    return bool(perms.get("can_view_cvs")) or _is_admin_or_ceo(perms)
+    # No dedicated DB flag; allow upload if can_view_cvs/can_view_cv or admin/ceo
+    return bool(perms.get("can_view_cvs") or perms.get("can_view_cv")) or _is_admin_or_ceo(perms)
 
 def _can_delete_cv(perms: dict) -> bool:
     # Use delete candidate/grant delete or admin/ceo
@@ -38,7 +38,7 @@ def _can_delete_cv(perms: dict) -> bool:
 
 def _can_edit_cv(perms: dict) -> bool:
     # No dedicated DB flag; reuse view/admin rights
-    return bool(perms.get("can_view_cvs")) or _is_admin_or_ceo(perms)
+    return bool(perms.get("can_view_cvs") or perms.get("can_view_cv")) or _is_admin_or_ceo(perms)
 
 
 # ---------- Full-page CV manager
@@ -76,7 +76,7 @@ def drive_and_cv_view():
     # Current CV state
     # Current CV state
     try:
-        cv_bytes, cv_name, reason = get_candidate_cv_secure(candidate_id, user.get("id"))
+        cv_bytes, cv_name, mime_type, reason = get_candidate_cv_secure(candidate_id, user.get("id"))
     except Exception as e:
         st.error(f"Error fetching CV: {e}")
         return
@@ -89,7 +89,7 @@ def drive_and_cv_view():
         st.write("No CV uploaded for this candidate.")
     else:
         st.write(f"Filename: {cv_name or 'unknown'}")
-        mime = mimetypes.guess_type(cv_name or "")[0] or "application/octet-stream"
+        mime = mime_type or (mimetypes.guess_type(cv_name or "")[0] or "application/octet-stream")
         st.download_button("Download CV", data=cv_bytes, file_name=cv_name or f"{candidate_id}_cv", mime=mime)
         ...
 
@@ -133,10 +133,25 @@ def preview_cv_ui(candidate_id: str):
     actor_id = user.get("id") if user else 0
 
     try:
-        file_bytes, filename, reason = get_candidate_cv_secure(candidate_id, actor_id)
+        res = get_candidate_cv_secure(candidate_id, actor_id)
     except Exception as e:
         st.error(f"Error fetching CV: {e}")
         return
+
+    # Normalize possible 3-tuple/4-tuple shapes
+    file_bytes = filename = mime = None
+    reason = "error"
+    if isinstance(res, (tuple, list)):
+        if len(res) == 4:
+            file_bytes, filename, mime, reason = res
+        elif len(res) == 3:
+            file_bytes, filename, reason = res
+            mime = mimetypes.guess_type(filename or "")[0] or "application/octet-stream"
+    elif isinstance(res, (bytes, bytearray)):
+        file_bytes = bytes(res)
+        filename = f"{candidate_id}.bin"
+        mime = "application/octet-stream"
+        reason = "ok"
 
     if reason == "no_permission":
         st.warning("🚫 You don’t have permission to view this CV.")
@@ -157,7 +172,7 @@ def preview_cv_ui(candidate_id: str):
 
     # success path
     st.success(f"CV found: {filename or 'unnamed'}")
-    mime = mimetypes.guess_type(filename or "")[0] or "application/octet-stream"
+    mime = mime or (mimetypes.guess_type(filename or "")[0] or "application/octet-stream")
     if mime == "application/pdf":
         try:
             b64 = base64.b64encode(file_bytes).decode("utf-8")

@@ -293,7 +293,7 @@ def _render_interview_card(idx: int, ev: Dict[str, Any]):
     if result:
         header += f" — {result}"
     if when:
-        header += f" • {_format_datetime(when) if ' _format_datetime' in globals() else str(when)}"
+        header += f" • {_format_datetime(when) if '_format_datetime' in globals() else str(when)}"
     st.markdown(header)
 
     # Format notes into Markdown-friendly bullets
