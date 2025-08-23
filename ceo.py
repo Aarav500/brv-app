@@ -1,14 +1,14 @@
 # ceo.py
 """
 CEO Control Panel
-- Manage user permissions (can_view_cvs, can_delete_records, can_grant_delete)
+- Manage user permissions (can_view_cvs, can_delete_records)
 - Force password reset (UI only to set flag)
 - Manage candidates (view details, download CV, delete candidate)
 - Displays candidate stats
 """
 
 import streamlit as st
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 from datetime import datetime
 
 # Import DB helpers -- ensure these exist in your db_postgres.py
@@ -38,7 +38,6 @@ def _format_datetime(v) -> str:
         return "N/A"
     if isinstance(v, str):
         try:
-            # try parsing isoformat
             dt = datetime.fromisoformat(v)
             return dt.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
@@ -54,11 +53,8 @@ def _render_user_permissions_block(user_row: Dict[str, Any], index_key: str):
     Render the permission checkboxes for a single user (returns new permission values as dict).
     This does not persist - caller should call update_user_permissions.
     """
-    # We will use unique keys so streamlit doesn't share state between users
     base = index_key
-    # Show minimal info (hide the "(ceo)" token)
     st.markdown(f"**{user_row.get('email','(no email)')}**")
-    # optionally show role but hide the literal "(ceo)" suffix if you prefer:
     role = (user_row.get("role") or "").strip()
     if role and role.lower() != "ceo":
         st.caption(f"Role: {role}")
@@ -73,8 +69,8 @@ def _render_user_permissions_block(user_row: Dict[str, Any], index_key: str):
     return {
         "can_view_cvs": bool(c1),
         "can_delete_records": bool(c2),
-        # no grant-delete control in UI anymore
     }
+
 
 def _render_candidate_summary(c: Dict[str, Any]):
     """Render candidate summary fields in a friendly way (no raw JSON dumps)."""
@@ -85,11 +81,9 @@ def _render_candidate_summary(c: Dict[str, Any]):
     st.write(f"**Created At:** {_format_datetime(c.get('created_at'))}")
     st.write(f"**Updated At:** {_format_datetime(c.get('updated_at'))}")
     st.write(f"**Can Edit (candidate):** {bool(c.get('can_edit', False))}")
-    # If there's an embedded form_data, show selected friendly fields
     form = c.get("form_data") or {}
     if isinstance(form, dict) and form:
         st.markdown("**Application summary**")
-        # present selected fields only for readability
         st.write(f"- Age / DOB: {form.get('dob','N/A')}")
         st.write(f"- Highest qualification: {form.get('highest_qualification','N/A')}")
         st.write(f"- Work experience: {form.get('work_experience','N/A')}")
@@ -113,7 +107,7 @@ def _render_interview_history(history: List[Dict[str, Any]]):
             raw_details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
             if isinstance(raw_details, dict):
                 result = raw_details.get("result") or raw_details.get("status")
-                notes = raw_details.get("notes") or raw_details.get("comment")
+                notes = raw_details.get("notes") or raw_details.get("comment") or raw_details
             elif isinstance(raw_details, str):
                 notes = raw_details
 
@@ -123,8 +117,13 @@ def _render_interview_history(history: List[Dict[str, Any]]):
             if result:
                 st.write(f"- **Result:** {result}")
             if notes:
-                md = str(notes).replace("\r\n", "\n").replace("\n", "  \n")
-                st.markdown(f"- **Details:**  \n{md}")
+                if isinstance(notes, dict):
+                    st.markdown("**Details:**")
+                    for k, v in notes.items():
+                        st.write(f"- {k}: {v}")
+                else:
+                    md = str(notes).replace("\r\n", "\n").replace("\n", "  \n")
+                    st.markdown(f"- **Details:**  \n{md}")
             st.markdown("---")
 
 
@@ -134,10 +133,10 @@ def _render_interview_history(history: List[Dict[str, Any]]):
 def show_ceo_panel():
     require_login()
     user = get_current_user(refresh=True)
-    role = (user.get("role") or "").lower()
 
     st.title("CEO Dashboard")
     st.caption("Candidate statistics and candidate management (no user operations here).")
+
     # -- Top-level stats --
     try:
         stats = get_candidate_statistics()
@@ -151,28 +150,21 @@ def show_ceo_panel():
         with col_s4:
             st.metric("Assessments", stats.get("total_assessments", 0))
     except Exception:
-        # non-fatal - continue
         pass
 
     st.markdown("---")
 
-
-
-    # --- Candidate Management (visible to any logged-in user, but delete gated) ---
+    # --- Candidate Management ---
     st.header("Candidate Management")
-    # filters & search
     q_col1, q_col2, q_col3 = st.columns([3, 1, 1])
     with q_col1:
         search_q = st.text_input("Search candidates by name / email / candidate_id (partial matches allowed)")
     with q_col2:
-        refresh_btn = st.button("Refresh List")
-        if refresh_btn:
+        if st.button("Refresh List"):
             st.rerun()
     with q_col3:
-        # show only those without CV or other quick filters if needed
         show_only_no_cv = st.checkbox("Only without CV", value=False, key="filter_no_cv")
 
-    # Load candidates
     try:
         candidates = get_all_candidates() or []
     except Exception as e:
@@ -183,7 +175,6 @@ def show_ceo_panel():
     filtered = []
     sq = (search_q or "").strip().lower()
     for c in candidates:
-        # search in name/email/candidate_id
         if sq:
             if (
                 (c.get("name") or "").lower().find(sq) != -1
@@ -201,14 +192,11 @@ def show_ceo_panel():
         st.info("No candidates match your criteria.")
         return
 
-    # For each candidate, present an expander with summary and actions
     for c in filtered:
         candidate_label = f"{c.get('name') or 'Unnamed'} — {c.get('candidate_id') or c.get('id')}"
         with st.expander(candidate_label, expanded=False):
-            # split into left (details) and right (actions)
             left, right = st.columns([3, 1])
             with left:
-                # Candidate details
                 try:
                     _render_candidate_summary(c)
                 except Exception as e:
@@ -216,24 +204,19 @@ def show_ceo_panel():
                     st.write(f"Name: {c.get('name', '—')}")
                     st.write(f"Candidate ID: {c.get('candidate_id', '—')}")
                     st.write(f"Created At: {_format_datetime(c.get('created_at'))}")
-                    st.caption("Full record available in logs if needed.")
-                    import logging
-                    logging.exception("ceo: render candidate error: %s", e)
 
                 # Candidate CV (secure + permission aware)
                 try:
                     cid = c.get("candidate_id")
-                    # force permission refresh so revokes apply instantly
                     user = get_current_user(refresh=True)
                     actor_id = user.get("id") if user else 0
-
                     cv_bytes, cv_name, reason = get_candidate_cv_secure(cid, actor_id)
 
                     if reason == "no_permission":
                         st.warning("❌ You don’t have permission to view CVs for this candidate.")
                     elif reason == "not_found":
                         st.info("No CV uploaded yet.")
-                    elif cv_bytes:
+                    elif reason == "ok" and cv_bytes:
                         st.download_button(
                             "📄 Download CV",
                             data=cv_bytes,
@@ -252,9 +235,9 @@ def show_ceo_panel():
             with right:
                 st.markdown("### Actions")
                 user = get_current_user(refresh=True)
-                role_lower = (user.get("role") or "").lower()
                 _perms = get_user_permissions(user.get("id")) or {}
-                can_delete_records = role_lower in ("admin", "ceo") or bool(_perms.get("can_delete_records"))
+                can_delete_records = bool(_perms.get("can_delete_records", False))
+
                 if not can_delete_records:
                     st.info("🚫 You don’t have permission to delete this record.")
                 else:
@@ -273,11 +256,9 @@ def show_ceo_panel():
                         except Exception as e:
                             st.error(f"Delete failed: {e}")
 
-                # Toggle can_edit for candidate from CEO, optional
                 if st.button("Toggle Candidate Edit Permission", key=f"toggle_edit_{c.get('candidate_id')}"):
                     try:
                         current_can_edit = bool(c.get("can_edit", False))
-                        # flip
                         new_val = not current_can_edit
                         set_candidate_permission(c.get("candidate_id"), new_val)
                         st.success(f"Set candidate can_edit = {new_val}")
@@ -285,11 +266,9 @@ def show_ceo_panel():
                     except Exception as e:
                         st.error(f"Failed to toggle edit permission: {e}")
 
-                # Small hint area
-                st.caption("Delete requires permission. Toggle candidate edit to allow candidate to update their record.")
 
 def show_user_management_panel():
-    """User management only (CEO/Admin). Route to this from a separate menu item."""
+    """User management only (CEO/Admin)."""
     require_login()
     current_user = get_current_user(refresh=True)
     role = (current_user.get("role") or "").lower()
@@ -316,5 +295,3 @@ def show_user_management_panel():
                     st.rerun()
                 else:
                     st.error("No change.")
-
-    # End of show_ceo_panel
