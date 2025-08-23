@@ -13,7 +13,7 @@ from db_postgres import (
     update_candidate_form_data,
     get_candidate_by_id,
     save_candidate_cv,
-    get_candidate_cv_secure,   # ✅ REPLACE
+    get_candidate_cv_secure,
     get_all_candidates,
 )
 
@@ -36,7 +36,7 @@ def _safe_json(o: Any) -> Any:
 
 
 # ------------------------------
-# Replace _pre_interview_fields starting at line 36
+# Pre-interview fields (with CV uploader included)
 # ------------------------------
 def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
@@ -62,23 +62,20 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
     phone = st.text_input("Phone", value=data.get("phone", ""))
 
     # Addresses
-    current_address = st.text_area("Current Address", value=data.get("current_address", "") or data.get("address",""))
+    current_address = st.text_area("Current Address", value=data.get("current_address", "") or data.get("address", ""))
     permanent_address = st.text_area("Permanent Address", value=data.get("permanent_address", ""))
 
     # Personal details
     col1, col2, col3 = st.columns(3)
     with col1:
-        # parse DOB if necessary to a date object for st.date_input
         dob_default = None
         dob_raw = data.get("dob") or data.get("date_of_birth")
         if dob_raw:
             try:
-                # handle isoformat / yyyy-mm-dd strings
                 from datetime import datetime as _dt
                 dob_default = _dt.fromisoformat(dob_raw).date()
             except Exception:
                 try:
-                    # fallback: parse date-only
                     from datetime import datetime as _dt
                     dob_default = _dt.strptime(dob_raw, "%Y-%m-%d").date()
                 except Exception:
@@ -113,16 +110,23 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
         ready_festivals = st.selectbox(
             "Ready to work on festivals and national holidays?",
             options=["No", "Yes"],
-            index=1 if str(data.get("ready_festivals","")).lower() == "yes" else 0
+            index=1 if str(data.get("ready_festivals", "")).lower() == "yes" else 0
         )
     with col7:
         ready_late_nights = st.selectbox(
             "Ready to work late nights if needed?",
             options=["No", "Yes"],
-            index=1 if str(data.get("ready_late_nights","")).lower() == "yes" else 0
+            index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
         )
 
-    # Build returned dict with keys matching DB update expectations
+    # Resume upload (included inside form now)
+    uploaded_cv = st.file_uploader(
+        "Upload Your Resume (PDF/DOC/DOCX preferred)",
+        type=["pdf", "doc", "docx"],
+        key="new_candidate_cv"
+    )
+
+    # Build returned dict
     form = {
         "name": name.strip(),
         "email": email.strip(),
@@ -138,9 +142,11 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
         "referral": referral.strip(),
         "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
         "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
+        "uploaded_cv": uploaded_cv,  # keep raw file object
         "updated_at": datetime.utcnow().isoformat(),
     }
     return _safe_json(form)
+
 
 def _cv_uploader(candidate_id: str):
     st.markdown("### Upload/Replace CV")
@@ -172,7 +178,6 @@ def candidate_form_view():
         form_data = _pre_interview_fields()
         st.markdown("---")
         if st.button("Submit Application"):
-            # Basic validations
             if not form_data.get("name") or not form_data.get("phone"):
                 st.error("Full Name and Phone are required.")
                 return
@@ -181,7 +186,7 @@ def candidate_form_view():
             rec = create_candidate_in_db(
                 candidate_id=candidate_id,
                 name=form_data.get("name", ""),
-                address=form_data.get("current_address", ""),  # store current as base address column
+                address=form_data.get("current_address", ""),
                 dob=form_data.get("dob", None),
                 caste=form_data.get("caste", ""),
                 email=form_data.get("email", ""),
@@ -191,31 +196,18 @@ def candidate_form_view():
             )
             if rec:
                 st.success(f"Application submitted. Your candidate code is: **{candidate_id}**")
-                # Simple front-end button to upload CV now (no extra session state)
-                if st.button("Upload CV now"):
-                    st.markdown("### Upload/Replace CV")
-                    file = st.file_uploader(
-                        "Upload CV (PDF or DOC/DOCX preferred)",
-                        type=["pdf", "doc", "docx"],
-                        key=f"new_cv_uploader_{candidate_id}"
-                    )
-                    if file is not None:
-                        file_bytes = file.read()
-                        ok = save_candidate_cv(candidate_id, file_bytes, file.name)
-                        if ok:
-                            st.success("CV saved.")
-                        else:
-                            st.error("Failed to save CV.")
-            else:
-                st.error("Failed to create your application. Please try again.")
+
+                if form_data.get("uploaded_cv"):
+                    file = form_data["uploaded_cv"]
+                    file_bytes = file.read()
+                    ok = save_candidate_cv(candidate_id, file_bytes, file.name)
+                    if ok:
+                        st.success("CV uploaded successfully.")
+                    else:
+                        st.error("Failed to save CV.")
 
     else:
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
-
-        # ---------- candidate_view.py : patched Returning candidate block ----------
-        # Note: ensure these imports exist at file top:
-        # import base64
-        # from db_postgres import get_candidate_by_id, get_candidate_cv_secure, update_candidate_form_data
 
         def _ensure_candidate_cache():
             if "candidates_cache" not in st.session_state:
@@ -227,37 +219,30 @@ def candidate_form_view():
 
         @st.cache_data(ttl=60)
         def _load_all_candidates():
-            # replace/get your get_all_candidates() call here
             try:
                 return get_all_candidates()
             except Exception:
                 return []
 
-        # Use _ensure_candidate_cache() at top of candidate_list UI
         _ensure_candidate_cache()
-        # ---------------- Returning candidate logic ----------------
+
         candidate_code = st.text_input("Candidate Code", key="cand_code")
         if candidate_code.strip():
             rec = get_candidate_by_id(candidate_code.strip())
             if not rec:
                 st.error("No record found for the provided code.")
             else:
-                # show data
                 existing_form = rec.get("form_data") or {}
                 st.info(f"Welcome back, {rec.get('name','Candidate')}")
                 from auth import get_current_user
                 user = get_current_user()
                 actor_id = (user.get("id") if user else 0)
 
-                # If editing disabled, show read-only details + uploader + cv preview (permission aware)
                 if not rec.get("can_edit", False):
                     st.warning("Editing is currently disabled for your application. You may upload a CV if permitted.")
                     _cv_uploader(candidate_code.strip())
 
-                    # NOTE: DB helper may return 4-tuple (bytes, filename, mime_type, reason)
-                    # or older 3-tuple (bytes, filename, reason). Handle both shapes defensively.
                     res = get_candidate_cv_secure(candidate_code.strip(), actor_id)
-                    # normalize shapes:
                     file_bytes = filename = mime_type = None
                     reason = "not_found"
                     try:
@@ -265,7 +250,6 @@ def candidate_form_view():
                             if len(res) == 4:
                                 file_bytes, filename, mime_type, reason = res
                             elif len(res) == 3:
-                                # old shape: (bytes, filename, reason)
                                 file_bytes, filename, reason = res
                                 mime_type = None
                         elif isinstance(res, (bytes, bytearray)):
@@ -290,16 +274,13 @@ def candidate_form_view():
                             mime=mime_type or "application/octet-stream",
                             key=f"cand_dlcv_{candidate_code}",
                         )
-                        # Inline preview for PDF
                         if (mime_type == "application/pdf") or (mime_type is None and (filename or "").lower().endswith(".pdf")):
-                            import base64
                             b64 = base64.b64encode(file_bytes).decode("utf-8")
                             st.markdown(
                                 f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>',
                                 unsafe_allow_html=True,
                             )
                 else:
-                    # Editing enabled branch
                     st.success("Editing is enabled for your application.")
                     updated = _pre_interview_fields(initial=existing_form)
                     st.markdown("---")
@@ -313,7 +294,7 @@ def candidate_form_view():
                             st.error("Failed to update your application.")
 
 
-# Backward-compatible wrapper some codebases import
+# Backward-compatible wrapper
 def candidate_view():
     """Main candidate view function (backward compatibility)"""
     candidate_form_view()
