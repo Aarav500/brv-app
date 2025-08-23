@@ -3,7 +3,7 @@ import os
 import logging
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
-
+import mimetypes
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import bcrypt
@@ -500,26 +500,38 @@ def clear_candidate_cv(candidate_id: str) -> bool:
         conn.close()
 
 
-def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
+def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Optional[bytes], Optional[str], Optional[str], str]:
     """
-    Return CV if actor has permission. Returns (file_bytes, filename, reason).
-    reason ∈ {"ok", "no_permission", "not_found"}
+    Securely fetch a candidate's CV.
+    Returns: (file_bytes, filename, mime_type, reason)
+    reason ∈ {"ok", "no_permission", "not_found", "error"}
     """
-    perms = get_user_permissions(actor_user_id)
-    role = (perms.get("role") or "").lower()
-    if not (role in ("ceo","admin") or perms.get("can_view_cvs")):
-        return None, None, "no_permission"
-
-    conn = get_conn()
     try:
+        # Permission check
+        perms = get_user_permissions(actor_user_id)
+        role = (perms.get("role") or "").lower()
+        if not (role in ("ceo", "admin") or perms.get("can_view_cvs")):
+            return None, None, None, "no_permission"
+
+        conn = get_conn()
         with conn, conn.cursor() as cur:
             cur.execute("SELECT cv_file, cv_filename FROM candidates WHERE candidate_id=%s", (candidate_id,))
             row = cur.fetchone()
+            conn.close()
+
             if not row or not row[0]:
-                return None, None, "not_found"
-            return bytes(row[0]), row[1], "ok"
-    finally:
-        conn.close()
+                return None, None, None, "not_found"
+
+            cv_bytes = bytes(row[0])
+            filename = row[1] or f"{candidate_id}_CV.pdf"
+            mime_type, _ = mimetypes.guess_type(filename)
+            mime_type = mime_type or "application/pdf"  # Default PDF
+
+            return cv_bytes, filename, mime_type, "ok"
+
+    except Exception as e:
+        print(f"get_candidate_cv_secure ERROR: {e}")
+        return None, None, None, "error"
 
 
 
