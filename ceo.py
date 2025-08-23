@@ -158,37 +158,6 @@ def show_ceo_panel():
 
 
 
-        # Focused panel to grant/revoke Interview Access for Interviewers
-            with st.expander("Interviewer Access Management", expanded=True):
-            st.caption("Grant or revoke interview access (CV viewing) for interviewer accounts.")
-            interviewers = [u for u in (users or []) if (u.get("role") or "").lower() == "interviewer"]
-            if not interviewers:
-                st.info("No interviewer accounts found.")
-            else:
-                for iu in interviewers:
-                    colA, colB, colC = st.columns([3, 1, 1])
-                    with colA:
-                        st.write(iu.get("email"))
-                        st.caption(f"User ID: {iu.get('id')}")
-                    with colB:
-                        current = bool(iu.get("can_view_cvs", False))
-                        new_val = st.toggle("Interview Access", value=current, key=f"ivacc_{iu.get('id')}")
-                    with colC:
-                        if st.button("Save", key=f"save_ivacc_{iu.get('id')}"):
-                            try:
-                                ok = set_user_permission(iu.get("id"), can_view=bool(new_val))
-                                if ok:
-                                    st.success("Updated.")
-                                    st.rerun()
-                                else:
-                                    st.error("No change or failed to update.")
-                            except Exception as e:
-                                st.error(f"Error updating: {e}")
-
-        st.markdown("---")
-    else:
-        st.info("User management panel is limited to admins and CEOs.")
-
     # --- Candidate Management (visible to any logged-in user, but delete gated) ---
     st.header("Candidate Management")
     # filters & search
