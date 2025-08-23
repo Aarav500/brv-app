@@ -159,7 +159,7 @@ def show_ceo_panel():
 
 
         # Focused panel to grant/revoke Interview Access for Interviewers
-        with st.expander("Interviewer Access Management", expanded=True):
+            with st.expander("Interviewer Access Management", expanded=True):
             st.caption("Grant or revoke interview access (CV viewing) for interviewer accounts.")
             interviewers = [u for u in (users or []) if (u.get("role") or "").lower() == "interviewer"]
             if not interviewers:
