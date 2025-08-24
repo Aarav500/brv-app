@@ -404,28 +404,39 @@ def create_candidate_in_db(candidate_id: str,
     conn = get_conn()
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Check if current_address column exists, if not use address field
+            # Check which address columns exist
             cur.execute("""
                         SELECT column_name
                         FROM information_schema.columns
                         WHERE table_name = 'candidates'
-                          AND column_name = 'current_address'
+                          AND column_name IN ('current_address', 'address')
                         """)
-            has_current_address = cur.fetchone() is not None
+            existing_address_columns = {row[0] for row in cur.fetchall()}
 
-            if has_current_address:
+            # Build the insert query based on available columns
+            if 'current_address' in existing_address_columns:
+                # Use current_address column (preferred)
                 cur.execute("""
                             INSERT INTO candidates (candidate_id, name, email, phone, current_address, form_data,
                                                     created_by, can_edit)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING *
                             """, (candidate_id, name, email, phone, address, Json(form_data or {}), created_by))
-            else:
+            elif 'address' in existing_address_columns:
                 # Fallback to address column if current_address doesn't exist
                 cur.execute("""
                             INSERT INTO candidates (candidate_id, name, email, phone, address, form_data, created_by,
                                                     can_edit)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING *
                             """, (candidate_id, name, email, phone, address, Json(form_data or {}), created_by))
+            else:
+                # No address column exists, insert without address
+                # Store address in form_data instead
+                updated_form_data = form_data or {}
+                updated_form_data['current_address'] = address
+                cur.execute("""
+                            INSERT INTO candidates (candidate_id, name, email, phone, form_data, created_by, can_edit)
+                            VALUES (%s, %s, %s, %s, %s, %s, FALSE) RETURNING *
+                            """, (candidate_id, name, email, phone, Json(updated_form_data), created_by))
 
             return cur.fetchone()
     finally:
