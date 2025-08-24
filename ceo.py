@@ -38,7 +38,7 @@ import uuid
 import mimetypes
 import traceback
 import re
-
+from smtp_mailer import send_email
 import streamlit as st
 import streamlit.components.v1 as components
 

@@ -278,6 +278,33 @@ def candidate_form_view():
                     if rec:
                         st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
 
+                        # --- Send candidate code via email ---
+                        cand_email = (form_data.get("email") or "").strip()
+                        if cand_email:
+                            subject = "Your Candidate Code"
+                            html_body = f"""
+                            <p>Hello {form_data.get('name', 'Candidate')},</p>
+                            <p>Thank you for applying. Your candidate code is:</p>
+                            <p style="font-size:18px;"><strong>{candidate_id}</strong></p>
+                            <p>Keep this code safe—you’ll need it to revisit or update your application.</p>
+                            <p>Best regards,<br/>Recruitment Team</p>
+                            """
+                            text_body = (
+                                f"Hello {form_data.get('name', 'Candidate')},\n\n"
+                                f"Thank you for applying. Your candidate code is: {candidate_id}\n"
+                                f"Keep this code safe—you’ll need it to revisit or update your application.\n\n"
+                                f"Best regards,\nRecruitment Team"
+                            )
+                            try:
+                                sent = send_email(cand_email, subject, html_body, text_body=text_body)
+                                if sent:
+                                    st.info("📧 Candidate code emailed to you.")
+                                else:
+                                    st.warning(
+                                        "Could not send email (SMTP not configured). Please note your code above.")
+                            except Exception as e:
+                                st.warning(f"Email failed: {e}. Please note your code above.")
+
                         # Save CV
                         cv_file = form_data.get("uploaded_cv")
                         if cv_file:
