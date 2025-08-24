@@ -31,6 +31,7 @@ def get_conn():
 # Initialization / migrations
 # -----------------------------
 def _ensure_column(cur, table: str, column: str, ddl: str):
+    """Safely add column if it doesn't exist."""
     cur.execute(f"""
         DO $$
         BEGIN
@@ -46,111 +47,173 @@ def _ensure_column(cur, table: str, column: str, ddl: str):
 
 
 def init_db():
-    """Initialize database tables and ensure schema consistency."""
+    """Initialize database tables and ensure schema consistency with built-in migration."""
     conn = get_conn()
     try:
         with conn:
             with conn.cursor() as cur:
                 # USERS
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        id SERIAL PRIMARY KEY,
-                        email VARCHAR(255) UNIQUE NOT NULL,
-                        password_hash VARCHAR(255) NOT NULL,
-                        role VARCHAR(50) NOT NULL DEFAULT 'candidate',
-                        force_password_reset BOOLEAN DEFAULT FALSE,
-                        can_view_cvs BOOLEAN DEFAULT FALSE,
-                        can_delete_records BOOLEAN DEFAULT FALSE,
-                        can_grant_delete BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
+                            CREATE TABLE IF NOT EXISTS users
+                            (
+                                id
+                                SERIAL
+                                PRIMARY
+                                KEY,
+                                email
+                                VARCHAR
+                            (
+                                255
+                            ) UNIQUE NOT NULL,
+                                password_hash VARCHAR
+                            (
+                                255
+                            ) NOT NULL,
+                                role VARCHAR
+                            (
+                                50
+                            ) NOT NULL DEFAULT 'candidate',
+                                force_password_reset BOOLEAN DEFAULT FALSE,
+                                can_view_cvs BOOLEAN DEFAULT FALSE,
+                                can_delete_records BOOLEAN DEFAULT FALSE,
+                                can_grant_delete BOOLEAN DEFAULT FALSE,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                );
+                            """)
 
-                # CANDIDATES
+                # CANDIDATES - Create base table first
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS candidates (
-                        id SERIAL PRIMARY KEY,
-                        candidate_id VARCHAR(50) UNIQUE NOT NULL,
-                        name VARCHAR(255),
-                        email VARCHAR(255),
-                        phone VARCHAR(50),
+                            CREATE TABLE IF NOT EXISTS candidates
+                            (
+                                id
+                                SERIAL
+                                PRIMARY
+                                KEY,
+                                candidate_id
+                                VARCHAR
+                            (
+                                50
+                            ) UNIQUE NOT NULL,
+                                name VARCHAR
+                            (
+                                255
+                            ),
+                                email VARCHAR
+                            (
+                                255
+                            ),
+                                phone VARCHAR
+                            (
+                                50
+                            ),
+                                address TEXT, -- keep for older data (unused by UI)
+                                form_data JSONB DEFAULT '{}'::jsonb,
+                                resume_link TEXT,
+                                can_edit BOOLEAN DEFAULT FALSE,
+                                created_by VARCHAR
+                            (
+                                100
+                            ),
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                );
+                            """)
 
-                        -- Expanded pre-interview fields
-                        current_address TEXT,
-                        permanent_address TEXT,
-                        dob DATE,
-                        caste VARCHAR(100),
-                        sub_caste VARCHAR(100),
-                        marital_status VARCHAR(50),
-                        highest_qualification VARCHAR(255),
-                        work_experience TEXT,
-                        referral VARCHAR(255),
-                        ready_festivals BOOLEAN DEFAULT FALSE,
-                        ready_late_nights BOOLEAN DEFAULT FALSE,
+                # Add all missing columns for expanded pre-interview fields
+                logger.info("Running database migration to add missing columns...")
 
-                        -- Legacy compatibility
-                        address TEXT,      -- keep for older data (unused by UI)
-                        form_data JSONB DEFAULT '{}'::jsonb,
-                        resume_link TEXT,
-                        can_edit BOOLEAN DEFAULT FALSE,
-                        created_by VARCHAR(100),
+                # List of columns to ensure exist
+                columns_to_ensure = [
+                    ("current_address", "current_address TEXT"),
+                    ("permanent_address", "permanent_address TEXT"),
+                    ("dob", "dob DATE"),
+                    ("caste", "caste VARCHAR(100)"),
+                    ("sub_caste", "sub_caste VARCHAR(100)"),
+                    ("marital_status", "marital_status VARCHAR(50)"),
+                    ("highest_qualification", "highest_qualification VARCHAR(255)"),
+                    ("work_experience", "work_experience TEXT"),
+                    ("referral", "referral VARCHAR(255)"),
+                    ("ready_festivals", "ready_festivals BOOLEAN DEFAULT FALSE"),
+                    ("ready_late_nights", "ready_late_nights BOOLEAN DEFAULT FALSE"),
+                    ("cv_file", "cv_file BYTEA"),
+                    ("cv_filename", "cv_filename TEXT")
+                ]
 
-                        -- CV blob store
-                        cv_file BYTEA,
-                        cv_filename TEXT,
-
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-
-                # Ensure legacy/older DBs get the new columns
-                _ensure_column(cur, "candidates", "current_address", "current_address TEXT")
-                _ensure_column(cur, "candidates", "permanent_address", "permanent_address TEXT")
-                _ensure_column(cur, "candidates", "cv_file", "cv_file BYTEA")
-                _ensure_column(cur, "candidates", "cv_filename", "cv_filename TEXT")
+                for col_name, col_ddl in columns_to_ensure:
+                    _ensure_column(cur, "candidates", col_name, col_ddl)
 
                 # INTERVIEWS
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS interviews (
-                        id SERIAL PRIMARY KEY,
-                        candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id) ON DELETE CASCADE,
-                        scheduled_at TIMESTAMP,
-                        interviewer VARCHAR(255),
-                        result VARCHAR(50),
-                        notes TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
+                            CREATE TABLE IF NOT EXISTS interviews
+                            (
+                                id
+                                SERIAL
+                                PRIMARY
+                                KEY,
+                                candidate_id
+                                VARCHAR
+                            (
+                                50
+                            ) NOT NULL REFERENCES candidates
+                            (
+                                candidate_id
+                            ) ON DELETE CASCADE,
+                                scheduled_at TIMESTAMP,
+                                interviewer VARCHAR
+                            (
+                                255
+                            ),
+                                result VARCHAR
+                            (
+                                50
+                            ),
+                                notes TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                );
+                            """)
 
                 # RECEPTIONIST ASSESSMENTS
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS receptionist_assessments (
-                        id SERIAL PRIMARY KEY,
-                        candidate_id VARCHAR(50) NOT NULL REFERENCES candidates(candidate_id) ON DELETE CASCADE,
-                        speed_test INTEGER,
-                        accuracy_test INTEGER,
-                        work_commitment TEXT,
-                        english_understanding TEXT,
-                        comments TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
+                            CREATE TABLE IF NOT EXISTS receptionist_assessments
+                            (
+                                id
+                                SERIAL
+                                PRIMARY
+                                KEY,
+                                candidate_id
+                                VARCHAR
+                            (
+                                50
+                            ) NOT NULL REFERENCES candidates
+                            (
+                                candidate_id
+                            ) ON DELETE CASCADE,
+                                speed_test INTEGER,
+                                accuracy_test INTEGER,
+                                work_commitment TEXT,
+                                english_understanding TEXT,
+                                comments TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                );
+                            """)
 
                 # Indexes
                 cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);
-                """)
+                            CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);
+                            """)
                 cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
-                """)
+                            CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
+                            """)
                 cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
-                """)
+                            CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
+                            """)
 
-        logger.info("Database initialized / migrated.")
+        logger.info("Database initialized / migrated successfully.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
     finally:
         conn.close()
 
