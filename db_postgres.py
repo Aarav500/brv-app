@@ -32,18 +32,23 @@ def get_conn():
 # -----------------------------
 def _ensure_column(cur, table: str, column: str, ddl: str):
     """Safely add column if it doesn't exist."""
-    cur.execute(f"""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = %s AND column_name = %s
-            ) THEN
-                EXECUTE %s;
-            END IF;
-        END$$;
-    """, (table, column, f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+    try:
+        cur.execute(f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = %s AND column_name = %s
+                ) THEN
+                    EXECUTE %s;
+                END IF;
+            END$$;
+        """, (table, column, f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+        logger.info(f"Column check/add for {table}.{column} completed")
+    except Exception as e:
+        logger.error(f"Failed to ensure column {table}.{column}: {e}")
+        raise
 
 
 def init_db():
@@ -52,6 +57,8 @@ def init_db():
     try:
         with conn:
             with conn.cursor() as cur:
+                logger.info("Starting database initialization...")
+
                 # USERS
                 cur.execute("""
                             CREATE TABLE IF NOT EXISTS users
@@ -125,23 +132,23 @@ def init_db():
 
                 # List of columns to ensure exist
                 columns_to_ensure = [
-                    ("current_address", "current_address TEXT"),
-                    ("permanent_address", "permanent_address TEXT"),
-                    ("dob", "dob DATE"),
-                    ("caste", "caste VARCHAR(100)"),
-                    ("sub_caste", "sub_caste VARCHAR(100)"),
-                    ("marital_status", "marital_status VARCHAR(50)"),
-                    ("highest_qualification", "highest_qualification VARCHAR(255)"),
-                    ("work_experience", "work_experience TEXT"),
-                    ("referral", "referral VARCHAR(255)"),
-                    ("ready_festivals", "ready_festivals BOOLEAN DEFAULT FALSE"),
-                    ("ready_late_nights", "ready_late_nights BOOLEAN DEFAULT FALSE"),
-                    ("cv_file", "cv_file BYTEA"),
-                    ("cv_filename", "cv_filename TEXT")
+                    ("current_address", "TEXT"),
+                    ("permanent_address", "TEXT"),
+                    ("dob", "DATE"),
+                    ("caste", "VARCHAR(100)"),
+                    ("sub_caste", "VARCHAR(100)"),
+                    ("marital_status", "VARCHAR(50)"),
+                    ("highest_qualification", "VARCHAR(255)"),
+                    ("work_experience", "TEXT"),
+                    ("referral", "VARCHAR(255)"),
+                    ("ready_festivals", "BOOLEAN DEFAULT FALSE"),
+                    ("ready_late_nights", "BOOLEAN DEFAULT FALSE"),
+                    ("cv_file", "BYTEA"),
+                    ("cv_filename", "TEXT")
                 ]
 
-                for col_name, col_ddl in columns_to_ensure:
-                    _ensure_column(cur, "candidates", col_name, col_ddl)
+                for col_name, col_type in columns_to_ensure:
+                    _ensure_column(cur, "candidates", col_name, col_type)
 
                 # INTERVIEWS
                 cur.execute("""
@@ -200,15 +207,9 @@ def init_db():
                             """)
 
                 # Indexes
-                cur.execute("""
-                            CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);
-                            """)
-                cur.execute("""
-                            CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
-                            """)
-                cur.execute("""
-                            CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);
-                            """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_candidates_name ON candidates(name);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_interviews_candidate_id ON interviews(candidate_id);")
 
         logger.info("Database initialized / migrated successfully.")
     except Exception as e:
@@ -264,9 +265,9 @@ def create_user_in_db(email: str, password: str, role: str = "candidate") -> boo
             if cur.fetchone():
                 return False
             cur.execute("""
-                INSERT INTO users (email, password_hash, role)
-                VALUES (%s, %s, %s)
-            """, (email, hash_password(password), role))
+                        INSERT INTO users (email, password_hash, role)
+                        VALUES (%s, %s, %s)
+                        """, (email, hash_password(password), role))
             return True
     finally:
         conn.close()
@@ -277,12 +278,12 @@ def update_user_password(email: str, new_password: str) -> bool:
     try:
         with conn, conn.cursor() as cur:
             cur.execute("""
-                UPDATE users
-                SET password_hash=%s,
-                    force_password_reset=FALSE,
-                    updated_at=CURRENT_TIMESTAMP
-                WHERE email=%s
-            """, (hash_password(new_password), email))
+                        UPDATE users
+                        SET password_hash=%s,
+                            force_password_reset= FALSE,
+                            updated_at=CURRENT_TIMESTAMP
+                        WHERE email = %s
+                        """, (hash_password(new_password), email))
             return cur.rowcount > 0
     finally:
         conn.close()
@@ -340,10 +341,18 @@ def get_all_users_with_permissions() -> List[Dict[str, Any]]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT id, email, role, can_view_cvs, can_delete_records, can_grant_delete,
-                       created_at, updated_at, force_password_reset
-                FROM users ORDER BY id
-            """)
+                        SELECT id,
+                               email,
+                               role,
+                               can_view_cvs,
+                               can_delete_records,
+                               can_grant_delete,
+                               created_at,
+                               updated_at,
+                               force_password_reset
+                        FROM users
+                        ORDER BY id
+                        """)
             return cur.fetchall()
     finally:
         conn.close()
@@ -354,9 +363,10 @@ def get_user_permissions(user_id: int) -> Dict[str, Any]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT role, can_view_cvs, can_delete_records, can_grant_delete
-                FROM users WHERE id=%s
-            """, (user_id,))
+                        SELECT role, can_view_cvs, can_delete_records, can_grant_delete
+                        FROM users
+                        WHERE id = %s
+                        """, (user_id,))
             return cur.fetchone() or {}
     finally:
         conn.close()
@@ -394,13 +404,29 @@ def create_candidate_in_db(candidate_id: str,
     conn = get_conn()
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Check if current_address column exists, if not use address field
             cur.execute("""
-                INSERT INTO candidates (
-                    candidate_id, name, email, phone, current_address, form_data, created_by, can_edit
-                )
-                VALUES (%s,%s,%s,%s,%s,%s,%s, FALSE)
-                RETURNING *
-            """, (candidate_id, name, email, phone, address, Json(form_data or {}), created_by))
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'candidates'
+                          AND column_name = 'current_address'
+                        """)
+            has_current_address = cur.fetchone() is not None
+
+            if has_current_address:
+                cur.execute("""
+                            INSERT INTO candidates (candidate_id, name, email, phone, current_address, form_data,
+                                                    created_by, can_edit)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING *
+                            """, (candidate_id, name, email, phone, address, Json(form_data or {}), created_by))
+            else:
+                # Fallback to address column if current_address doesn't exist
+                cur.execute("""
+                            INSERT INTO candidates (candidate_id, name, email, phone, address, form_data, created_by,
+                                                    can_edit)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING *
+                            """, (candidate_id, name, email, phone, address, Json(form_data or {}), created_by))
+
             return cur.fetchone()
     finally:
         conn.close()
@@ -431,10 +457,11 @@ def find_candidates_by_name(q: str) -> List[Dict[str, Any]]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT * FROM candidates
-                WHERE LOWER(name) LIKE %s
-                ORDER BY updated_at DESC LIMIT 200
-            """, (f"%{q.lower()}%",))
+                        SELECT *
+                        FROM candidates
+                        WHERE LOWER(name) LIKE %s
+                        ORDER BY updated_at DESC LIMIT 200
+                        """, (f"%{q.lower()}%",))
             return cur.fetchall()
     finally:
         conn.close()
@@ -447,21 +474,34 @@ def update_candidate_form_data(candidate_id: str, updates: dict) -> bool:
         "referral", "ready_festivals", "ready_late_nights"
     }
     sets, params = [], []
-    for k, v in (updates or {}).items():
-        if k in allowed_cols:
-            sets.append(f"{k}=%s")
-            params.append(v)
-    form_patch = updates.get("form_patch")
-    if form_patch:
-        sets.append("form_data = COALESCE(form_data,'{}'::jsonb) || %s::jsonb")
-        params.append(Json(form_patch))
-    if not sets:
-        return False
-    params.append(candidate_id)
 
     conn = get_conn()
     try:
         with conn, conn.cursor() as cur:
+            # Check which columns actually exist in the table
+            cur.execute("""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'candidates'
+                        """)
+            existing_columns = {row[0] for row in cur.fetchall()}
+
+            # Only update columns that exist and are allowed
+            for k, v in (updates or {}).items():
+                if k in allowed_cols and k in existing_columns:
+                    sets.append(f"{k}=%s")
+                    params.append(v)
+
+            form_patch = updates.get("form_patch")
+            if form_patch and "form_data" in existing_columns:
+                sets.append("form_data = COALESCE(form_data,'{}'::jsonb) || %s::jsonb")
+                params.append(Json(form_patch))
+
+            if not sets:
+                return False
+
+            params.append(candidate_id)
+
             cur.execute(f"""
                 UPDATE candidates
                 SET {', '.join(sets)}, updated_at=CURRENT_TIMESTAMP
@@ -477,10 +517,11 @@ def update_candidate_resume_link(candidate_id: str, resume_link: str) -> bool:
     try:
         with conn, conn.cursor() as cur:
             cur.execute("""
-                UPDATE candidates
-                SET resume_link=%s, updated_at=CURRENT_TIMESTAMP
-                WHERE candidate_id=%s
-            """, (resume_link, candidate_id))
+                        UPDATE candidates
+                        SET resume_link=%s,
+                            updated_at=CURRENT_TIMESTAMP
+                        WHERE candidate_id = %s
+                        """, (resume_link, candidate_id))
             return cur.rowcount > 0
     finally:
         conn.close()
@@ -491,10 +532,11 @@ def set_candidate_permission(candidate_id: str, can_edit: bool) -> bool:
     try:
         with conn, conn.cursor() as cur:
             cur.execute("""
-                UPDATE candidates
-                SET can_edit=%s, updated_at=CURRENT_TIMESTAMP
-                WHERE candidate_id=%s
-            """, (can_edit, candidate_id))
+                        UPDATE candidates
+                        SET can_edit=%s,
+                            updated_at=CURRENT_TIMESTAMP
+                        WHERE candidate_id = %s
+                        """, (can_edit, candidate_id))
             return cur.rowcount > 0
     finally:
         conn.close()
@@ -540,9 +582,6 @@ def delete_candidate(candidate_ids, actor_user_id: int) -> (bool, str):
         conn.close()
 
 
-
-
-
 # -----------------------------
 # CV storage helpers
 # -----------------------------
@@ -551,10 +590,12 @@ def save_candidate_cv(candidate_id: str, file_bytes: bytes, filename: Optional[s
     try:
         with conn, conn.cursor() as cur:
             cur.execute("""
-                UPDATE candidates
-                SET cv_file=%s, cv_filename=%s, updated_at=CURRENT_TIMESTAMP
-                WHERE candidate_id=%s
-            """, (psycopg2.Binary(file_bytes), filename, candidate_id))
+                        UPDATE candidates
+                        SET cv_file=%s,
+                            cv_filename=%s,
+                            updated_at=CURRENT_TIMESTAMP
+                        WHERE candidate_id = %s
+                        """, (psycopg2.Binary(file_bytes), filename, candidate_id))
             return cur.rowcount > 0
     finally:
         conn.close()
@@ -568,8 +609,10 @@ def clear_candidate_cv(candidate_id: str) -> bool:
             cur.execute(
                 """
                 UPDATE candidates
-                SET cv_file=NULL, cv_filename=NULL, updated_at=CURRENT_TIMESTAMP
-                WHERE candidate_id=%s
+                SET cv_file=NULL,
+                    cv_filename=NULL,
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE candidate_id = %s
                 """,
                 (candidate_id,)
             )
@@ -578,7 +621,8 @@ def clear_candidate_cv(candidate_id: str) -> bool:
         conn.close()
 
 
-def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Optional[bytes], Optional[str], Optional[str], str]:
+def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[
+    Optional[bytes], Optional[str], Optional[str], str]:
     """
     Securely fetch a candidate's CV.
     Returns: (file_bytes, filename, mime_type, reason)
@@ -612,8 +656,6 @@ def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Opti
         return None, None, None, "error"
 
 
-
-
 def get_total_cv_storage_usage() -> int:
     conn = get_conn()
     try:
@@ -637,12 +679,12 @@ def save_receptionist_assessment(candidate_id: str,
     try:
         with conn, conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO receptionist_assessments
-                    (candidate_id, speed_test, accuracy_test, work_commitment,
-                     english_understanding, comments)
-                VALUES (%s,%s,%s,%s,%s,%s)
-            """, (candidate_id, speed_test, accuracy_test, work_commitment,
-                  english_understanding, comments))
+                        INSERT INTO receptionist_assessments
+                        (candidate_id, speed_test, accuracy_test, work_commitment,
+                         english_understanding, comments)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (candidate_id, speed_test, accuracy_test, work_commitment,
+                              english_understanding, comments))
             return True
     finally:
         conn.close()
@@ -653,9 +695,11 @@ def get_receptionist_assessments(candidate_id: str) -> List[Dict[str, Any]]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT * FROM receptionist_assessments
-                WHERE candidate_id=%s ORDER BY created_at DESC
-            """, (candidate_id,))
+                        SELECT *
+                        FROM receptionist_assessments
+                        WHERE candidate_id = %s
+                        ORDER BY created_at DESC
+                        """, (candidate_id,))
             return cur.fetchall()
     finally:
         conn.close()
@@ -673,9 +717,9 @@ def create_interview(candidate_id: str,
     try:
         with conn, conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO interviews (candidate_id, scheduled_at, interviewer, result, notes)
-                VALUES (%s,%s,%s,%s,%s) RETURNING id
-            """, (candidate_id, scheduled_at, interviewer, result, notes))
+                        INSERT INTO interviews (candidate_id, scheduled_at, interviewer, result, notes)
+                        VALUES (%s, %s, %s, %s, %s) RETURNING id
+                        """, (candidate_id, scheduled_at, interviewer, result, notes))
             row = cur.fetchone()
             return row[0] if row else None
     finally:
@@ -687,9 +731,11 @@ def get_interviews_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT * FROM interviews
-                WHERE candidate_id=%s ORDER BY created_at DESC
-            """, (candidate_id,))
+                        SELECT *
+                        FROM interviews
+                        WHERE candidate_id = %s
+                        ORDER BY created_at DESC
+                        """, (candidate_id,))
             return cur.fetchall()
     finally:
         conn.close()
@@ -700,11 +746,11 @@ def get_all_interviews() -> List[Dict[str, Any]]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT i.*, c.name AS candidate_name, c.email AS candidate_email
-                FROM interviews i
-                JOIN candidates c ON c.candidate_id=i.candidate_id
-                ORDER BY i.scheduled_at DESC NULLS LAST, i.created_at DESC
-            """)
+                        SELECT i.*, c.name AS candidate_name, c.email AS candidate_email
+                        FROM interviews i
+                                 JOIN candidates c ON c.candidate_id = i.candidate_id
+                        ORDER BY i.scheduled_at DESC NULLS LAST, i.created_at DESC
+                        """)
             return cur.fetchall()
     finally:
         conn.close()
@@ -722,7 +768,9 @@ def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             # ensure candidate exists
-            cur.execute("SELECT candidate_id, name, created_at, updated_at, created_by FROM candidates WHERE candidate_id=%s", (candidate_id,))
+            cur.execute(
+                "SELECT candidate_id, name, created_at, updated_at, created_by FROM candidates WHERE candidate_id=%s",
+                (candidate_id,))
             cand = cur.fetchone()
             if not cand:
                 return []
@@ -747,11 +795,17 @@ def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
 
             # receptionist assessments
             cur.execute("""
-                SELECT id, speed_test, accuracy_test, work_commitment, english_understanding, comments, created_at
-                FROM receptionist_assessments
-                WHERE candidate_id=%s
-                ORDER BY created_at DESC
-            """, (candidate_id,))
+                        SELECT id,
+                               speed_test,
+                               accuracy_test,
+                               work_commitment,
+                               english_understanding,
+                               comments,
+                               created_at
+                        FROM receptionist_assessments
+                        WHERE candidate_id = %s
+                        ORDER BY created_at DESC
+                        """, (candidate_id,))
             for r in cur.fetchall():
                 details = f"Speed: {r.get('speed_test')}, Accuracy: {r.get('accuracy_test')}"
                 if r.get("work_commitment"):
@@ -769,10 +823,10 @@ def get_candidate_history(candidate_id: str) -> List[Dict[str, Any]]:
 
             # interviews (include scheduled_at as the event time if present; fallback to created_at)
             cur.execute("""
-                SELECT id, scheduled_at, created_at, result, interviewer, notes
-                FROM interviews
-                WHERE candidate_id=%s
-            """, (candidate_id,))
+                        SELECT id, scheduled_at, created_at, result, interviewer, notes
+                        FROM interviews
+                        WHERE candidate_id = %s
+                        """, (candidate_id,))
             for iv in cur.fetchall():
                 ev_time = iv.get("scheduled_at") or iv.get("created_at")
                 details = f"Result: {iv.get('result') or 'unspecified'}"
@@ -804,14 +858,13 @@ def get_interviewer_performance_stats(interviewer_id: str) -> Dict[str, Any]:
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT
-                    COUNT(*)::int AS total_interviews,
-                    SUM(CASE WHEN LOWER(result) = 'scheduled' THEN 1 ELSE 0 END)::int AS scheduled,
-                    SUM(CASE WHEN LOWER(result) IN ('completed','pass','fail') THEN 1 ELSE 0 END)::int AS completed,
-                    SUM(CASE WHEN LOWER(result) = 'pass' THEN 1 ELSE 0 END)::int AS passed
-                FROM interviews
-                WHERE interviewer = %s
-            """, (interviewer_id,))
+                        SELECT COUNT(*)::int AS total_interviews, SUM(CASE WHEN LOWER(result) = 'scheduled' THEN 1 ELSE 0 END)::int AS scheduled, SUM(CASE
+                                                                                                                                                          WHEN LOWER(result) IN ('completed', 'pass', 'fail')
+                                                                                                                                                              THEN 1
+                                                                                                                                                          ELSE 0 END)::int AS completed, SUM(CASE WHEN LOWER(result) = 'pass' THEN 1 ELSE 0 END) ::int AS passed
+                        FROM interviews
+                        WHERE interviewer = %s
+                        """, (interviewer_id,))
             row = cur.fetchone() or {}
             total = int(row.get("total_interviews") or 0)
             scheduled = int(row.get("scheduled") or 0)
@@ -870,15 +923,18 @@ def search_candidates_by_name_or_email(query: str) -> List[Dict[str, Any]]:
             if query.strip():
                 like = f"%{query.lower()}%"
                 cur.execute("""
-                    SELECT * FROM candidates
-                    WHERE LOWER(name) LIKE %s OR LOWER(email) LIKE %s
-                    ORDER BY updated_at DESC LIMIT 50
-                """, (like, like))
+                            SELECT *
+                            FROM candidates
+                            WHERE LOWER(name) LIKE %s
+                               OR LOWER(email) LIKE %s
+                            ORDER BY updated_at DESC LIMIT 50
+                            """, (like, like))
             else:
                 cur.execute("""
-                    SELECT * FROM candidates
-                    ORDER BY updated_at DESC LIMIT 50
-                """)
+                            SELECT *
+                            FROM candidates
+                            ORDER BY updated_at DESC LIMIT 50
+                            """)
             return cur.fetchall()
     finally:
         conn.close()
@@ -899,17 +955,17 @@ def get_candidate_statistics() -> Dict[str, Any]:
             stats["candidates_today"] = cur.fetchone()["c"]
 
             cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM candidates
-                WHERE DATE_TRUNC('week', created_at)=DATE_TRUNC('week', CURRENT_DATE)
-            """)
+                        SELECT COUNT(*) AS c
+                        FROM candidates
+                        WHERE DATE_TRUNC('week', created_at) = DATE_TRUNC('week', CURRENT_DATE)
+                        """)
             stats["candidates_this_week"] = cur.fetchone()["c"]
 
             cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM candidates
-                WHERE DATE_TRUNC('month', created_at)=DATE_TRUNC('month', CURRENT_DATE)
-            """)
+                        SELECT COUNT(*) AS c
+                        FROM candidates
+                        WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+                        """)
             stats["candidates_this_month"] = cur.fetchone()["c"]
 
             cur.execute("SELECT COUNT(*) AS c FROM candidates WHERE cv_file IS NOT NULL OR resume_link IS NOT NULL")
@@ -920,19 +976,20 @@ def get_candidate_statistics() -> Dict[str, Any]:
             stats["total_interviews"] = cur.fetchone()["c"]
 
             cur.execute("SELECT result, COUNT(*) AS c FROM interviews GROUP BY result")
-            stats["interview_results"] = { (r["result"] or "unspecified"): r["c"] for r in cur.fetchall() }
+            stats["interview_results"] = {(r["result"] or "unspecified"): r["c"] for r in cur.fetchall()}
 
             cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result IS NULL OR result ILIKE 'scheduled'")
             stats["interviews_scheduled"] = cur.fetchone()["c"]
 
-            cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled'")
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM interviews WHERE result IS NOT NULL AND result NOT ILIKE 'scheduled'")
             stats["interviews_completed"] = cur.fetchone()["c"]
 
             cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM interviews
-                WHERE DATE_TRUNC('week', COALESCE(scheduled_at, created_at))=DATE_TRUNC('week', CURRENT_DATE)
-            """)
+                        SELECT COUNT(*) AS c
+                        FROM interviews
+                        WHERE DATE_TRUNC('week', COALESCE(scheduled_at, created_at)) = DATE_TRUNC('week', CURRENT_DATE)
+                        """)
             stats["interviews_this_week"] = cur.fetchone()["c"]
 
             cur.execute("SELECT COUNT(*) AS c FROM interviews WHERE result ILIKE 'pass'")
@@ -945,18 +1002,18 @@ def get_candidate_statistics() -> Dict[str, Any]:
             stats["interviews_on_hold"] = cur.fetchone()["c"] if cur.rowcount is not None else 0
 
             cur.execute("SELECT interviewer, COUNT(*) AS c FROM interviews GROUP BY interviewer")
-            stats["per_interviewer"] = { (r["interviewer"] or "unknown"): r["c"] for r in cur.fetchall() }
+            stats["per_interviewer"] = {(r["interviewer"] or "unknown"): r["c"] for r in cur.fetchall()}
 
             cur.execute("SELECT role, COUNT(*) AS c FROM users GROUP BY role")
-            stats["users_per_role"] = { r["role"]: r["c"] for r in cur.fetchall() }
+            stats["users_per_role"] = {r["role"]: r["c"] for r in cur.fetchall()}
 
             cur.execute("SELECT COUNT(*) AS c FROM receptionist_assessments")
             stats["total_assessments"] = cur.fetchone()["c"]
 
             cur.execute("""
-                SELECT AVG(speed_test) AS avg_speed, AVG(accuracy_test) AS avg_accuracy
-                FROM receptionist_assessments
-            """)
+                        SELECT AVG(speed_test) AS avg_speed, AVG(accuracy_test) AS avg_accuracy
+                        FROM receptionist_assessments
+                        """)
             row = cur.fetchone()
             stats["avg_speed_test"] = float(row["avg_speed"] or 0)
             stats["avg_accuracy_test"] = float(row["avg_accuracy"] or 0)
@@ -986,9 +1043,8 @@ def seed_sample_users():
                 cur.execute("SELECT 1 FROM users WHERE email=%s", (email,))
                 if not cur.fetchone():
                     cur.execute("""
-                        INSERT INTO users (email, password_hash, role)
-                        VALUES (%s,%s,%s)
-                    """, (email, hash_password(pw), role))
+                                INSERT INTO users (email, password_hash, role)
+                                VALUES (%s, %s, %s)
+                                """, (email, hash_password(pw), role))
     finally:
         conn.close()
-
