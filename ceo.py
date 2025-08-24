@@ -1,16 +1,16 @@
 # =============================================================================
-# CV Preview Helpers & Fallbacks - ENHANCED VERSION
+# CV Preview Helpers & Fallbacks - SIMPLIFIED VERSION
 # =============================================================================
-# ceo.py - ENHANCED VERSION with PDF fixes and dark theme interview notes
+# ceo.py - SIMPLIFIED VERSION with clean PDF display and complete form data
 """
 CEO Control Panel (feature-complete, cleaned + modular)
 
-ENHANCED FIXES APPLIED:
-1. Improved PDF preview with multiple fallback methods
-2. Enhanced PDF embedding with better browser compatibility
-3. Dark theme for interview notes with black background and white text
-4. Better PDF viewer with iframe and object fallbacks
-5. Improved candidate name and form details styling
+SIMPLIFIED FIXES APPLIED:
+1. Fixed PDF preview with simple iframe approach
+2. Show complete candidate form data from candidate_view.py
+3. Clean white text styling for interview notes
+4. Auto-redirect for new tab functionality
+5. Display all application questions and answers
 """
 
 from __future__ import annotations
@@ -159,89 +159,42 @@ def _safe_get_candidate_cv_fixed(candidate_id: str, actor_id: int) -> Tuple[Opti
 
 
 # =============================================================================
-# ENHANCED PDF Preview with Multiple Fallbacks
+# SIMPLE PDF Preview
 # =============================================================================
 
-def _embed_pdf_enhanced(bytes_data: bytes, height: int = 600, unique_key: str = "") -> bool:
-    """Enhanced PDF preview with multiple fallback methods for better browser compatibility."""
+def _simple_pdf_preview(bytes_data: bytes, height: int = 600, unique_key: str = "") -> bool:
+    """Simple PDF preview using streamlit native display."""
     if not bytes_data:
         return False
 
     try:
-        b64 = base64.b64encode(bytes_data).decode()
-        pdf_data_uri = f"data:application/pdf;base64,{b64}"
+        # Try Streamlit's native PDF display first
+        st.subheader("📄 CV Preview")
 
-        # Create a comprehensive PDF viewer with multiple fallbacks
-        pdf_viewer_html = f"""
-        <div style="width:100%; height:{height + 100}px; border: 2px solid #ddd; border-radius: 8px; background: #f8f9fa;">
-            <div style="padding: 10px; background: #343a40; color: white; border-radius: 6px 6px 0 0;">
-                <h4 style="margin: 0; color: white;">📄 CV Preview</h4>
-                <p style="margin: 5px 0 0 0; font-size: 14px; color: #adb5bd;">
-                    If the PDF doesn't load, try the download button below.
-                </p>
-            </div>
-
-            <!-- Method 1: Embed tag (works in most browsers) -->
-            <embed src="{pdf_data_uri}" 
-                   type="application/pdf" 
-                   width="100%" 
-                   height="{height}px"
-                   style="display: block;">
-
-            <!-- Method 2: Object tag fallback -->
-            <object data="{pdf_data_uri}" 
-                    type="application/pdf" 
-                    width="100%" 
-                    height="{height}px"
-                    style="display: none;">
-
-                <!-- Method 3: iframe fallback -->
-                <iframe src="{pdf_data_uri}" 
-                        width="100%" 
-                        height="{height}px"
-                        style="border: none;">
-
-                    <!-- Final fallback message -->
-                    <div style="padding: 20px; text-align: center;">
-                        <p><strong>PDF cannot be displayed in this browser.</strong></p>
-                        <p>Please use the download button below to view the CV.</p>
-                        <a href="{pdf_data_uri}" 
-                           download="cv.pdf" 
-                           style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">
-                           📥 Download PDF
-                        </a>
-                    </div>
-                </iframe>
-            </object>
-
-            <script>
-                // Try to detect if PDF loaded successfully
-                setTimeout(function() {{
-                    var embed = document.querySelector('embed[src*="application/pdf"]');
-                    var object = document.querySelector('object[data*="application/pdf"]');
-                    var iframe = document.querySelector('iframe[src*="application/pdf"]');
-
-                    // If embed fails, try object
-                    if (embed && !embed.offsetHeight) {{
-                        embed.style.display = 'none';
-                        if (object) object.style.display = 'block';
-                    }}
-                }}, 1000);
-            </script>
-        </div>
-        """
-
-        components.html(pdf_viewer_html, height=height + 100)
-
-        # Add download button as backup
+        # Create download button
         st.download_button(
-            "📥 Download PDF (if preview doesn't work)",
+            "📥 Download PDF",
             data=bytes_data,
             file_name="cv.pdf",
             mime="application/pdf",
-            key=f"pdf_fallback_download_{unique_key}"
+            key=f"pdf_download_{unique_key}"
         )
 
+        # Simple iframe approach
+        b64 = base64.b64encode(bytes_data).decode()
+
+        # Simple HTML iframe
+        iframe_html = f"""
+        <iframe 
+            src="data:application/pdf;base64,{b64}" 
+            width="100%" 
+            height="{height}px" 
+            style="border: 1px solid #ccc;">
+            <p>Your browser does not support PDFs. Please download the PDF to view it.</p>
+        </iframe>
+        """
+
+        st.markdown(iframe_html, unsafe_allow_html=True)
         return True
 
     except Exception as e:
@@ -249,37 +202,34 @@ def _embed_pdf_enhanced(bytes_data: bytes, height: int = 600, unique_key: str = 
         return False
 
 
-def _open_file_new_tab(bytes_data: bytes, mimetype: str, label: str = "Open in new tab") -> bool:
+def _open_file_auto_redirect(bytes_data: bytes, mimetype: str, unique_key: str = "") -> bool:
     """
-    Generic open-in-new-tab fallback using a data URI anchor injected via components.html.
-    Works immediately without rerun; if a strict browser blocks it, user can Download.
+    Auto-redirect to new tab with file content - reloads automatically.
     """
     try:
         src = _b64_data_uri(bytes_data, mimetype)
-        aid = f"open_{uuid.uuid4().hex}"
-        html = f'''
-            <div style="padding: 10px; background: #e7f3ff; border-radius: 4px; margin: 5px 0;">
-                <a id="{aid}" 
-                   href="{src}" 
-                   target="_blank" 
-                   rel="noopener noreferrer"
-                   style="color: #0066cc; text-decoration: none; font-weight: bold;">
-                   {label} ↗️
-                </a>
-                <script>
-                  (function() {{
-                    var a = document.getElementById("{aid}");
-                    if (a) {{
-                      // auto click to avoid extra step
-                      a.click();
-                    }}
-                  }})();
-                </script>
-            </div>
-        '''
-        components.html(html, height=60)
-        st.caption("If a new tab didn't open (strict browser), use Download below.")
+
+        # Auto-redirect script that opens new tab and reloads
+        redirect_html = f"""
+        <script>
+        (function() {{
+            var newWindow = window.open('{src}', '_blank');
+            if (newWindow) {{
+                // Force reload after a short delay
+                setTimeout(function() {{
+                    newWindow.location.reload();
+                }}, 1000);
+            }}
+        }})();
+        </script>
+        <div style="padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
+            ✅ Opening CV in new tab and reloading...
+        </div>
+        """
+
+        components.html(redirect_html, height=60)
         return True
+
     except Exception:
         return False
 
@@ -342,7 +292,7 @@ def _clear_caches():
 
 
 # =============================================================================
-# Interview helpers (formatting, filtering) - ENHANCED WITH DARK THEME
+# Interview helpers (formatting, filtering) - CLEAN VERSION
 # =============================================================================
 
 SYSTEM_HINT_WORDS = ("candidate record created", "record created", "created", "system", "import",
@@ -370,8 +320,8 @@ def _is_system_event(ev: Dict[str, Any]) -> bool:
     return False
 
 
-def _render_kv_block_dark(d: Dict[str, Any]):
-    """Dark themed key-value block renderer."""
+def _render_kv_block_clean(d: Dict[str, Any]):
+    """Clean white text key-value block renderer."""
     html_content = ""
     for k, v in d.items():
         if v is None or v == "":
@@ -385,7 +335,7 @@ def _render_kv_block_dark(d: Dict[str, Any]):
         field_name = _titleize_key(k)
         html_content += f"""
             <div style="margin-bottom: 8px;">
-                <span style="color: #ffd700; font-weight: bold;">• {field_name}:</span>
+                <span style="color: #ffffff; font-weight: bold;">• {field_name}:</span>
                 <span style="color: #ffffff; margin-left: 8px;">{v}</span>
             </div>
         """
@@ -393,7 +343,7 @@ def _render_kv_block_dark(d: Dict[str, Any]):
     if html_content:
         st.markdown(
             f"""
-            <div style="background-color: #1a1a1a; padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #333;">
+            <div style="background-color: #000000; padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #333;">
                 {html_content}
             </div>
             """,
@@ -402,7 +352,7 @@ def _render_kv_block_dark(d: Dict[str, Any]):
 
 
 def _format_interview_details(raw_details: str) -> str:
-    """Format raw interview details into human-readable text."""
+    """Format raw interview details into clean readable text."""
     if not raw_details or raw_details.strip() == "":
         return "No details provided"
 
@@ -440,7 +390,7 @@ def _format_interview_details(raw_details: str) -> str:
                 if value and str(value).strip():
                     field_name = field_mapping.get(key, key.replace("_", " ").title())
                     formatted_lines.append(
-                        f"<span style='color: #ffd700; font-weight: bold;'>{field_name}:</span> <span style='color: #ffffff;'>{value}</span>")
+                        f"<span style='color: #ffffff; font-weight: bold;'>{field_name}:</span> <span style='color: #ffffff;'>{value}</span>")
 
             return "<br>".join(formatted_lines) if formatted_lines else "No interview details recorded"
 
@@ -457,9 +407,9 @@ def _format_interview_details(raw_details: str) -> str:
     return cleaned_text
 
 
-def _render_interview_card_enhanced(ev: Dict[str, Any]):
+def _render_interview_card_clean(ev: Dict[str, Any]):
     """
-    ENHANCED: Render a single interview/event with dark theme styling.
+    CLEAN: Render a single interview/event with simple black background and white text.
     """
     # Extract common fields
     when = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at") or ev.get("date") or ev.get("timestamp")
@@ -490,16 +440,16 @@ def _render_interview_card_enhanced(ev: Dict[str, Any]):
     # Format header info
     header_info = []
     if result and result != "unspecified":
-        header_info.append(f"<span style='color: #28a745; font-weight: bold;'>{result}</span>")
+        header_info.append(f"<span style='color: #ffffff; font-weight: bold;'>{result}</span>")
     if when:
-        header_info.append(f"<span style='color: #6c757d;'>{_format_datetime(when)}</span>")
+        header_info.append(f"<span style='color: #cccccc;'>{_format_datetime(when)}</span>")
 
-    # Create dark themed interview card
+    # Create clean interview card
     header_extra = f" • {' • '.join(header_info)}" if header_info else ""
 
     st.markdown(
         f"""
-        <div style="background-color: #000000; padding: 20px; border-radius: 10px; margin-bottom: 15px; border: 2px solid #333;">
+        <div style="background-color: #000000; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333;">
             <div style="margin-bottom: 15px;">
                 <span style="color: #ffffff; font-size: 18px; font-weight: bold;">👤 {interviewer}</span>
                 {header_extra}
@@ -508,14 +458,14 @@ def _render_interview_card_enhanced(ev: Dict[str, Any]):
         unsafe_allow_html=True
     )
 
-    # Format and display notes with dark theme
+    # Format and display notes
     if notes and notes.strip():
         formatted_notes = _format_interview_details(notes)
 
         st.markdown(
             f"""
-            <div style="background-color: #1a1a1a; padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #444;">
-                <div style="color: #ffffff; line-height: 1.8; font-size: 14px;">
+            <div style="background-color: #000000; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                <div style="color: #ffffff; line-height: 1.6; font-size: 14px;">
                     {formatted_notes}
                 </div>
             </div>
@@ -523,13 +473,13 @@ def _render_interview_card_enhanced(ev: Dict[str, Any]):
             unsafe_allow_html=True
         )
 
-    # Show event metadata with dark theme
+    # Show event metadata
     ev_id = ev.get("id") or ev.get("event_id") or "—"
     actor_id = ev.get("actor_id") or ev.get("user_id") or "—"
 
     st.markdown(
         f"""
-            <div style="color: #6c757d; font-size: 12px; margin-top: 10px;">
+            <div style="color: #cccccc; font-size: 12px; margin-top: 10px;">
                 Event ID: {ev_id} • Actor ID: {actor_id}
             </div>
         </div>
@@ -541,64 +491,102 @@ def _render_interview_card_enhanced(ev: Dict[str, Any]):
 
 
 # =============================================================================
-# Candidate summary - ENHANCED WITH DARK THEME
+# Candidate summary - COMPLETE FORM DATA VERSION
 # =============================================================================
 
-def _render_candidate_summary_enhanced(c: Dict[str, Any]):
-    # Dark themed candidate name and basic info
+def _render_candidate_summary_complete(c: Dict[str, Any]):
+    """Display complete candidate information including all form questions."""
+
+    # Basic candidate info
     candidate_name = c.get('name') or '—'
     candidate_id = c.get('candidate_id') or c.get('id')
 
     st.markdown(
         f"""
-        <div style="background-color: #000000; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 2px solid #333;">
+        <div style="background-color: #000000; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333;">
             <h2 style="color: #ffffff; margin: 0 0 15px 0;">👤 {candidate_name}</h2>
-            <div style="color: #ffd700; font-size: 14px; line-height: 1.6;">
-                <div><strong>Candidate ID:</strong> <span style="color: #ffffff;">{candidate_id}</span></div>
-                <div><strong>Email:</strong> <span style="color: #ffffff;">{c.get('email') or '—'}</span></div>
-                <div><strong>Phone:</strong> <span style="color: #ffffff;">{c.get('phone') or '—'}</span></div>
-                <div><strong>Created At:</strong> <span style="color: #ffffff;">{_format_datetime(c.get('created_at'))}</span></div>
-                <div><strong>Updated At:</strong> <span style="color: #ffffff;">{_format_datetime(c.get('updated_at'))}</span></div>
-                <div><strong>Can Edit (candidate):</strong> <span style="color: #ffffff;">{bool(c.get('can_edit', False))}</span></div>
+            <div style="color: #ffffff; font-size: 14px; line-height: 1.6;">
+                <div><strong>Candidate ID:</strong> {candidate_id}</div>
+                <div><strong>Email:</strong> {c.get('email') or '—'}</div>
+                <div><strong>Phone:</strong> {c.get('phone') or '—'}</div>
+                <div><strong>Created At:</strong> {_format_datetime(c.get('created_at'))}</div>
+                <div><strong>Updated At:</strong> {_format_datetime(c.get('updated_at'))}</div>
+                <div><strong>Can Edit (candidate):</strong> {bool(c.get('can_edit', False))}</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True
     )
 
+    # Complete form data from candidate_view.py
     form = c.get("form_data") or {}
     if isinstance(form, dict) and form:
         st.markdown(
             """
-            <div style="background-color: #1a1a1a; padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #333;">
-                <h4 style="color: #ffd700; margin: 0 0 15px 0;">📋 Application Summary</h4>
+            <div style="background-color: #000000; padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #333;">
+                <h4 style="color: #ffffff; margin: 0 0 15px 0;">📋 Complete Application Details</h4>
             """,
             unsafe_allow_html=True
         )
 
-        # Display common fields if present, else a compact kv listing
-        displayed = False
-        common_fields = {
-            "dob": "Age / DOB",
+        # Map all form fields from candidate_view.py
+        form_fields = {
+            # Personal Information
+            "name": "Full Name",
+            "email": "Email Address",
+            "phone": "Phone Number",
+            "dob": "Date of Birth",
+            "current_address": "Current Address",
+            "permanent_address": "Permanent Address",
+            "caste": "Caste",
+            "sub_caste": "Sub-caste",
+            "marital_status": "Marital Status",
+
+            # Education & Experience
             "highest_qualification": "Highest Qualification",
             "work_experience": "Work Experience",
-            "ready_festivals": "Ready for Holidays",
-            "ready_late_nights": "Ready for Late Nights"
+            "referral": "How did you hear about us?",
+
+            # Availability Questions
+            "ready_festivals": "Ready to work on festivals and national holidays?",
+            "ready_late_nights": "Ready to work late nights if needed?",
+
+            # Timestamps
+            "updated_at": "Last Updated"
         }
 
         form_html = ""
-        for field_key, field_label in common_fields.items():
-            if form.get(field_key) is not None:
-                displayed = True
-                value = form.get(field_key, 'N/A')
+        for field_key, field_label in form_fields.items():
+            value = form.get(field_key)
+            if value is not None and str(value).strip():
+                # Format the value
+                if field_key in ["ready_festivals", "ready_late_nights"]:
+                    display_value = "✅ Yes" if value == "Yes" else "❌ No"
+                elif field_key == "dob":
+                    try:
+                        # Try to format date nicely
+                        if isinstance(value, str):
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(value)
+                            display_value = dt.strftime("%B %d, %Y")
+                        else:
+                            display_value = str(value)
+                    except:
+                        display_value = str(value)
+                elif field_key in ["current_address", "permanent_address", "work_experience"]:
+                    # Multi-line fields
+                    display_value = str(value).replace('\n', '<br>')
+                else:
+                    display_value = str(value)
+
                 form_html += f"""
-                    <div style="margin-bottom: 8px;">
-                        <span style="color: #ffd700; font-weight: bold;">• {field_label}:</span>
-                        <span style="color: #ffffff; margin-left: 8px;">{value}</span>
+                    <div style="margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px;">
+                        <div style="color: #ffffff; font-weight: bold; margin-bottom: 4px;">{field_label}:</div>
+                        <div style="color: #ffffff; margin-left: 15px; line-height: 1.5;">{display_value}</div>
                     </div>
                 """
 
-        if displayed and form_html:
+        if form_html:
             st.markdown(
                 f"""
                 <div style="color: #ffffff; line-height: 1.6;">
@@ -609,13 +597,12 @@ def _render_candidate_summary_enhanced(c: Dict[str, Any]):
                 unsafe_allow_html=True
             )
         else:
-            # Fallback to dark themed key-value block
             st.markdown("</div>", unsafe_allow_html=True)
-            _render_kv_block_dark(form)
+            st.info("No detailed form data available.")
 
 
 # =============================================================================
-# CEO Dashboard (main) - ENHANCED
+# CEO Dashboard (main) - SIMPLIFIED
 # =============================================================================
 
 def show_ceo_panel():
@@ -755,14 +742,14 @@ def show_ceo_panel():
         with st.expander(label, expanded=False):
             main_left, main_right = st.columns([3, 1])
             with main_left:
-                # Enhanced summary with dark theme
+                # Complete candidate summary with all form data
                 try:
-                    _render_candidate_summary_enhanced(c)
+                    _render_candidate_summary_complete(c)
                 except Exception:
                     st.error("Error rendering candidate summary.")
                     st.write(json.dumps(c, default=str))
 
-                # ===================== ENHANCED CV Access & Preview Section =====================
+                # ===================== SIMPLE CV Access & Preview Section =====================
                 try:
                     # Get the currently logged-in user
                     current_user = get_current_user(refresh=True)
@@ -780,7 +767,7 @@ def show_ceo_panel():
                     if not can_view_cvs:
                         st.warning("🔒 You do not have permission to view or download CVs.")
                     else:
-                        # Fetch CV securely from database using FIXED function
+                        # Fetch CV securely from database
                         cv_bytes, cv_name, reason = _safe_get_candidate_cv_fixed(cid, actor_id)
 
                         # Handle CV fetch results
@@ -795,7 +782,6 @@ def show_ceo_panel():
                             col1, col2 = st.columns([1, 1])
                             with col1:
                                 if st.button("🔗 Open CV Link", key=f"link_{cid}"):
-                                    # Use JavaScript to open link in new tab
                                     components.html(f"""
                                         <script>
                                         window.open('{cv_name}', '_blank');
@@ -826,23 +812,20 @@ def show_ceo_panel():
                                     key=f"dl_{cid}"
                                 )
 
-                            # 3️⃣ Open in New Tab Button
+                            # 3️⃣ Open in New Tab Button (Auto-redirect)
                             with col3:
                                 if st.button("↗️ Open in New Tab", key=f"newtab_{cid}"):
-                                    ok = _open_file_new_tab(cv_bytes, mimetype)
+                                    ok = _open_file_auto_redirect(cv_bytes, mimetype, cid)
                                     if not ok:
-                                        st.info("⚠️ Your browser blocked the new tab. Please use **Download** instead.")
+                                        st.info("⚠️ Failed to open in new tab. Please use **Download** instead.")
 
-                            # 4️⃣ Enhanced Inline Preview (if requested)
+                            # 4️⃣ Simple Inline Preview (if requested)
                             if st.session_state.get(f"preview_{cid}", False):
-                                st.subheader("📄 CV Preview")
-
                                 if mimetype == "application/pdf":
-                                    # ENHANCED PDF preview with multiple fallbacks
-                                    with st.spinner("Loading PDF..."):
-                                        ok = _embed_pdf_enhanced(cv_bytes, unique_key=cid)
-                                        if not ok:
-                                            st.info("PDF preview not available in browser. Please download the file.")
+                                    # Simple PDF preview
+                                    ok = _simple_pdf_preview(cv_bytes, unique_key=cid)
+                                    if not ok:
+                                        st.info("PDF preview not available. Please download the file.")
 
                                 elif mimetype.startswith("text/"):
                                     _preview_text(cv_bytes)
@@ -866,7 +849,7 @@ def show_ceo_panel():
                 except Exception as e:
                     st.error(f"Unexpected error while handling CV: {e}")
 
-                # ENHANCED Interview history with dark theme (skip system events)
+                # Clean Interview history (skip system events)
                 try:
                     with st.spinner("Loading interview history..."):
                         history = get_candidate_history(c.get("candidate_id"))
@@ -880,7 +863,7 @@ def show_ceo_panel():
                             st.markdown("#### 📋 Interview History")
                             # Only show actual interviews, not system events
                             for ev in real_history:
-                                _render_interview_card_enhanced(ev)
+                                _render_interview_card_clean(ev)
                 except Exception as e:
                     st.error(f"Interview history error: {str(e)}")
                     # Don't show full traceback in production
@@ -954,7 +937,7 @@ def show_ceo_panel():
     # Footer tip
     st.markdown("---")
     st.caption(
-        "💡 Tip: Enhanced PDF preview with multiple browser compatibility modes. If preview still fails, use 'Download' button.")
+        "💡 Simplified PDF preview and clean interview display. Auto-redirect opens files in new tab automatically.")
 
 
 def _batch_delete_candidates(candidate_ids: Iterable[str]):
