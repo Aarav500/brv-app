@@ -316,7 +316,14 @@ def _render_interview_card(idx: int, ev: Dict[str, Any]):
 
     if notes and notes.strip():
         md = _notes_to_markdown(notes)
-        st.markdown(f"**Details:**\n\n{md}")
+        st.markdown(
+            f"""
+            <div style="background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:10px; border:1px solid #ddd;">
+                <strong>Details:</strong><br>{md}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # show event metadata
     ev_id = ev.get("id") or ev.get("event_id") or "—"
@@ -506,41 +513,91 @@ def show_ceo_panel():
                     st.error("Error rendering candidate summary.")
                     st.write(json.dumps(c, default=str))
 
-                # CV access & preview
-                try:
-                    current_user = get_current_user(refresh=True)
-                    actor_id = current_user.get("id") if current_user else 0
-                    cv_bytes, cv_name, reason = _safe_get_candidate_cv(cid, actor_id)
-                    current_perms = get_user_permissions(current_user.get("id")) or {}
-                    can_view_cvs = bool(current_perms.get("can_view_cvs", False))
+                    # ===================== CV Access & Preview Section =====================
+                    try:
+                        # Get the currently logged-in user
+                        current_user = get_current_user(refresh=True)
+                        actor_id = current_user.get("id") if current_user else 0
 
-                    if reason == "no_permission":
-                        st.warning("❌ You don’t have permission to view CVs for this candidate.")
-                    elif reason == "not_found" or not cv_bytes:
-                        st.info("No CV uploaded yet.")
-                    elif reason == "ok" and cv_bytes:
-                        if not can_view_cvs:
-                            st.warning("🔒 You do not have permission to view or download CVs.")
-                        else:
-                            mimetype = _detect_mimetype_from_name(cv_name)
-                            a, b, ccol = st.columns([1, 1, 1])
-                            with a:
-                                if st.button("🔍 Preview", key=f"prev_{cid}"):
-                                    st.session_state[f"preview_{cid}"] = True
-                            with b:
-                                st.download_button(
-                                    "📄 Download",
-                                    data=cv_bytes,
-                                    file_name=cv_name or f"{cid}_cv.bin",
-                                    key=f"dl_{cid}",
-                                )
-                            with ccol:
-                                if st.button("↗️ Open in new tab", key=f"newtab_{cid}"):
-                                    ok = _open_file_new_tab(cv_bytes, mimetype)
-                                    if not ok:
-                                        st.info("Your browser blocked new tab. Please use Download.")
+                        # Fetch CV securely from database / storage
+                        cv_bytes, cv_name, reason = _safe_get_candidate_cv(cid, actor_id)
 
-                            # Render preview area
+                        # Get the user's permissions
+                        current_perms = get_user_permissions(actor_id) or {}
+                        can_view_cvs = bool(current_perms.get("can_view_cvs", False))
+
+                        # Handle CV fetch results
+                        if reason == "no_permission":
+                            st.warning("❌ You don’t have permission to view CVs for this candidate.")
+
+                        elif reason == "not_found" or not cv_bytes:
+                            st.info("📂 No CV uploaded yet.")
+
+                        elif reason == "ok" and cv_bytes:
+                            # Check view permissions
+                            if not can_view_cvs:
+                                st.warning("🔒 You do not have permission to view or download CVs.")
+                            else:
+                                # Detect file type for proper preview
+                                mimetype = _detect_mimetype_from_name(cv_name)
+
+                                # Create three columns: Preview | Download | Open in New Tab
+                                col1, col2, col3 = st.columns([1, 1, 1])
+
+                                # 1️⃣ Preview Button
+                                with col1:
+                                    if st.button("🔍 Preview", key=f"prev_{cid}"):
+                                        st.session_state[f"preview_{cid}"] = True
+
+                                # 2️⃣ Download Button
+                                with col2:
+                                    st.download_button(
+                                        "📄 Download",
+                                        data=cv_bytes,
+                                        file_name=cv_name or f"{cid}_cv.bin",
+                                        key=f"dl_{cid}"
+                                    )
+
+                                # 3️⃣ Open in New Tab Button
+                                with col3:
+                                    if st.button("↗️ Open in New Tab", key=f"newtab_{cid}"):
+                                        ok = _open_file_new_tab(cv_bytes, mimetype)
+                                        if not ok:
+                                            st.info(
+                                                "⚠️ Your browser blocked the new tab. Please use **Download** instead.")
+
+                                # 4️⃣ Inline PDF Preview (optional)
+                                if st.session_state.get(f"preview_{cid}", False):
+                                    try:
+                                        if mimetype == "application/pdf":
+                                            st.subheader("📄 CV Preview")
+                                            st.download_button(
+                                                label="🔽 Save PDF",
+                                                data=cv_bytes,
+                                                file_name=cv_name or f"{cid}_cv.pdf",
+                                                key=f"save_{cid}"
+                                            )
+                                            st.components.v1.html(
+                                                f"""
+                                                <embed
+                                                    src="data:application/pdf;base64,{cv_bytes.decode('latin1')}"
+                                                    width="100%"
+                                                    height="600px"
+                                                    type="application/pdf"
+                                                />
+                                                """,
+                                                height=600
+                                            )
+                                        else:
+                                            st.warning(
+                                                "⚠️ Preview not supported for this file type. Please download instead.")
+                                    except Exception as e:
+                                        st.error(f"❌ Unable to preview CV: {e}")
+
+                    except Exception as e:
+                        st.error(f"Unexpected error while fetching CV: {e}")
+
+                        # Render preview area
                             if st.session_state.get(f"preview_{cid}", False):
                                 st.markdown("**Preview**")
                                 if mimetype == "application/pdf":

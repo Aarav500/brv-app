@@ -646,26 +646,27 @@ def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[
         if not (role in ("ceo", "admin") or perms.get("can_view_cvs")):
             return None, None, None, "no_permission"
 
-        conn = get_conn()
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT cv_file, cv_filename FROM candidates WHERE candidate_id=%s", (candidate_id,))
-            row = cur.fetchone()
-            conn.close()
+    cursor = conn.cursor()
+    cursor.execute("SELECT cv_link FROM candidates WHERE candidate_id = %s", (candidate_id,))
+    result = cursor.fetchone()
+    cursor.close()
 
-            if not row or not row[0]:
-                return None, None, None, "not_found"
+    if not result or not result[0]:
+        return None
 
-            cv_bytes = bytes(row[0])
-            filename = row[1] or f"{candidate_id}_CV.pdf"
-            mime_type, _ = mimetypes.guess_type(filename)
-            mime_type = mime_type or "application/pdf"  # Default PDF
+    link = result[0]
 
-            return cv_bytes, filename, mime_type, "ok"
-
-    except Exception as e:
-        print(f"get_candidate_cv_secure ERROR: {e}")
-        return None, None, None, "error"
-
+    # Fix Google Drive preview URL for embedding
+    if "drive.google.com" in link:
+        if "view" in link:
+            return link
+        elif "file/d/" in link:
+            file_id = link.split("file/d/")[1].split("/")[0]
+            return f"https://drive.google.com/file/d/{file_id}/preview"
+        elif "id=" in link:
+            file_id = link.split("id=")[1]
+            return f"https://drive.google.com/file/d/{file_id}/preview"
+    return link
 
 def get_total_cv_storage_usage() -> int:
     conn = get_conn()
