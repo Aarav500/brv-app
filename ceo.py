@@ -338,7 +338,8 @@ def _format_interview_details(raw_details: str) -> str:
         pass
 
     # Fallback: return as is but clean it up
-    return raw_details.replace("\\n", "\n").replace('\\"', '"')
+    cleaned_text = raw_details.replace("\\n", "\n").replace('\\"', '"')
+    return cleaned_text
 
 
 def _render_interview_card_fixed(ev: Dict[str, Any]):
@@ -382,11 +383,13 @@ def _render_interview_card_fixed(ev: Dict[str, Any]):
     # Format and display notes
     if notes and notes.strip():
         formatted_notes = _format_interview_details(notes)
+        # Convert newlines to HTML breaks outside the f-string
+        formatted_html = formatted_notes.replace('\n', '<br>')
         st.markdown(
             f"""
             <div style="background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:10px; border:1px solid #ddd;">
                 <div style="color:#333333; line-height: 1.6;">
-                    {formatted_notes.replace('\n', '<br>')}
+                    {formatted_html}
                 </div>
             </div>
             """,
@@ -688,21 +691,24 @@ def show_ceo_panel():
 
                 # Interview history (skip system events) - FIXED
                 try:
-                    history = get_candidate_history(c.get("candidate_id"))
+                    with st.spinner("Loading interview history..."):
+                        history = get_candidate_history(c.get("candidate_id"))
                     if history is None:
                         st.info("No interview history available.")
                     else:
                         real_history = [ev for ev in history if not _is_system_event(ev)]
                         if not real_history:
-                            st.info("No interviews recorded (only system events present).")
+                            st.info("No interviews recorded yet.")
                         else:
                             st.markdown("#### Interview History")
-                            # FIXED: Don't show numbering, just render each interview
+                            # Only show actual interviews, not system events
                             for ev in real_history:
                                 _render_interview_card_fixed(ev)
-                except Exception:
-                    st.error("Interview history: (error fetching)")
-                    st.write(traceback.format_exc())
+                except Exception as e:
+                    st.error(f"Interview history error: {str(e)}")
+                    # Don't show full traceback in production
+                    if st.session_state.get("debug_mode", False):
+                        st.write(traceback.format_exc())
 
             with main_right:
                 st.markdown("### Actions")
