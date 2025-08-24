@@ -102,9 +102,9 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
             index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
         )
 
-    # Resume upload (raw file object included in returned dict)
+    # Resume upload (MANDATORY now)
     uploaded_cv = st.file_uploader(
-        "Upload Your Resume (PDF/DOC/DOCX preferred)",
+        "Upload Your Resume (PDF/DOC/DOCX preferred) — REQUIRED",
         type=["pdf", "doc", "docx"],
         key="new_candidate_cv"
     )
@@ -159,11 +159,24 @@ def candidate_form_view():
 
         # Validate required fields
         missing_fields = []
-        if not form_data["name"]:
-            missing_fields.append("Full Name")
-        if not form_data["phone"]:
-            missing_fields.append("Phone")
-        elif len(form_data["phone"]) < 10:
+        required_fields = {
+            "Full Name": form_data.get("name"),
+            "Email": form_data.get("email"),
+            "Phone": form_data.get("phone"),
+            "Date of Birth": form_data.get("dob"),
+            "Current Address": form_data.get("current_address"),
+            "Permanent Address": form_data.get("permanent_address"),
+            "Highest Qualification": form_data.get("highest_qualification"),
+            "Work Experience": form_data.get("work_experience"),
+            "Referral": form_data.get("referral"),
+            "CV": form_data.get("uploaded_cv"),
+        }
+
+        for label, value in required_fields.items():
+            if not value or (isinstance(value, str) and not value.strip()):
+                missing_fields.append(label)
+
+        if form_data["phone"] and len(form_data["phone"]) < 10:
             st.error("⚠️ Please enter a valid 10-digit phone number.")
             st.stop()
 
@@ -188,14 +201,14 @@ def candidate_form_view():
             if rec:
                 st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
 
-                if form_data.get("uploaded_cv"):
-                    file = form_data["uploaded_cv"]
-                    file_bytes = file.read()
-                    ok = save_candidate_cv(candidate_id, file_bytes, file.name)
-                    if ok:
-                        st.success("📄 CV uploaded successfully.")
-                    else:
-                        st.error("⚠️ Failed to save CV.")
+                # Save CV (mandatory, so guaranteed present)
+                file = form_data["uploaded_cv"]
+                file_bytes = file.read()
+                ok = save_candidate_cv(candidate_id, file_bytes, file.name)
+                if ok:
+                    st.success("📄 CV uploaded successfully.")
+                else:
+                    st.error("⚠️ Failed to save CV.")
 
     else:
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
