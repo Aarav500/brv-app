@@ -598,29 +598,33 @@ def show_ceo_panel():
                         st.error(f"Unexpected error while fetching CV: {e}")
 
                         # Render preview area
-                            if st.session_state.get(f"preview_{cid}", False):
-                                st.markdown("**Preview**")
-                                if mimetype == "application/pdf":
-                                    ok = _embed_pdf_iframe(cv_bytes)
-                                    if not ok:
-                                        if not _open_file_new_tab(cv_bytes, mimetype):
-                                            st.info("Preview blocked. Please use Download.")
-                                elif mimetype.startswith("text/"):
-                                    _preview_text(cv_bytes)
-                                elif mimetype.startswith("image/"):
-                                    _preview_image(cv_bytes, caption=cv_name or cid)
-                                elif mimetype in (
+                        if st.session_state.get(f"preview_{cid}", False):
+                            st.markdown("**Preview**")
+
+                            if mimetype == "application/pdf":
+                                ok = _embed_pdf_iframe(cv_bytes)
+                                if not ok:
+                                    if not _open_file_new_tab(cv_bytes, mimetype):
+                                        st.info("Preview blocked. Please use Download.")
+
+                            elif mimetype.startswith("text/"):
+                                _preview_text(cv_bytes)
+
+                            elif mimetype.startswith("image/"):
+                                _preview_image(cv_bytes, caption=cv_name or cid)
+
+                            elif mimetype in (
                                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     "application/msword",
-                                ):
-                                    st.info("Inline preview for Word docs is not supported. Use Open in New Tab or Download.")
-                                else:
-                                    st.info("Preview isn't available for this file type. Please download to view.")
-                    else:
-                        st.info("No CV available or unable to fetch CV. You can upload or check permissions.")
-                except Exception as e:
-                    st.error("Error processing CV preview/download.")
-                    st.write(traceback.format_exc())
+                            ):
+                                st.info(
+                                    "Inline preview for Word docs is not supported. Use Open in New Tab or Download.")
+
+                            else:
+                                st.info("Preview isn't available for this file type. Please download to view.")
+
+                        else:
+                            st.info("No CV available or unable to fetch CV. You can upload or check permissions.")
 
                 # Interview history (skip system events)
                 try:
