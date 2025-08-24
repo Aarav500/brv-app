@@ -138,9 +138,9 @@ def _safe_get_candidate_cv_fixed(candidate_id: str, actor_id: int) -> Tuple[Opti
                     return bytes(cv_file), cv_filename or f"{candidate_id}.bin", "ok"
 
                 # If we have a resume link but no file bytes
-                if resume_link:
+                if resume_link and resume_link.strip():
                     # For links, we can't return bytes, so indicate it's a link
-                    return None, resume_link, "link_only"
+                    return None, resume_link.strip(), "link_only"
 
                 # No CV found
                 return None, None, "not_found"
@@ -295,8 +295,9 @@ def _render_interview_card_fixed(ev: Dict[str, Any]):
         md = _notes_to_markdown(notes)
         st.markdown(
             f"""
-            <div style="background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:10px; border:1px solid #ddd;">
-                <strong>Details:</strong><br>{md}
+            <div style="background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:10px; border:1px solid #ddd; color:#000000;">
+                <strong style="color:#000000;">Details:</strong><br>
+                <div style="color:#333333;">{md}</div>
             </div>
             """,
             unsafe_allow_html=True
@@ -519,9 +520,19 @@ def show_ceo_panel():
                             st.info("📂 No CV uploaded yet.")
 
                         elif reason == "link_only":
-                            st.info(f"📎 CV available as link: {cv_name}")
-                            if st.button("🔗 Open CV Link", key=f"link_{cid}"):
-                                st.markdown(f"[Open CV]({cv_name})")
+                            st.info(f"📎 CV available as link")
+                            col1, col2 = st.columns([1, 1])
+                            with col1:
+                                if st.button("🔗 Open CV Link", key=f"link_{cid}"):
+                                    # Use JavaScript to open link in new tab
+                                    components.html(f"""
+                                        <script>
+                                        window.open('{cv_name}', '_blank');
+                                        </script>
+                                        <p>Opening CV in new tab...</p>
+                                    """, height=50)
+                            with col2:
+                                st.markdown(f"[📄 Direct Link]({cv_name})", unsafe_allow_html=True)
 
                         elif reason == "ok" and cv_bytes:
                             # Detect file type for proper preview
