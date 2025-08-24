@@ -157,15 +157,46 @@ def _safe_get_candidate_cv_fixed(candidate_id: str, actor_id: int) -> Tuple[Opti
 # CV Preview Helpers & Fallbacks
 # =============================================================================
 
-def _embed_pdf_iframe(bytes_data: bytes, height: int = 720) -> bool:
-    """Primary inline preview for PDFs using base64 data URI in <iframe>."""
+def _embed_pdf_iframe(bytes_data: bytes, height: int = 600) -> bool:
+    """Enhanced PDF preview with fallback options."""
     if not bytes_data:
         return False
     try:
-        src = _b64_data_uri(bytes_data, "application/pdf")
-        html = f'<iframe src="{src}" width="100%" height="{height}" style="border:none;"></iframe>'
-        components.html(html, height=height + 20)
-        return True
+        # Try direct PDF display first
+        st.info("📄 Loading PDF preview...")
+
+        # Use Streamlit's native PDF display if available
+        try:
+            # Method 1: Direct bytes display
+            with st.container():
+                st.write("**PDF Content:**")
+                # Create download button as fallback
+                st.download_button(
+                    "📥 Download PDF to view",
+                    data=bytes_data,
+                    file_name="cv.pdf",
+                    mime="application/pdf"
+                )
+
+                # Try embedding with object tag
+                b64 = base64.b64encode(bytes_data).decode()
+                pdf_display = f"""
+                <div style="width:100%; height:{height}px;">
+                    <object data="data:application/pdf;base64,{b64}" 
+                            type="application/pdf" 
+                            width="100%" 
+                            height="{height}px">
+                        <p>PDF cannot be displayed in this browser. Please download to view.</p>
+                        <a href="data:application/pdf;base64,{b64}" download="cv.pdf">Download PDF</a>
+                    </object>
+                </div>
+                """
+                components.html(pdf_display, height=height + 50)
+                return True
+        except Exception as e:
+            st.warning(f"PDF preview failed: {e}")
+            return False
+
     except Exception:
         return False
 
@@ -219,19 +250,28 @@ def _preview_image(bytes_data: bytes, caption: Optional[str] = None):
 # Interview helpers (formatting, filtering) - FIXED
 # =============================================================================
 
-SYSTEM_HINT_WORDS = ("candidate record created", "record created", "created", "system", "import")
+SYSTEM_HINT_WORDS = ("candidate record created", "record created", "created", "system", "import",
+                     "candidate record updated", "record updated", "updated")
 
 
 def _is_system_event(ev: Dict[str, Any]) -> bool:
-    title = str(ev.get("title") or ev.get("event") or "").lower()
+    """Enhanced system event detection."""
+    title = str(ev.get("title") or ev.get("event") or ev.get("details") or "").lower()
     actor = str(ev.get("actor") or ev.get("source") or ev.get("actor_type") or "").lower()
-    etype = str(ev.get("type") or "").lower()
+    etype = str(ev.get("type") or ev.get("event") or "").lower()
+
+    # Check if it's a system event
     if any(w in title for w in SYSTEM_HINT_WORDS):
         return True
     if actor and ("portal" in actor or "candidate_portal" in actor or "system" in actor):
         return True
-    if etype in ("system", "created", "import"):
+    if etype in ("system", "created", "import", "candidate_created", "candidate_updated"):
         return True
+
+    # Additional check for system-like events
+    if "candidate record" in title or "record updated" in title:
+        return True
+
     return False
 
 
@@ -247,9 +287,63 @@ def _render_kv_block(d: Dict[str, Any]):
         st.write(f"- **{_titleize_key(k)}:** {v}")
 
 
+def _format_interview_details(raw_details: str) -> str:
+    """Format raw interview details into human-readable text."""
+    if not raw_details or raw_details.strip() == "":
+        return "No details provided"
+
+    # If it's already formatted text, return as is
+    if not (raw_details.strip().startswith("{") or raw_details.strip().startswith('"')):
+        return raw_details
+
+    try:
+        # Try to parse as JSON
+        if raw_details.strip().startswith("{"):
+            import json
+            data = json.loads(raw_details)
+            formatted_lines = []
+
+            # Format common interview fields
+            field_mapping = {
+                "age": "Age",
+                "education": "Education",
+                "family_background": "Family Background",
+                "english": "English Skills",
+                "experience_salary": "Experience & Salary",
+                "attitude": "Attitude",
+                "commitment": "Commitment Level",
+                "no_festival_leave": "Available for Festivals",
+                "own_pc": "Has Own PC",
+                "continuous_night": "Continuous Night Shifts",
+                "rotational_night": "Rotational Night Shifts",
+                "profile_fit": "Profile Fit",
+                "project_fit": "Project Fit",
+                "grasping": "Learning Ability",
+                "other_notes": "Additional Notes"
+            }
+
+            for key, value in data.items():
+                if value and str(value).strip():
+                    field_name = field_mapping.get(key, key.replace("_", " ").title())
+                    formatted_lines.append(f"**{field_name}:** {value}")
+
+            return "\n".join(formatted_lines) if formatted_lines else "No interview details recorded"
+
+        # If starts with quotes, it might be a quoted string
+        elif raw_details.strip().startswith('"') and raw_details.strip().endswith('"'):
+            clean_text = raw_details.strip()[1:-1]  # Remove quotes
+            return clean_text if clean_text else "No details provided"
+
+    except (json.JSONDecodeError, Exception):
+        pass
+
+    # Fallback: return as is but clean it up
+    return raw_details.replace("\\n", "\n").replace('\\"', '"')
+
+
 def _render_interview_card_fixed(ev: Dict[str, Any]):
     """
-    FIXED: Render a single interview/event as a clean card WITHOUT numbering.
+    FIXED: Render a single interview/event with properly formatted details.
     """
     # Extract common fields
     when = ev.get("created_at") or ev.get("at") or ev.get("scheduled_at") or ev.get("date") or ev.get("timestamp")
@@ -258,52 +352,48 @@ def _render_interview_card_fixed(ev: Dict[str, Any]):
     raw_details = ev.get("details") or ev.get("notes") or ev.get("action") or ""
     result = None
     notes = None
+
     if isinstance(raw_details, dict):
         result = raw_details.get("result") or raw_details.get("status")
         notes = raw_details.get("notes") or raw_details.get("details") or ""
     else:
-        # string
-        notes = str(raw_details or "")
+        # Handle string details that might contain result info
+        raw_str = str(raw_details or "")
+        if raw_str.startswith("Result: "):
+            parts = raw_str.split("Result: ", 1)
+            if len(parts) > 1 and ", Notes: " in parts[1]:
+                result_and_notes = parts[1].split(", Notes: ", 1)
+                result = result_and_notes[0]
+                notes = result_and_notes[1] if len(result_and_notes) > 1 else ""
+            else:
+                result = parts[1] if len(parts) > 1 else None
+                notes = ""
+        else:
+            notes = raw_str
 
     # Header WITHOUT numbering
     header = f"**{interviewer}**"
-    if result:
+    if result and result != "unspecified":
         header += f" — {result}"
     if when:
         header += f" • {_format_datetime(when)}"
     st.markdown(header)
 
-    # Format notes into Markdown-friendly bullets
-    def _notes_to_markdown(n: str) -> str:
-        if not n:
-            return ""
-        n = n.replace("\r\n", "\n").strip()
-        lines = [ln.strip() for ln in n.split("\n") if ln.strip()]
-        # If single paragraph, return as-is (short)
-        if len(lines) == 1:
-            return lines[0]
-        # Otherwise render as bullets, preserving existing bullet markers
-        out = []
-        for ln in lines:
-            if re.match(r"^[\-\•\*]\s+", ln):
-                out.append(ln)
-            else:
-                out.append(f"- {ln}")
-        return "\n".join(out)
-
+    # Format and display notes
     if notes and notes.strip():
-        md = _notes_to_markdown(notes)
+        formatted_notes = _format_interview_details(notes)
         st.markdown(
             f"""
-            <div style="background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:10px; border:1px solid #ddd; color:#000000;">
-                <strong style="color:#000000;">Details:</strong><br>
-                <div style="color:#333333;">{md}</div>
+            <div style="background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:10px; border:1px solid #ddd;">
+                <div style="color:#333333; line-height: 1.6;">
+                    {formatted_notes.replace('\n', '<br>')}
+                </div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-    # show event metadata
+    # Show event metadata
     ev_id = ev.get("id") or ev.get("event_id") or "—"
     actor_id = ev.get("actor_id") or ev.get("user_id") or "—"
     st.caption(f"Event ID: {ev_id} • Actor ID: {actor_id}")
@@ -399,7 +489,8 @@ def show_ceo_panel():
     # Load candidates (cached per session run)
     try:
         if "last_candidates_loaded" not in st.session_state:
-            st.session_state["last_candidates_loaded"] = get_all_candidates() or []
+            with st.spinner("Loading candidates..."):
+                st.session_state["last_candidates_loaded"] = get_all_candidates() or []
         candidates: List[Dict[str, Any]] = st.session_state["last_candidates_loaded"]
     except Exception as e:
         st.error(f"Failed to load candidates: {e}")
@@ -567,10 +658,11 @@ def show_ceo_panel():
                                 st.subheader("📄 CV Preview")
 
                                 if mimetype == "application/pdf":
-                                    ok = _embed_pdf_iframe(cv_bytes)
-                                    if not ok:
-                                        if not _open_file_new_tab(cv_bytes, mimetype):
-                                            st.info("Preview blocked. Please use Download.")
+                                    # Enhanced PDF preview
+                                    with st.spinner("Loading PDF..."):
+                                        ok = _embed_pdf_iframe(cv_bytes)
+                                        if not ok:
+                                            st.info("PDF preview not available in browser. Please download the file.")
 
                                 elif mimetype.startswith("text/"):
                                     _preview_text(cv_bytes)
@@ -583,7 +675,7 @@ def show_ceo_panel():
                                         "application/msword",
                                 ):
                                     st.info(
-                                        "Inline preview for Word docs is not supported. Use Open in New Tab or Download.")
+                                        "📄 Word document preview is not supported. Please download to view the full document.")
 
                                 else:
                                     st.info("Preview isn't available for this file type. Please download to view.")
