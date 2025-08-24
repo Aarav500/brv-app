@@ -668,6 +668,10 @@ def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[
             return f"https://drive.google.com/file/d/{file_id}/preview"
     return link
 
+    except Exception as e:
+    print(f"[ERROR] Failed to fetch CV for {candidate_id}: {e}")
+    return None, None, None, "error"
+
 def get_total_cv_storage_usage() -> int:
     conn = get_conn()
     try:
