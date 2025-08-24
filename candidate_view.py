@@ -1,4 +1,4 @@
-# candidate_view.py (final patched validation)
+# candidate_view.py (final patched validation with debugging)
 import json
 import secrets
 import string
@@ -64,9 +64,10 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
     # Personal details
     col1, col2, col3 = st.columns(3)
     with col1:
-        # DOB handling with better defaults
+        # DOB handling - always require explicit selection
         dob_default = None
         dob_raw = data.get("dob") or data.get("date_of_birth")
+
         if dob_raw:
             try:
                 from datetime import datetime as _dt
@@ -76,17 +77,21 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
                     from datetime import datetime as _dt
                     dob_default = _dt.strptime(dob_raw, "%Y-%m-%d").date()
                 except Exception:
-                    dob_default = None
+                    pass
 
-        # If no default, use a reasonable default instead of today
-        if dob_default is None:
-            dob_default = date(1990, 1, 1)
+        # For new forms, don't set a default - let user pick
+        if not initial:  # This is a new form
+            dob = st.date_input("Date of Birth *",
+                                min_value=date(1950, 1, 1),
+                                max_value=date.today(),
+                                help="Required field - Please select your date of birth")
+        else:  # Editing existing form
+            dob = st.date_input("Date of Birth *",
+                                value=dob_default or date(1990, 1, 1),
+                                min_value=date(1950, 1, 1),
+                                max_value=date.today(),
+                                help="Required field")
 
-        dob = st.date_input("Date of Birth *",
-                            value=dob_default,
-                            min_value=date(1950, 1, 1),
-                            max_value=date.today(),
-                            help="Required field")
     with col2:
         caste = st.text_input("Caste", value=data.get("caste", ""))
     with col3:
@@ -135,29 +140,35 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
         help="This is a required field. Please upload your CV in PDF, DOC, or DOCX format."
     )
 
-    # Handle DOB value properly - always use the selected date
+    # Handle DOB value - only set if user actually selected something
     dob_value = None
     if isinstance(dob, date):
-        dob_value = dob.isoformat()
+        # For new forms, only accept if it's not today's date (unless explicitly chosen)
+        if initial or dob != date.today():
+            dob_value = dob.isoformat()
+        elif not initial and dob != date.today():
+            dob_value = dob.isoformat()
 
-    return _safe_json({
-        "name": name.strip(),
-        "email": email.strip(),
-        "phone": phone.strip(),
-        "current_address": current_address.strip(),
-        "permanent_address": permanent_address.strip(),
+    form_data = {
+        "name": name.strip() if name else "",
+        "email": email.strip() if email else "",
+        "phone": phone.strip() if phone else "",
+        "current_address": current_address.strip() if current_address else "",
+        "permanent_address": permanent_address.strip() if permanent_address else "",
         "dob": dob_value,
-        "caste": caste.strip(),
-        "sub_caste": sub_caste.strip(),
+        "caste": caste.strip() if caste else "",
+        "sub_caste": sub_caste.strip() if sub_caste else "",
         "marital_status": marital_status,
-        "highest_qualification": highest_qualification.strip(),
-        "work_experience": work_experience.strip(),
-        "referral": referral.strip(),
+        "highest_qualification": highest_qualification.strip() if highest_qualification else "",
+        "work_experience": work_experience.strip() if work_experience else "",
+        "referral": referral.strip() if referral else "",
         "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
         "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
         "uploaded_cv": uploaded_cv,
         "updated_at": datetime.utcnow().isoformat(),
-    })
+    }
+
+    return _safe_json(form_data)
 
 
 def _cv_uploader(candidate_id: str):
@@ -185,58 +196,82 @@ def candidate_form_view():
         form_data = _pre_interview_fields()
         st.markdown("---")
 
-        # Normalize phone
-        form_data["phone"] = "".join(filter(str.isdigit, form_data.get("phone", ""))).strip()
-        form_data["name"] = form_data.get("name", "").strip()
+        # Debug: Show what data we captured (remove this in production)
+        with st.expander("Debug: Form Data Captured", expanded=False):
+            st.json(form_data)
 
-        if st.button("Submit Application"):
+        # Normalize phone
+        if form_data.get("phone"):
+            form_data["phone"] = "".join(filter(str.isdigit, form_data.get("phone", ""))).strip()
+
+        if st.button("Submit Application", type="primary"):
             # Enhanced validation with specific error messages
             validation_errors = []
 
+            # Debug each field
+            st.write("Debugging validation:")
+
             # Name validation
-            if not form_data.get("name"):
+            name_val = form_data.get("name", "").strip()
+            st.write(f"Name: '{name_val}' (length: {len(name_val)})")
+            if not name_val:
                 validation_errors.append("• Full Name is required")
 
             # Email validation
-            email = form_data.get("email", "").strip()
-            if not email:
+            email_val = form_data.get("email", "").strip()
+            st.write(f"Email: '{email_val}' (length: {len(email_val)})")
+            if not email_val:
                 validation_errors.append("• Email is required")
-            elif "@" not in email or "." not in email.split("@")[-1]:
+            elif "@" not in email_val or "." not in email_val.split("@")[-1]:
                 validation_errors.append("• Please enter a valid email address")
 
             # Phone validation
-            phone = form_data.get("phone", "")
-            if not phone:
+            phone_val = form_data.get("phone", "")
+            st.write(f"Phone: '{phone_val}' (length: {len(phone_val)})")
+            if not phone_val:
                 validation_errors.append("• Phone number is required")
-            elif len(phone) < 10:
+            elif len(phone_val) < 10:
                 validation_errors.append("• Phone number must be at least 10 digits")
 
-            # DOB validation - simplified to just check if it exists
-            dob = form_data.get("dob")
-            if not dob:
+            # DOB validation
+            dob_val = form_data.get("dob")
+            st.write(f"DOB: '{dob_val}'")
+            if not dob_val:
                 validation_errors.append("• Date of Birth is required")
 
             # Address validation
-            if not form_data.get("current_address", "").strip():
+            curr_addr = form_data.get("current_address", "").strip()
+            st.write(f"Current Address: '{curr_addr}' (length: {len(curr_addr)})")
+            if not curr_addr:
                 validation_errors.append("• Current Address is required")
 
-            if not form_data.get("permanent_address", "").strip():
+            perm_addr = form_data.get("permanent_address", "").strip()
+            st.write(f"Permanent Address: '{perm_addr}' (length: {len(perm_addr)})")
+            if not perm_addr:
                 validation_errors.append("• Permanent Address is required")
 
             # Qualification validation
-            if not form_data.get("highest_qualification", "").strip():
+            qual_val = form_data.get("highest_qualification", "").strip()
+            st.write(f"Qualification: '{qual_val}' (length: {len(qual_val)})")
+            if not qual_val:
                 validation_errors.append("• Highest Qualification is required")
 
             # Work experience validation
-            if not form_data.get("work_experience", "").strip():
+            work_val = form_data.get("work_experience", "").strip()
+            st.write(f"Work Experience: '{work_val}' (length: {len(work_val)})")
+            if not work_val:
                 validation_errors.append("• Work Experience is required")
 
             # Referral validation
-            if not form_data.get("referral", "").strip():
+            ref_val = form_data.get("referral", "").strip()
+            st.write(f"Referral: '{ref_val}' (length: {len(ref_val)})")
+            if not ref_val:
                 validation_errors.append("• Referral information is required")
 
             # CV validation
-            if form_data.get("uploaded_cv") is None:
+            cv_val = form_data.get("uploaded_cv")
+            st.write(f"CV: {cv_val}")
+            if cv_val is None:
                 validation_errors.append("• CV upload is required")
 
             # Display all validation errors at once
@@ -266,6 +301,7 @@ def candidate_form_view():
                 # Save CV
                 file = form_data["uploaded_cv"]
                 if file:
+                    file.seek(0)  # Reset file pointer
                     file_bytes = file.read()
                     ok = save_candidate_cv(candidate_id, file_bytes, file.name)
                     if ok:
