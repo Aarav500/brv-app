@@ -17,6 +17,7 @@ from db_postgres import (
     get_all_candidates,
 )
 
+
 # --------------------------------
 # helpers
 # --------------------------------
@@ -42,20 +43,28 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
     data = initial or {}
     st.subheader("Pre-Interview Form")
 
+    # Add a note about required fields
+    st.info("Fields marked with * are required")
+
     initial_name = data.get("name") or data.get("full_name") or ""
 
-    # Basics
-    name = st.text_input("Full Name", value=initial_name)
-    email = st.text_input("Email", value=data.get("email", ""))
-    phone = st.text_input("Phone", value=data.get("phone", ""))
+    # Basics with required indicators
+    name = st.text_input("Full Name *", value=initial_name, help="Required field")
+    email = st.text_input("Email *", value=data.get("email", ""), help="Required field")
+    phone = st.text_input("Phone *", value=data.get("phone", ""), help="Required field - 10 digits minimum")
 
-    # Addresses
-    current_address = st.text_area("Current Address", value=data.get("current_address", "") or data.get("address", ""))
-    permanent_address = st.text_area("Permanent Address", value=data.get("permanent_address", ""))
+    # Addresses with required indicators
+    current_address = st.text_area("Current Address *",
+                                   value=data.get("current_address", "") or data.get("address", ""),
+                                   help="Required field")
+    permanent_address = st.text_area("Permanent Address *",
+                                     value=data.get("permanent_address", ""),
+                                     help="Required field")
 
     # Personal details
     col1, col2, col3 = st.columns(3)
     with col1:
+        # DOB handling with better defaults
         dob_default = None
         dob_raw = data.get("dob") or data.get("date_of_birth")
         if dob_raw:
@@ -68,7 +77,16 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
                     dob_default = _dt.strptime(dob_raw, "%Y-%m-%d").date()
                 except Exception:
                     dob_default = None
-        dob = st.date_input("Date of Birth", value=dob_default)
+
+        # If no default, use a reasonable default instead of today
+        if dob_default is None:
+            dob_default = date(1990, 1, 1)
+
+        dob = st.date_input("Date of Birth *",
+                            value=dob_default,
+                            min_value=date(1950, 1, 1),
+                            max_value=date.today(),
+                            help="Required field")
     with col2:
         caste = st.text_input("Caste", value=data.get("caste", ""))
     with col3:
@@ -81,11 +99,17 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
         m_index = marital_options.index(data["marital_status"]) if data.get("marital_status") in marital_options else 0
         marital_status = st.selectbox("Marital Status", options=marital_options, index=m_index)
     with col5:
-        highest_qualification = st.text_input("Highest Qualification", value=data.get("highest_qualification", ""))
+        highest_qualification = st.text_input("Highest Qualification *",
+                                              value=data.get("highest_qualification", ""),
+                                              help="Required field")
 
-    # Work & referral
-    work_experience = st.text_area("Work Experience (years/summary)", value=data.get("work_experience", ""))
-    referral = st.text_input("Referral (if any)", value=data.get("referral", ""))
+    # Work & referral with required indicators
+    work_experience = st.text_area("Work Experience (years/summary) *",
+                                   value=data.get("work_experience", ""),
+                                   help="Required field - Describe your work experience")
+    referral = st.text_input("Referral (if any) *",
+                             value=data.get("referral", ""),
+                             help="Required field - How did you hear about us?")
 
     # Availability
     col6, col7 = st.columns(2)
@@ -102,19 +126,19 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
             index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
         )
 
-    # Resume upload
+    # Resume upload with clear requirement
+    st.markdown("### CV Upload *")
     uploaded_cv = st.file_uploader(
         "Upload Your Resume (PDF/DOC/DOCX preferred) — REQUIRED",
         type=["pdf", "doc", "docx"],
-        key="new_candidate_cv"
+        key="new_candidate_cv",
+        help="This is a required field. Please upload your CV in PDF, DOC, or DOCX format."
     )
 
-    # Convert dob to ISO only if explicitly chosen
+    # Handle DOB value properly - always use the selected date
     dob_value = None
     if isinstance(dob, date):
-        # If user didn't change, dob == today's date by default
-        if dob_default or dob != date.today():
-            dob_value = dob.isoformat()
+        dob_value = dob.isoformat()
 
     return _safe_json({
         "name": name.strip(),
@@ -138,7 +162,8 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
 
 def _cv_uploader(candidate_id: str):
     st.markdown("### Upload/Replace CV")
-    file = st.file_uploader("Upload CV (PDF or DOC/DOCX preferred)", type=["pdf", "doc", "docx"], key=f"cv_{candidate_id}")
+    file = st.file_uploader("Upload CV (PDF or DOC/DOCX preferred)", type=["pdf", "doc", "docx"],
+                            key=f"cv_{candidate_id}")
     if file is not None:
         file_bytes = file.read()
         ok = save_candidate_cv(candidate_id, file_bytes, file.name)
@@ -165,37 +190,63 @@ def candidate_form_view():
         form_data["name"] = form_data.get("name", "").strip()
 
         if st.button("Submit Application"):
-            # Required fields validation
-            missing_fields = []
+            # Enhanced validation with specific error messages
+            validation_errors = []
+
+            # Name validation
             if not form_data.get("name"):
-                missing_fields.append("Full Name")
-            if not form_data.get("email"):
-                missing_fields.append("Email")
-            if not form_data.get("phone"):
-                missing_fields.append("Phone")
-            elif len(form_data["phone"]) < 10:
-                st.error("⚠️ Please enter a valid 10-digit phone number.")
-                st.stop()
-            if not form_data.get("dob"):
-                missing_fields.append("Date of Birth")
-            if not form_data.get("current_address"):
-                missing_fields.append("Current Address")
-            if not form_data.get("permanent_address"):
-                missing_fields.append("Permanent Address")
-            if not form_data.get("highest_qualification"):
-                missing_fields.append("Highest Qualification")
-            if not form_data.get("work_experience"):
-                missing_fields.append("Work Experience")
-            if not form_data.get("referral"):
-                missing_fields.append("Referral")
+                validation_errors.append("• Full Name is required")
+
+            # Email validation
+            email = form_data.get("email", "").strip()
+            if not email:
+                validation_errors.append("• Email is required")
+            elif "@" not in email or "." not in email.split("@")[-1]:
+                validation_errors.append("• Please enter a valid email address")
+
+            # Phone validation
+            phone = form_data.get("phone", "")
+            if not phone:
+                validation_errors.append("• Phone number is required")
+            elif len(phone) < 10:
+                validation_errors.append("• Phone number must be at least 10 digits")
+
+            # DOB validation - simplified to just check if it exists
+            dob = form_data.get("dob")
+            if not dob:
+                validation_errors.append("• Date of Birth is required")
+
+            # Address validation
+            if not form_data.get("current_address", "").strip():
+                validation_errors.append("• Current Address is required")
+
+            if not form_data.get("permanent_address", "").strip():
+                validation_errors.append("• Permanent Address is required")
+
+            # Qualification validation
+            if not form_data.get("highest_qualification", "").strip():
+                validation_errors.append("• Highest Qualification is required")
+
+            # Work experience validation
+            if not form_data.get("work_experience", "").strip():
+                validation_errors.append("• Work Experience is required")
+
+            # Referral validation
+            if not form_data.get("referral", "").strip():
+                validation_errors.append("• Referral information is required")
+
+            # CV validation
             if form_data.get("uploaded_cv") is None:
-                missing_fields.append("CV")
+                validation_errors.append("• CV upload is required")
 
-            if missing_fields:
-                st.error(f"Please fill in the following required fields: {', '.join(missing_fields)}")
+            # Display all validation errors at once
+            if validation_errors:
+                st.error("Please fix the following issues before submitting:")
+                for error in validation_errors:
+                    st.error(error)
                 st.stop()
 
-            # Create record
+            # If validation passes, create the record
             candidate_id = _gen_candidate_code()
             rec = create_candidate_in_db(
                 candidate_id=candidate_id,
@@ -221,6 +272,8 @@ def candidate_form_view():
                         st.success("📄 CV uploaded successfully.")
                     else:
                         st.error("⚠️ Failed to save CV.")
+            else:
+                st.error("Failed to create candidate record. Please try again.")
 
     else:
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
@@ -232,7 +285,7 @@ def candidate_form_view():
                 st.error("No record found for the provided code.")
             else:
                 existing_form = rec.get("form_data") or {}
-                st.info(f"Welcome back, {rec.get('name','Candidate')}")
+                st.info(f"Welcome back, {rec.get('name', 'Candidate')}")
 
                 from auth import get_current_user
                 user = get_current_user()
@@ -259,7 +312,7 @@ def candidate_form_view():
                         reason = "ok"
 
                     if reason == "no_permission":
-                        st.warning("🚫 You don’t have permission to view this CV.")
+                        st.warning("🚫 You don't have permission to view this CV.")
                     elif reason == "not_found":
                         st.info("No CV uploaded yet.")
                     elif cv_bytes:
@@ -270,7 +323,8 @@ def candidate_form_view():
                             mime=mime_type or "application/octet-stream",
                             key=f"cand_dlcv_{candidate_code}",
                         )
-                        if (mime_type == "application/pdf") or (mime_type is None and (cv_name or "").lower().endswith(".pdf")):
+                        if (mime_type == "application/pdf") or (
+                                mime_type is None and (cv_name or "").lower().endswith(".pdf")):
                             b64 = base64.b64encode(cv_bytes).decode("utf-8")
                             st.markdown(
                                 f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>',
