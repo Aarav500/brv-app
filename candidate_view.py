@@ -1,4 +1,4 @@
-# candidate_view.py (final patched validation with debugging)
+# candidate_view.py (fixed with session state)
 import json
 import secrets
 import string
@@ -36,141 +36,6 @@ def _safe_json(o: Any) -> Any:
         return {}
 
 
-# ------------------------------
-# Pre-interview fields (with CV uploader included)
-# ------------------------------
-def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    data = initial or {}
-    st.subheader("Pre-Interview Form")
-
-    # Add a note about required fields
-    st.info("Fields marked with * are required")
-
-    initial_name = data.get("name") or data.get("full_name") or ""
-
-    # Basics with required indicators
-    name = st.text_input("Full Name *", value=initial_name, help="Required field")
-    email = st.text_input("Email *", value=data.get("email", ""), help="Required field")
-    phone = st.text_input("Phone *", value=data.get("phone", ""), help="Required field - 10 digits minimum")
-
-    # Addresses with required indicators
-    current_address = st.text_area("Current Address *",
-                                   value=data.get("current_address", "") or data.get("address", ""),
-                                   help="Required field")
-    permanent_address = st.text_area("Permanent Address *",
-                                     value=data.get("permanent_address", ""),
-                                     help="Required field")
-
-    # Personal details
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        # DOB handling - always require explicit selection
-        dob_default = None
-        dob_raw = data.get("dob") or data.get("date_of_birth")
-
-        if dob_raw:
-            try:
-                from datetime import datetime as _dt
-                dob_default = _dt.fromisoformat(dob_raw).date()
-            except Exception:
-                try:
-                    from datetime import datetime as _dt
-                    dob_default = _dt.strptime(dob_raw, "%Y-%m-%d").date()
-                except Exception:
-                    pass
-
-        # For new forms, don't set a default - let user pick
-        if not initial:  # This is a new form
-            dob = st.date_input("Date of Birth *",
-                                min_value=date(1950, 1, 1),
-                                max_value=date.today(),
-                                help="Required field - Please select your date of birth")
-        else:  # Editing existing form
-            dob = st.date_input("Date of Birth *",
-                                value=dob_default or date(1990, 1, 1),
-                                min_value=date(1950, 1, 1),
-                                max_value=date.today(),
-                                help="Required field")
-
-    with col2:
-        caste = st.text_input("Caste", value=data.get("caste", ""))
-    with col3:
-        sub_caste = st.text_input("Sub-caste", value=data.get("sub_caste", ""))
-
-    # Marital status & education
-    col4, col5 = st.columns(2)
-    with col4:
-        marital_options = ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"]
-        m_index = marital_options.index(data["marital_status"]) if data.get("marital_status") in marital_options else 0
-        marital_status = st.selectbox("Marital Status", options=marital_options, index=m_index)
-    with col5:
-        highest_qualification = st.text_input("Highest Qualification *",
-                                              value=data.get("highest_qualification", ""),
-                                              help="Required field")
-
-    # Work & referral with required indicators
-    work_experience = st.text_area("Work Experience (years/summary) *",
-                                   value=data.get("work_experience", ""),
-                                   help="Required field - Describe your work experience")
-    referral = st.text_input("Referral (if any) *",
-                             value=data.get("referral", ""),
-                             help="Required field - How did you hear about us?")
-
-    # Availability
-    col6, col7 = st.columns(2)
-    with col6:
-        ready_festivals = st.selectbox(
-            "Ready to work on festivals and national holidays?",
-            options=["No", "Yes"],
-            index=1 if str(data.get("ready_festivals", "")).lower() == "yes" else 0
-        )
-    with col7:
-        ready_late_nights = st.selectbox(
-            "Ready to work late nights if needed?",
-            options=["No", "Yes"],
-            index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
-        )
-
-    # Resume upload with clear requirement
-    st.markdown("### CV Upload *")
-    uploaded_cv = st.file_uploader(
-        "Upload Your Resume (PDF/DOC/DOCX preferred) — REQUIRED",
-        type=["pdf", "doc", "docx"],
-        key="new_candidate_cv",
-        help="This is a required field. Please upload your CV in PDF, DOC, or DOCX format."
-    )
-
-    # Handle DOB value - only set if user actually selected something
-    dob_value = None
-    if isinstance(dob, date):
-        # For new forms, only accept if it's not today's date (unless explicitly chosen)
-        if initial or dob != date.today():
-            dob_value = dob.isoformat()
-        elif not initial and dob != date.today():
-            dob_value = dob.isoformat()
-
-    form_data = {
-        "name": name.strip() if name else "",
-        "email": email.strip() if email else "",
-        "phone": phone.strip() if phone else "",
-        "current_address": current_address.strip() if current_address else "",
-        "permanent_address": permanent_address.strip() if permanent_address else "",
-        "dob": dob_value,
-        "caste": caste.strip() if caste else "",
-        "sub_caste": sub_caste.strip() if sub_caste else "",
-        "marital_status": marital_status,
-        "highest_qualification": highest_qualification.strip() if highest_qualification else "",
-        "work_experience": work_experience.strip() if work_experience else "",
-        "referral": referral.strip() if referral else "",
-        "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
-        "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
-        "uploaded_cv": uploaded_cv,
-        "updated_at": datetime.utcnow().isoformat(),
-    }
-
-    return _safe_json(form_data)
-
-
 def _cv_uploader(candidate_id: str):
     st.markdown("### Upload/Replace CV")
     file = st.file_uploader("Upload CV (PDF or DOC/DOCX preferred)", type=["pdf", "doc", "docx"],
@@ -193,125 +58,244 @@ def candidate_form_view():
     mode = st.radio("I am a…", ["New candidate", "Returning candidate"], horizontal=True)
 
     if mode == "New candidate":
-        form_data = _pre_interview_fields()
-        st.markdown("---")
+        st.subheader("Pre-Interview Form")
+        st.info("Fields marked with * are required")
 
-        # Debug: Show what data we captured (remove this in production)
-        with st.expander("Debug: Form Data Captured", expanded=False):
-            st.json(form_data)
+        # Use form to ensure all data is captured together
+        with st.form("candidate_form", clear_on_submit=False):
+            # Initialize session state for initial values if not exists
+            if 'form_data' not in st.session_state:
+                st.session_state.form_data = {}
 
-        # Normalize phone
-        if form_data.get("phone"):
-            form_data["phone"] = "".join(filter(str.isdigit, form_data.get("phone", ""))).strip()
+            initial_data = st.session_state.form_data
 
-        if st.button("Submit Application", type="primary"):
-            # Enhanced validation with specific error messages
-            validation_errors = []
+            # Basic Information
+            name = st.text_input("Full Name *",
+                                 value=initial_data.get("name", ""),
+                                 help="Required field")
 
-            # Debug each field
-            st.write("Debugging validation:")
+            email = st.text_input("Email *",
+                                  value=initial_data.get("email", ""),
+                                  help="Required field")
 
-            # Name validation
-            name_val = form_data.get("name", "").strip()
-            st.write(f"Name: '{name_val}' (length: {len(name_val)})")
-            if not name_val:
-                validation_errors.append("• Full Name is required")
+            phone = st.text_input("Phone *",
+                                  value=initial_data.get("phone", ""),
+                                  help="Required field - 10 digits minimum")
 
-            # Email validation
-            email_val = form_data.get("email", "").strip()
-            st.write(f"Email: '{email_val}' (length: {len(email_val)})")
-            if not email_val:
-                validation_errors.append("• Email is required")
-            elif "@" not in email_val or "." not in email_val.split("@")[-1]:
-                validation_errors.append("• Please enter a valid email address")
+            # Addresses
+            current_address = st.text_area("Current Address *",
+                                           value=initial_data.get("current_address", ""),
+                                           help="Required field")
 
-            # Phone validation
-            phone_val = form_data.get("phone", "")
-            st.write(f"Phone: '{phone_val}' (length: {len(phone_val)})")
-            if not phone_val:
-                validation_errors.append("• Phone number is required")
-            elif len(phone_val) < 10:
-                validation_errors.append("• Phone number must be at least 10 digits")
+            permanent_address = st.text_area("Permanent Address *",
+                                             value=initial_data.get("permanent_address", ""),
+                                             help="Required field")
 
-            # DOB validation
-            dob_val = form_data.get("dob")
-            st.write(f"DOB: '{dob_val}'")
-            if not dob_val:
-                validation_errors.append("• Date of Birth is required")
+            # Personal details
+            col1, col2, col3 = st.columns(3)
 
-            # Address validation
-            curr_addr = form_data.get("current_address", "").strip()
-            st.write(f"Current Address: '{curr_addr}' (length: {len(curr_addr)})")
-            if not curr_addr:
-                validation_errors.append("• Current Address is required")
+            with col1:
+                # DOB handling
+                dob_default = None
+                if initial_data.get("dob"):
+                    try:
+                        dob_default = datetime.fromisoformat(initial_data["dob"]).date()
+                    except:
+                        dob_default = None
 
-            perm_addr = form_data.get("permanent_address", "").strip()
-            st.write(f"Permanent Address: '{perm_addr}' (length: {len(perm_addr)})")
-            if not perm_addr:
-                validation_errors.append("• Permanent Address is required")
+                if dob_default:
+                    dob = st.date_input("Date of Birth *",
+                                        value=dob_default,
+                                        min_value=date(1950, 1, 1),
+                                        max_value=date.today(),
+                                        help="Required field")
+                else:
+                    dob = st.date_input("Date of Birth *",
+                                        min_value=date(1950, 1, 1),
+                                        max_value=date.today(),
+                                        help="Required field - Please select your date of birth")
 
-            # Qualification validation
-            qual_val = form_data.get("highest_qualification", "").strip()
-            st.write(f"Qualification: '{qual_val}' (length: {len(qual_val)})")
-            if not qual_val:
-                validation_errors.append("• Highest Qualification is required")
+            with col2:
+                caste = st.text_input("Caste",
+                                      value=initial_data.get("caste", ""))
 
-            # Work experience validation
-            work_val = form_data.get("work_experience", "").strip()
-            st.write(f"Work Experience: '{work_val}' (length: {len(work_val)})")
-            if not work_val:
-                validation_errors.append("• Work Experience is required")
+            with col3:
+                sub_caste = st.text_input("Sub-caste",
+                                          value=initial_data.get("sub_caste", ""))
 
-            # Referral validation
-            ref_val = form_data.get("referral", "").strip()
-            st.write(f"Referral: '{ref_val}' (length: {len(ref_val)})")
-            if not ref_val:
-                validation_errors.append("• Referral information is required")
+            # Marital status & education
+            col4, col5 = st.columns(2)
 
-            # CV validation
-            cv_val = form_data.get("uploaded_cv")
-            st.write(f"CV: {cv_val}")
-            if cv_val is None:
-                validation_errors.append("• CV upload is required")
+            with col4:
+                marital_options = ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"]
+                marital_index = 0
+                if initial_data.get("marital_status") in marital_options:
+                    marital_index = marital_options.index(initial_data["marital_status"])
 
-            # Display all validation errors at once
-            if validation_errors:
-                st.error("Please fix the following issues before submitting:")
-                for error in validation_errors:
-                    st.error(error)
-                st.stop()
+                marital_status = st.selectbox("Marital Status",
+                                              options=marital_options,
+                                              index=marital_index)
 
-            # If validation passes, create the record
-            candidate_id = _gen_candidate_code()
-            rec = create_candidate_in_db(
-                candidate_id=candidate_id,
-                name=form_data.get("name", ""),
-                address=form_data.get("current_address", ""),
-                dob=form_data.get("dob", None),
-                caste=form_data.get("caste", ""),
-                email=form_data.get("email", ""),
-                phone=form_data.get("phone", ""),
-                form_data=form_data,
-                created_by="candidate",
-            )
+            with col5:
+                highest_qualification = st.text_input("Highest Qualification *",
+                                                      value=initial_data.get("highest_qualification", ""),
+                                                      help="Required field")
 
-            if rec:
-                st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
+            # Work & referral
+            work_experience = st.text_area("Work Experience (years/summary) *",
+                                           value=initial_data.get("work_experience", ""),
+                                           help="Required field - Describe your work experience")
 
-                # Save CV
-                file = form_data["uploaded_cv"]
-                if file:
-                    file.seek(0)  # Reset file pointer
-                    file_bytes = file.read()
-                    ok = save_candidate_cv(candidate_id, file_bytes, file.name)
-                    if ok:
-                        st.success("📄 CV uploaded successfully.")
+            referral = st.text_input("Referral (if any) *",
+                                     value=initial_data.get("referral", ""),
+                                     help="Required field - How did you hear about us?")
+
+            # Availability
+            col6, col7 = st.columns(2)
+
+            with col6:
+                festivals_index = 1 if initial_data.get("ready_festivals") == "Yes" else 0
+                ready_festivals = st.selectbox("Ready to work on festivals and national holidays?",
+                                               options=["No", "Yes"],
+                                               index=festivals_index)
+
+            with col7:
+                nights_index = 1 if initial_data.get("ready_late_nights") == "Yes" else 0
+                ready_late_nights = st.selectbox("Ready to work late nights if needed?",
+                                                 options=["No", "Yes"],
+                                                 index=nights_index)
+
+            # CV Upload
+            st.markdown("### CV Upload *")
+            uploaded_cv = st.file_uploader("Upload Your Resume (PDF/DOC/DOCX preferred) — REQUIRED",
+                                           type=["pdf", "doc", "docx"],
+                                           help="This is a required field. Please upload your CV in PDF, DOC, or DOCX format.")
+
+            # Submit button inside the form
+            submitted = st.form_submit_button("Submit Application", type="primary")
+
+            if submitted:
+                # Collect all form data
+                form_data = {
+                    "name": name.strip() if name else "",
+                    "email": email.strip() if email else "",
+                    "phone": "".join(filter(str.isdigit, phone)) if phone else "",
+                    "current_address": current_address.strip() if current_address else "",
+                    "permanent_address": permanent_address.strip() if permanent_address else "",
+                    "dob": dob.isoformat() if isinstance(dob, date) else None,
+                    "caste": caste.strip() if caste else "",
+                    "sub_caste": sub_caste.strip() if sub_caste else "",
+                    "marital_status": marital_status,
+                    "highest_qualification": highest_qualification.strip() if highest_qualification else "",
+                    "work_experience": work_experience.strip() if work_experience else "",
+                    "referral": referral.strip() if referral else "",
+                    "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
+                    "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
+                    "uploaded_cv": uploaded_cv,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+
+                # Store in session state
+                st.session_state.form_data = form_data
+
+                # Debug output
+                with st.expander("Debug: Form Data Captured", expanded=True):
+                    st.write("Debugging validation:")
+                    st.write(f"Name: '{form_data.get('name', '')}' (length: {len(form_data.get('name', ''))})")
+                    st.write(f"Email: '{form_data.get('email', '')}' (length: {len(form_data.get('email', ''))})")
+                    st.write(f"Phone: '{form_data.get('phone', '')}' (length: {len(form_data.get('phone', ''))})")
+                    st.write(f"DOB: '{form_data.get('dob', 'None')}'")
+                    st.write(
+                        f"Current Address: '{form_data.get('current_address', '')}' (length: {len(form_data.get('current_address', ''))})")
+                    st.write(
+                        f"Permanent Address: '{form_data.get('permanent_address', '')}' (length: {len(form_data.get('permanent_address', ''))})")
+                    st.write(
+                        f"Qualification: '{form_data.get('highest_qualification', '')}' (length: {len(form_data.get('highest_qualification', ''))})")
+                    st.write(
+                        f"Work Experience: '{form_data.get('work_experience', '')}' (length: {len(form_data.get('work_experience', ''))})")
+                    st.write(
+                        f"Referral: '{form_data.get('referral', '')}' (length: {len(form_data.get('referral', ''))})")
+                    st.write(f"CV: {form_data.get('uploaded_cv')}")
+
+                # Validation
+                validation_errors = []
+
+                if not form_data.get("name"):
+                    validation_errors.append("• Full Name is required")
+
+                email_val = form_data.get("email", "")
+                if not email_val:
+                    validation_errors.append("• Email is required")
+                elif "@" not in email_val or "." not in email_val.split("@")[-1]:
+                    validation_errors.append("• Please enter a valid email address")
+
+                phone_val = form_data.get("phone", "")
+                if not phone_val:
+                    validation_errors.append("• Phone number is required")
+                elif len(phone_val) < 10:
+                    validation_errors.append("• Phone number must be at least 10 digits")
+
+                if not form_data.get("dob"):
+                    validation_errors.append("• Date of Birth is required")
+
+                if not form_data.get("current_address"):
+                    validation_errors.append("• Current Address is required")
+
+                if not form_data.get("permanent_address"):
+                    validation_errors.append("• Permanent Address is required")
+
+                if not form_data.get("highest_qualification"):
+                    validation_errors.append("• Highest Qualification is required")
+
+                if not form_data.get("work_experience"):
+                    validation_errors.append("• Work Experience is required")
+
+                if not form_data.get("referral"):
+                    validation_errors.append("• Referral information is required")
+
+                if not form_data.get("uploaded_cv"):
+                    validation_errors.append("• CV upload is required")
+
+                if validation_errors:
+                    st.error("Please fix the following issues before submitting:")
+                    for error in validation_errors:
+                        st.error(error)
+                else:
+                    # Validation passed - create candidate
+                    candidate_id = _gen_candidate_code()
+                    rec = create_candidate_in_db(
+                        candidate_id=candidate_id,
+                        name=form_data.get("name", ""),
+                        address=form_data.get("current_address", ""),
+                        dob=form_data.get("dob", None),
+                        caste=form_data.get("caste", ""),
+                        email=form_data.get("email", ""),
+                        phone=form_data.get("phone", ""),
+                        form_data=_safe_json(form_data),
+                        created_by="candidate",
+                    )
+
+                    if rec:
+                        st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
+
+                        # Save CV
+                        cv_file = form_data.get("uploaded_cv")
+                        if cv_file:
+                            file_bytes = cv_file.read()
+                            ok = save_candidate_cv(candidate_id, file_bytes, cv_file.name)
+                            if ok:
+                                st.success("📄 CV uploaded successfully.")
+                            else:
+                                st.error("⚠️ Failed to save CV.")
+
+                        # Clear the form data from session state
+                        st.session_state.form_data = {}
+                        st.rerun()
                     else:
-                        st.error("⚠️ Failed to save CV.")
-            else:
-                st.error("Failed to create candidate record. Please try again.")
+                        st.error("Failed to create candidate record. Please try again.")
 
     else:
+        # Returning candidate section
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
         candidate_code = st.text_input("Candidate Code", key="cand_code")
 
@@ -372,13 +356,79 @@ def candidate_form_view():
                 # Allow editing only if permitted
                 if rec.get("can_edit", False):
                     st.success("Editing is enabled for your application.")
-                    updated = _pre_interview_fields(initial=existing_form)
-                    if st.button("Save Changes"):
-                        ok = update_candidate_form_data(candidate_code.strip(), updated)
-                        if ok:
-                            st.success("Your application has been updated.")
+
+                    with st.form("edit_candidate_form"):
+                        # Similar form structure for editing
+                        name = st.text_input("Full Name *", value=existing_form.get("name", ""))
+                        email = st.text_input("Email *", value=existing_form.get("email", ""))
+                        phone = st.text_input("Phone *", value=existing_form.get("phone", ""))
+                        current_address = st.text_area("Current Address *",
+                                                       value=existing_form.get("current_address", ""))
+                        permanent_address = st.text_area("Permanent Address *",
+                                                         value=existing_form.get("permanent_address", ""))
+
+                        # DOB for editing
+                        dob_default = None
+                        if existing_form.get("dob"):
+                            try:
+                                dob_default = datetime.fromisoformat(existing_form["dob"]).date()
+                            except:
+                                pass
+
+                        if dob_default:
+                            dob = st.date_input("Date of Birth *", value=dob_default)
                         else:
-                            st.error("Failed to update your application.")
+                            dob = st.date_input("Date of Birth *")
+
+                        caste = st.text_input("Caste", value=existing_form.get("caste", ""))
+                        sub_caste = st.text_input("Sub-caste", value=existing_form.get("sub_caste", ""))
+
+                        marital_options = ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"]
+                        marital_index = 0
+                        if existing_form.get("marital_status") in marital_options:
+                            marital_index = marital_options.index(existing_form["marital_status"])
+                        marital_status = st.selectbox("Marital Status", options=marital_options, index=marital_index)
+
+                        highest_qualification = st.text_input("Highest Qualification *",
+                                                              value=existing_form.get("highest_qualification", ""))
+                        work_experience = st.text_area("Work Experience *",
+                                                       value=existing_form.get("work_experience", ""))
+                        referral = st.text_input("Referral *", value=existing_form.get("referral", ""))
+
+                        festivals_index = 1 if existing_form.get("ready_festivals") == "Yes" else 0
+                        ready_festivals = st.selectbox("Ready to work on festivals?", options=["No", "Yes"],
+                                                       index=festivals_index)
+
+                        nights_index = 1 if existing_form.get("ready_late_nights") == "Yes" else 0
+                        ready_late_nights = st.selectbox("Ready to work late nights?", options=["No", "Yes"],
+                                                         index=nights_index)
+
+                        save_changes = st.form_submit_button("Save Changes")
+
+                        if save_changes:
+                            updated_data = {
+                                "name": name.strip(),
+                                "email": email.strip(),
+                                "phone": "".join(filter(str.isdigit, phone)),
+                                "current_address": current_address.strip(),
+                                "permanent_address": permanent_address.strip(),
+                                "dob": dob.isoformat() if isinstance(dob, date) else None,
+                                "caste": caste.strip(),
+                                "sub_caste": sub_caste.strip(),
+                                "marital_status": marital_status,
+                                "highest_qualification": highest_qualification.strip(),
+                                "work_experience": work_experience.strip(),
+                                "referral": referral.strip(),
+                                "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
+                                "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
+                                "updated_at": datetime.utcnow().isoformat(),
+                            }
+
+                            ok = update_candidate_form_data(candidate_code.strip(), updated_data)
+                            if ok:
+                                st.success("Your application has been updated.")
+                            else:
+                                st.error("Failed to update your application.")
 
 
 # Backward-compatible wrapper
