@@ -1,4 +1,6 @@
-# ceo.py - FIXED VERSION
+# =============================================================================
+# CV Preview Helpers & Fallbacks
+# =============================================================================# ceo.py - FIXED VERSION
 """
 CEO Control Panel (feature-complete, cleaned + modular)
 
@@ -154,10 +156,45 @@ def _safe_get_candidate_cv_fixed(candidate_id: str, actor_id: int) -> Tuple[Opti
 
 
 # =============================================================================
-# CV Preview Helpers & Fallbacks
+# Performance optimization helpers
 # =============================================================================
 
-def _embed_pdf_iframe(bytes_data: bytes, height: int = 600) -> bool:
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def _get_candidates_cached():
+    """Cached candidate loading with 5 minute TTL."""
+    try:
+        return get_all_candidates() or []
+    except Exception as e:
+        st.error(f"Failed to load candidates: {e}")
+        return []
+
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def _get_candidate_history_cached(candidate_id: str):
+    """Cached history loading with 5 minute TTL."""
+    try:
+        return get_candidate_history(candidate_id)
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=600)  # Cache for 10 minutes
+def _get_stats_cached():
+    """Cached statistics with 10 minute TTL."""
+    try:
+        return get_candidate_statistics() or {}
+    except Exception:
+        return {}
+
+
+def _clear_caches():
+    """Clear all caches for refresh."""
+    _get_candidates_cached.clear()
+    _get_candidate_history_cached.clear()
+    _get_stats_cached.clear()
+
+
+def _embed_pdf_iframe(bytes_data: bytes, height: int = 600, unique_key: str = "") -> bool:
     """Enhanced PDF preview with fallback options."""
     if not bytes_data:
         return False
@@ -170,12 +207,13 @@ def _embed_pdf_iframe(bytes_data: bytes, height: int = 600) -> bool:
             # Method 1: Direct bytes display
             with st.container():
                 st.write("**PDF Content:**")
-                # Create download button as fallback
+                # Create download button as fallback with unique key
                 st.download_button(
                     "📥 Download PDF to view",
                     data=bytes_data,
                     file_name="cv.pdf",
-                    mime="application/pdf"
+                    mime="application/pdf",
+                    key=f"pdf_download_{unique_key}"
                 )
 
                 # Try embedding with object tag
