@@ -7,7 +7,6 @@ from typing import Dict, Any, Optional
 
 import streamlit as st
 import base64
-from smtp_mailer import send_email
 from db_postgres import (
     create_candidate_in_db,
     update_candidate_form_data,
@@ -198,24 +197,6 @@ def candidate_form_view():
                 # Store in session state
                 st.session_state.form_data = form_data
 
-                # Debug output
-                with st.expander("Debug: Form Data Captured", expanded=True):
-                    st.write("Debugging validation:")
-                    st.write(f"Name: '{form_data.get('name', '')}' (length: {len(form_data.get('name', ''))})")
-                    st.write(f"Email: '{form_data.get('email', '')}' (length: {len(form_data.get('email', ''))})")
-                    st.write(f"Phone: '{form_data.get('phone', '')}' (length: {len(form_data.get('phone', ''))})")
-                    st.write(f"DOB: '{form_data.get('dob', 'None')}'")
-                    st.write(
-                        f"Current Address: '{form_data.get('current_address', '')}' (length: {len(form_data.get('current_address', ''))})")
-                    st.write(
-                        f"Permanent Address: '{form_data.get('permanent_address', '')}' (length: {len(form_data.get('permanent_address', ''))})")
-                    st.write(
-                        f"Qualification: '{form_data.get('highest_qualification', '')}' (length: {len(form_data.get('highest_qualification', ''))})")
-                    st.write(
-                        f"Work Experience: '{form_data.get('work_experience', '')}' (length: {len(form_data.get('work_experience', ''))})")
-                    st.write(
-                        f"Referral: '{form_data.get('referral', '')}' (length: {len(form_data.get('referral', ''))})")
-                    st.write(f"CV: {form_data.get('uploaded_cv')}")
 
                 # Validation
                 validation_errors = []
@@ -279,31 +260,17 @@ def candidate_form_view():
                         st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
 
                         # --- Send candidate code via email ---
-                        cand_email = (form_data.get("email") or "").strip()
-                        if cand_email:
-                            subject = "Your Candidate Code"
-                            html_body = f"""
-                            <p>Hello {form_data.get('name', 'Candidate')},</p>
-                            <p>Thank you for applying. Your candidate code is:</p>
-                            <p style="font-size:18px;"><strong>{candidate_id}</strong></p>
-                            <p>Keep this code safe—you’ll need it to revisit or update your application.</p>
-                            <p>Best regards,<br/>Recruitment Team</p>
-                            """
-                            text_body = (
-                                f"Hello {form_data.get('name', 'Candidate')},\n\n"
-                                f"Thank you for applying. Your candidate code is: {candidate_id}\n"
-                                f"Keep this code safe—you’ll need it to revisit or update your application.\n\n"
-                                f"Best regards,\nRecruitment Team"
+                        try:
+                            from smtp_mailer import send_email
+                            send_email(
+                                to_email=form_data.get("email"),  # match smtp_mailer signature
+                                subject="Your Candidate Code",
+                                text=body_text,  # smtp_mailer expects 'text'
+                                html=body_html  # smtp_mailer expects 'html'
                             )
-                            try:
-                                sent = send_email(cand_email, subject, html_body, text_body=text_body)
-                                if sent:
-                                    st.info("📧 Candidate code emailed to you.")
-                                else:
-                                    st.warning(
-                                        "Could not send email (SMTP not configured). Please note your code above.")
-                            except Exception as e:
-                                st.warning(f"Email failed: {e}. Please note your code above.")
+                            st.info("📧 Candidate code has also been emailed to you.")
+                        except Exception as e:
+                            st.warning(f"Email failed: {e}. Please note your code above.")
 
                         # Save CV
                         cv_file = form_data.get("uploaded_cv")
