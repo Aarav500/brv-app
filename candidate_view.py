@@ -262,32 +262,33 @@ def candidate_form_view():
                         # --- Send candidate code via email ---
                         try:
                             from smtp_mailer import send_email
+
+                            body_text = f"""Hello,
+
+                        Your candidate code is: {candidate_id}
+
+                        Use this code to view/update your application if permitted.
+
+                        Thanks,
+                        BRV Recruitment
+                        """
+
+                            body_html = f"""
+                        <p>Hello,</p>
+                        <p>Your candidate code is: <b>{candidate_id}</b></p>
+                        <p>Use this code to view/update your application if permitted.</p>
+                        <p>Thanks,<br>BRV Recruitment</p>
+                        """
+
                             send_email(
-                                to_email=form_data.get("email"),  # match smtp_mailer signature
+                                to_email=form_data.get("email"),
                                 subject="Your Candidate Code",
-                                text=body_text,  # smtp_mailer expects 'text'
-                                html=body_html  # smtp_mailer expects 'html'
+                                text=body_text,  # smtp_mailer expects "text"
+                                html=body_html  # optional html version
                             )
                             st.info("📧 Candidate code has also been emailed to you.")
                         except Exception as e:
                             st.warning(f"Email failed: {e}. Please note your code above.")
-
-                        # Save CV
-                        cv_file = form_data.get("uploaded_cv")
-                        if cv_file:
-                            file_bytes = cv_file.read()
-                            ok = save_candidate_cv(candidate_id, file_bytes, cv_file.name)
-                            if ok:
-                                st.success("📄 CV uploaded successfully.")
-                            else:
-                                st.error("⚠️ Failed to save CV.")
-
-                        # Clear the form data from session state
-                        st.session_state.form_data = {}
-                        st.rerun()
-                    else:
-                        st.error("Failed to create candidate record. Please try again.")
-
     else:
         # Returning candidate section
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
