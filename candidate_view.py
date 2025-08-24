@@ -1,8 +1,8 @@
-# candidate_view.py (patched validation)
+# candidate_view.py (final patched validation)
 import json
 import secrets
 import string
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional
 
 import streamlit as st
@@ -102,12 +102,19 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
             index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
         )
 
-    # Resume upload (MANDATORY now)
+    # Resume upload
     uploaded_cv = st.file_uploader(
         "Upload Your Resume (PDF/DOC/DOCX preferred) — REQUIRED",
         type=["pdf", "doc", "docx"],
         key="new_candidate_cv"
     )
+
+    # Convert dob to ISO only if explicitly chosen
+    dob_value = None
+    if isinstance(dob, date):
+        # If user didn't change, dob == today's date by default
+        if dob_default or dob != date.today():
+            dob_value = dob.isoformat()
 
     return _safe_json({
         "name": name.strip(),
@@ -115,7 +122,7 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
         "phone": phone.strip(),
         "current_address": current_address.strip(),
         "permanent_address": permanent_address.strip(),
-        "dob": dob.isoformat() if dob else None,
+        "dob": dob_value,
         "caste": caste.strip(),
         "sub_caste": sub_caste.strip(),
         "marital_status": marital_status,
@@ -181,7 +188,7 @@ def candidate_form_view():
                 missing_fields.append("Work Experience")
             if not form_data.get("referral"):
                 missing_fields.append("Referral")
-            if not form_data.get("uploaded_cv"):
+            if form_data.get("uploaded_cv") is None:
                 missing_fields.append("CV")
 
             if missing_fields:
@@ -207,12 +214,13 @@ def candidate_form_view():
 
                 # Save CV
                 file = form_data["uploaded_cv"]
-                file_bytes = file.read()
-                ok = save_candidate_cv(candidate_id, file_bytes, file.name)
-                if ok:
-                    st.success("📄 CV uploaded successfully.")
-                else:
-                    st.error("⚠️ Failed to save CV.")
+                if file:
+                    file_bytes = file.read()
+                    ok = save_candidate_cv(candidate_id, file_bytes, file.name)
+                    if ok:
+                        st.success("📄 CV uploaded successfully.")
+                    else:
+                        st.error("⚠️ Failed to save CV.")
 
     else:
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
