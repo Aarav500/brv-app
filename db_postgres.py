@@ -8,7 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import bcrypt
 from dotenv import load_dotenv
-
+from typing import Tuple, Optional
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -632,8 +632,7 @@ def clear_candidate_cv(candidate_id: str) -> bool:
         conn.close()
 
 
-def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[
-    Optional[bytes], Optional[str], Optional[str], str]:
+def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Optional[bytes], Optional[str], Optional[str], str]:
     """
     Securely fetch a candidate's CV.
     Returns: (file_bytes, filename, mime_type, reason)
@@ -646,31 +645,33 @@ def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[
         if not (role in ("ceo", "admin") or perms.get("can_view_cvs")):
             return None, None, None, "no_permission"
 
-    cursor = conn.cursor()
-    cursor.execute("SELECT cv_link FROM candidates WHERE candidate_id = %s", (candidate_id,))
-    result = cursor.fetchone()
-    cursor.close()
+        # Fetch CV link from DB
+        cursor = conn.cursor()
+        cursor.execute("SELECT cv_link FROM candidates WHERE candidate_id = %s", (candidate_id,))
+        result = cursor.fetchone()
+        cursor.close()
 
-    if not result or not result[0]:
-        return None
+        if not result or not result[0]:
+            return None, None, None, "not_found"
 
-    link = result[0]
+        link = result[0]
 
-    # Fix Google Drive preview URL for embedding
-    if "drive.google.com" in link:
-        if "view" in link:
-            return link
-        elif "file/d/" in link:
-            file_id = link.split("file/d/")[1].split("/")[0]
-            return f"https://drive.google.com/file/d/{file_id}/preview"
-        elif "id=" in link:
-            file_id = link.split("id=")[1]
-            return f"https://drive.google.com/file/d/{file_id}/preview"
-    return link
+        # Handle Google Drive URLs for embedding
+        if "drive.google.com" in link:
+            if "file/d/" in link:
+                file_id = link.split("file/d/")[1].split("/")[0]
+                link = f"https://drive.google.com/file/d/{file_id}/preview"
+            elif "id=" in link:
+                file_id = link.split("id=")[1]
+                link = f"https://drive.google.com/file/d/{file_id}/preview"
+            # If it already has "view" in URL, we keep it as-is.
+
+        # We are returning just the link, so file_bytes, filename, mime_type = None
+        return None, link, "url", "ok"
 
     except Exception as e:
-    print(f"[ERROR] Failed to fetch CV for {candidate_id}: {e}")
-    return None, None, None, "error"
+        print(f"[ERROR] Failed to fetch CV for {candidate_id}: {e}")
+        return None, None, None, "error"
 
 def get_total_cv_storage_usage() -> int:
     conn = get_conn()
