@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 
 import streamlit as st
 import base64
-
+from smtp_mailer import send_email
 from db_postgres import (
     create_candidate_in_db,
     update_candidate_form_data,
