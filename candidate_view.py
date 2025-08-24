@@ -39,21 +39,9 @@ def _safe_json(o: Any) -> Any:
 # Pre-interview fields (with CV uploader included)
 # ------------------------------
 def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Renders the Pre-Interview form, returning a dict with keys that match the DB layer:
-      - name, email, phone
-      - current_address (stored as address), permanent_address
-      - dob (ISO string)
-      - caste, sub_caste, marital_status
-      - highest_qualification, work_experience, referral
-      - ready_festivals (Yes/No), ready_late_nights (Yes/No)
-    NOTE: Accepts older keys in `initial` (e.g. 'full_name') for backwards compatibility.
-    """
     data = initial or {}
-
     st.subheader("Pre-Interview Form")
 
-    # pick up name (backwards-compatible: prefer 'name', fallback to 'full_name')
     initial_name = data.get("name") or data.get("full_name") or ""
 
     # Basics
@@ -90,12 +78,7 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
     col4, col5 = st.columns(2)
     with col4:
         marital_options = ["Single", "Married", "Divorced", "Widowed", "Prefer not to say"]
-        m_index = 0
-        if data.get("marital_status") in marital_options:
-            try:
-                m_index = marital_options.index(data["marital_status"])
-            except Exception:
-                m_index = 0
+        m_index = marital_options.index(data["marital_status"]) if data.get("marital_status") in marital_options else 0
         marital_status = st.selectbox("Marital Status", options=marital_options, index=m_index)
     with col5:
         highest_qualification = st.text_input("Highest Qualification", value=data.get("highest_qualification", ""))
@@ -119,15 +102,14 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
             index=1 if str(data.get("ready_late_nights", "")).lower() == "yes" else 0
         )
 
-    # Resume upload (included inside form now)
+    # Resume upload (raw file object included in returned dict)
     uploaded_cv = st.file_uploader(
         "Upload Your Resume (PDF/DOC/DOCX preferred)",
         type=["pdf", "doc", "docx"],
         key="new_candidate_cv"
     )
 
-    # Build returned dict
-    form = {
+    return _safe_json({
         "name": name.strip(),
         "email": email.strip(),
         "phone": phone.strip(),
@@ -142,15 +124,14 @@ def _pre_interview_fields(initial: Optional[Dict[str, Any]] = None) -> Dict[str,
         "referral": referral.strip(),
         "ready_festivals": "Yes" if ready_festivals == "Yes" else "No",
         "ready_late_nights": "Yes" if ready_late_nights == "Yes" else "No",
-        "uploaded_cv": uploaded_cv,  # keep raw file object
+        "uploaded_cv": uploaded_cv,
         "updated_at": datetime.utcnow().isoformat(),
-    }
-    return _safe_json(form)
+    })
 
 
 def _cv_uploader(candidate_id: str):
     st.markdown("### Upload/Replace CV")
-    file = st.file_uploader("Upload CV (PDF or DOC/DOCX preferred)", type=["pdf", "doc", "docx"])
+    file = st.file_uploader("Upload CV (PDF or DOC/DOCX preferred)", type=["pdf", "doc", "docx"], key=f"cv_{candidate_id}")
     if file is not None:
         file_bytes = file.read()
         ok = save_candidate_cv(candidate_id, file_bytes, file.name)
@@ -165,20 +146,14 @@ def _cv_uploader(candidate_id: str):
 # --------------------------------
 
 def candidate_form_view():
-    """
-    Main Candidate flow:
-      - New candidate: fill Pre-Interview form, system generates candidate code and creates record.
-      - Returning candidate: enter code; if candidate has can_edit=True, update form data and upload CV.
-    """
     st.header("Candidate — Pre-Interview Application")
-
     mode = st.radio("I am a…", ["New candidate", "Returning candidate"], horizontal=True)
 
     if mode == "New candidate":
         form_data = _pre_interview_fields()
         st.markdown("---")
-        # Validate required fields before submission
-        # Normalize phone *before* validation
+
+        # Normalize phone
         form_data["phone"] = "".join(filter(str.isdigit, form_data.get("phone", ""))).strip()
         form_data["name"] = form_data.get("name", "").strip()
 
@@ -188,7 +163,7 @@ def candidate_form_view():
             missing_fields.append("Full Name")
         if not form_data["phone"]:
             missing_fields.append("Phone")
-        elif len(form_data["phone"]) < 10:  # Optional: Ensure valid numbers
+        elif len(form_data["phone"]) < 10:
             st.error("⚠️ Please enter a valid 10-digit phone number.")
             st.stop()
 
@@ -213,7 +188,6 @@ def candidate_form_view():
             if rec:
                 st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
 
-                # Save CV if uploaded
                 if form_data.get("uploaded_cv"):
                     file = form_data["uploaded_cv"]
                     file_bytes = file.read()
@@ -223,51 +197,10 @@ def candidate_form_view():
                     else:
                         st.error("⚠️ Failed to save CV.")
 
-            candidate_id = _gen_candidate_code()
-            rec = create_candidate_in_db(
-                candidate_id=candidate_id,
-                name=form_data.get("name", ""),
-                address=form_data.get("current_address", ""),
-                dob=form_data.get("dob", None),
-                caste=form_data.get("caste", ""),
-                email=form_data.get("email", ""),
-                phone=form_data.get("phone", ""),
-                form_data=form_data,
-                created_by="candidate",
-            )
-            if rec:
-                st.success(f"Application submitted. Your candidate code is: **{candidate_id}**")
-
-                if form_data.get("uploaded_cv"):
-                    file = form_data["uploaded_cv"]
-                    file_bytes = file.read()
-                    ok = save_candidate_cv(candidate_id, file_bytes, file.name)
-                    if ok:
-                        st.success("CV uploaded successfully.")
-                    else:
-                        st.error("Failed to save CV.")
-
     else:
         st.caption("Enter your candidate code to view and edit your application (if permission is granted).")
-
-        def _ensure_candidate_cache():
-            if "candidates_cache" not in st.session_state:
-                st.session_state.candidates_cache = None
-            if "candidate_selected_ids" not in st.session_state:
-                st.session_state.candidate_selected_ids = set()
-            if "expanded_candidates" not in st.session_state:
-                st.session_state.expanded_candidates = set()
-
-        @st.cache_data(ttl=60)
-        def _load_all_candidates():
-            try:
-                return get_all_candidates()
-            except Exception:
-                return []
-
-        _ensure_candidate_cache()
-
         candidate_code = st.text_input("Candidate Code", key="cand_code")
+
         if candidate_code.strip():
             rec = get_candidate_by_id(candidate_code.strip())
             if not rec:
@@ -275,58 +208,56 @@ def candidate_form_view():
             else:
                 existing_form = rec.get("form_data") or {}
                 st.info(f"Welcome back, {rec.get('name','Candidate')}")
+
                 from auth import get_current_user
                 user = get_current_user()
                 actor_id = (user.get("id") if user else 0)
 
-                if not rec.get("can_edit", False):
-                    st.warning("Editing is currently disabled for your application. You may upload a CV if permitted.")
-                    _cv_uploader(candidate_code.strip())
+                # Always allow CV upload
+                _cv_uploader(candidate_code.strip())
 
+                # Secure CV fetch
+                try:
                     res = get_candidate_cv_secure(candidate_code.strip(), actor_id)
-                    file_bytes = filename = mime_type = None
+                    cv_bytes = cv_name = mime_type = None
                     reason = "not_found"
-                    try:
-                        if isinstance(res, tuple) or isinstance(res, list):
-                            if len(res) == 4:
-                                file_bytes, filename, mime_type, reason = res
-                            elif len(res) == 3:
-                                file_bytes, filename, reason = res
-                                mime_type = None
-                        elif isinstance(res, (bytes, bytearray)):
-                            file_bytes = bytes(res)
-                            filename = f"{candidate_code}_cv.bin"
+
+                    if isinstance(res, (tuple, list)):
+                        if len(res) == 4:
+                            cv_bytes, cv_name, mime_type, reason = res
+                        elif len(res) == 3:
+                            cv_bytes, cv_name, reason = res
                             mime_type = None
-                            reason = "ok"
-                        else:
-                            reason = "not_found"
-                    except Exception:
-                        reason = "error"
+                    elif isinstance(res, (bytes, bytearray)):
+                        cv_bytes = bytes(res)
+                        cv_name = f"{candidate_code}_cv.bin"
+                        reason = "ok"
 
                     if reason == "no_permission":
                         st.warning("🚫 You don’t have permission to view this CV.")
                     elif reason == "not_found":
                         st.info("No CV uploaded yet.")
-                    elif file_bytes:
+                    elif cv_bytes:
                         st.download_button(
                             "Download CV",
-                            data=file_bytes,
-                            file_name=filename or f"{candidate_code}_cv.bin",
+                            data=cv_bytes,
+                            file_name=cv_name or f"{candidate_code}_cv.bin",
                             mime=mime_type or "application/octet-stream",
                             key=f"cand_dlcv_{candidate_code}",
                         )
-                        if (mime_type == "application/pdf") or (mime_type is None and (filename or "").lower().endswith(".pdf")):
-                            b64 = base64.b64encode(file_bytes).decode("utf-8")
+                        if (mime_type == "application/pdf") or (mime_type is None and (cv_name or "").lower().endswith(".pdf")):
+                            b64 = base64.b64encode(cv_bytes).decode("utf-8")
                             st.markdown(
                                 f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600"></iframe>',
                                 unsafe_allow_html=True,
                             )
-                else:
+                except Exception as e:
+                    st.error(f"Error fetching CV: {e}")
+
+                # Allow editing only if permitted
+                if rec.get("can_edit", False):
                     st.success("Editing is enabled for your application.")
                     updated = _pre_interview_fields(initial=existing_form)
-                    st.markdown("---")
-                    _cv_uploader(candidate_code.strip())
-
                     if st.button("Save Changes"):
                         ok = update_candidate_form_data(candidate_code.strip(), updated)
                         if ok:
@@ -337,5 +268,4 @@ def candidate_form_view():
 
 # Backward-compatible wrapper
 def candidate_view():
-    """Main candidate view function (backward compatibility)"""
     candidate_form_view()
