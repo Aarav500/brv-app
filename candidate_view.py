@@ -178,20 +178,24 @@ def candidate_form_view():
         form_data = _pre_interview_fields()
         st.markdown("---")
         # Validate required fields before submission
+        # Normalize phone *before* validation
+        form_data["phone"] = "".join(filter(str.isdigit, form_data.get("phone", ""))).strip()
+        form_data["name"] = form_data.get("name", "").strip()
+
+        # Validate required fields
         missing_fields = []
-        if not form_data.get("name", "").strip():
+        if not form_data["name"]:
             missing_fields.append("Full Name")
-        if not form_data.get("phone", "").strip():
+        if not form_data["phone"]:
             missing_fields.append("Phone")
+        elif len(form_data["phone"]) < 10:  # Optional: Ensure valid numbers
+            st.error("⚠️ Please enter a valid 10-digit phone number.")
+            st.stop()
 
         if st.button("Submit Application"):
             if missing_fields:
                 st.error(f"Please fill in the following required fields: {', '.join(missing_fields)}")
-                st.stop()  # Prevents executing below code until fixed
-
-            # Normalize phone (remove spaces, dashes, etc.)
-            form_data["phone"] = "".join(filter(str.isdigit, form_data["phone"]))
-            form_data["name"] = form_data["name"].strip()
+                st.stop()
 
             candidate_id = _gen_candidate_code()
             rec = create_candidate_in_db(
