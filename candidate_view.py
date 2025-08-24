@@ -177,10 +177,47 @@ def candidate_form_view():
     if mode == "New candidate":
         form_data = _pre_interview_fields()
         st.markdown("---")
+        # Validate required fields before submission
+        missing_fields = []
+        if not form_data.get("name", "").strip():
+            missing_fields.append("Full Name")
+        if not form_data.get("phone", "").strip():
+            missing_fields.append("Phone")
+
         if st.button("Submit Application"):
-            if not form_data.get("name") or not form_data.get("phone"):
-                st.error("Full Name and Phone are required.")
-                return
+            if missing_fields:
+                st.error(f"Please fill in the following required fields: {', '.join(missing_fields)}")
+                st.stop()  # Prevents executing below code until fixed
+
+            # Normalize phone (remove spaces, dashes, etc.)
+            form_data["phone"] = "".join(filter(str.isdigit, form_data["phone"]))
+            form_data["name"] = form_data["name"].strip()
+
+            candidate_id = _gen_candidate_code()
+            rec = create_candidate_in_db(
+                candidate_id=candidate_id,
+                name=form_data.get("name", ""),
+                address=form_data.get("current_address", ""),
+                dob=form_data.get("dob", None),
+                caste=form_data.get("caste", ""),
+                email=form_data.get("email", ""),
+                phone=form_data.get("phone", ""),
+                form_data=form_data,
+                created_by="candidate",
+            )
+
+            if rec:
+                st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
+
+                # Save CV if uploaded
+                if form_data.get("uploaded_cv"):
+                    file = form_data["uploaded_cv"]
+                    file_bytes = file.read()
+                    ok = save_candidate_cv(candidate_id, file_bytes, file.name)
+                    if ok:
+                        st.success("📄 CV uploaded successfully.")
+                    else:
+                        st.error("⚠️ Failed to save CV.")
 
             candidate_id = _gen_candidate_code()
             rec = create_candidate_in_db(
