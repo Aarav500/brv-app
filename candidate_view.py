@@ -1,4 +1,4 @@
-# candidate_view.py
+# candidate_view.py (patched validation)
 import json
 import secrets
 import string
@@ -157,34 +157,38 @@ def candidate_form_view():
         form_data["phone"] = "".join(filter(str.isdigit, form_data.get("phone", ""))).strip()
         form_data["name"] = form_data.get("name", "").strip()
 
-        # Validate required fields
-        missing_fields = []
-        required_fields = {
-            "Full Name": form_data.get("name"),
-            "Email": form_data.get("email"),
-            "Phone": form_data.get("phone"),
-            "Date of Birth": form_data.get("dob"),
-            "Current Address": form_data.get("current_address"),
-            "Permanent Address": form_data.get("permanent_address"),
-            "Highest Qualification": form_data.get("highest_qualification"),
-            "Work Experience": form_data.get("work_experience"),
-            "Referral": form_data.get("referral"),
-            "CV": form_data.get("uploaded_cv"),
-        }
-
-        for label, value in required_fields.items():
-            if not value or (isinstance(value, str) and not value.strip()):
-                missing_fields.append(label)
-
-        if form_data["phone"] and len(form_data["phone"]) < 10:
-            st.error("⚠️ Please enter a valid 10-digit phone number.")
-            st.stop()
-
         if st.button("Submit Application"):
+            # Required fields validation
+            missing_fields = []
+            if not form_data.get("name"):
+                missing_fields.append("Full Name")
+            if not form_data.get("email"):
+                missing_fields.append("Email")
+            if not form_data.get("phone"):
+                missing_fields.append("Phone")
+            elif len(form_data["phone"]) < 10:
+                st.error("⚠️ Please enter a valid 10-digit phone number.")
+                st.stop()
+            if not form_data.get("dob"):
+                missing_fields.append("Date of Birth")
+            if not form_data.get("current_address"):
+                missing_fields.append("Current Address")
+            if not form_data.get("permanent_address"):
+                missing_fields.append("Permanent Address")
+            if not form_data.get("highest_qualification"):
+                missing_fields.append("Highest Qualification")
+            if not form_data.get("work_experience"):
+                missing_fields.append("Work Experience")
+            if not form_data.get("referral"):
+                missing_fields.append("Referral")
+            if not form_data.get("uploaded_cv"):
+                missing_fields.append("CV")
+
             if missing_fields:
                 st.error(f"Please fill in the following required fields: {', '.join(missing_fields)}")
                 st.stop()
 
+            # Create record
             candidate_id = _gen_candidate_code()
             rec = create_candidate_in_db(
                 candidate_id=candidate_id,
@@ -201,7 +205,7 @@ def candidate_form_view():
             if rec:
                 st.success(f"✅ Application submitted! Your candidate code is: **{candidate_id}**")
 
-                # Save CV (mandatory, so guaranteed present)
+                # Save CV
                 file = form_data["uploaded_cv"]
                 file_bytes = file.read()
                 ok = save_candidate_cv(candidate_id, file_bytes, file.name)
