@@ -1,5 +1,5 @@
 # =============================================================================
-# Fixed CEO Control Panel - Performance & Access Rights Optimized
+# Fixed CEO Control Panel - Access Rights & Data Display Corrected
 # =============================================================================
 
 from __future__ import annotations
@@ -41,10 +41,9 @@ from auth import require_login, get_current_user
 # Performance Optimizations
 # =============================================================================
 
-# Cache with shorter TTL and session-based invalidation
-@st.cache_data(ttl=60, show_spinner=False)  # 1 minute cache
+@st.cache_data(ttl=60, show_spinner=False)
 def _get_candidates_fast():
-    """Fast candidate loading with minimal queries."""
+    """Fast candidate loading with complete form data."""
     try:
         conn = get_conn()
         with conn.cursor() as cur:
@@ -53,6 +52,9 @@ def _get_candidates_fast():
                                name,
                                email,
                                phone,
+                               address,
+                               dob,
+                               caste,
                                created_at,
                                updated_at,
                                can_edit,
@@ -65,17 +67,23 @@ def _get_candidates_fast():
 
             candidates = []
             for row in cur.fetchall():
+                # Parse form_data to get complete application details
+                form_data = row[12] if row[12] else {}
+
                 candidate = {
                     'candidate_id': row[0],
                     'name': row[1],
                     'email': row[2],
                     'phone': row[3],
-                    'created_at': row[4],
-                    'updated_at': row[5],
-                    'can_edit': row[6],
-                    'has_cv_file': row[7],
-                    'has_resume_link': row[8],
-                    'form_data': row[9] if row[9] else {}
+                    'address': row[4],
+                    'dob': row[5],
+                    'caste': row[6],
+                    'created_at': row[7],
+                    'updated_at': row[8],
+                    'can_edit': row[9],
+                    'has_cv_file': row[10],
+                    'has_resume_link': row[11],
+                    'form_data': form_data
                 }
                 candidates.append(candidate)
 
@@ -86,7 +94,7 @@ def _get_candidates_fast():
         return []
 
 
-@st.cache_data(ttl=300, show_spinner=False)  # 5 minute cache for stats
+@st.cache_data(ttl=300, show_spinner=False)
 def _get_stats_fast():
     """Fast statistics loading."""
     try:
@@ -106,12 +114,11 @@ def _clear_candidate_cache():
 # =============================================================================
 
 def _check_user_permissions(user_id: int) -> Dict[str, Any]:
-    """Check user permissions with proper caching and error handling."""
+    """Check user permissions with proper error handling."""
     try:
-        # Get fresh permissions from database
         perms = get_user_permissions(user_id)
         if not perms:
-            return {"role": "user", "can_view_cvs": False, "can_delete_records": False}
+            return {"role": "user", "can_view_cvs": False, "can_delete_records": False, "can_manage_users": False}
 
         role = (perms.get("role") or "user").lower()
 
@@ -128,50 +135,52 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
             "role": role,
             "can_view_cvs": bool(perms.get("can_view_cvs", False)),
             "can_delete_records": bool(perms.get("can_delete_records", False)),
-            "can_manage_users": False
+            "can_manage_users": role == "admin"  # Only admins can manage users
         }
     except Exception as e:
         st.error(f"Permission check failed: {e}")
-        return {"role": "user", "can_view_cvs": False, "can_delete_records": False}
+        return {"role": "user", "can_view_cvs": False, "can_delete_records": False, "can_manage_users": False}
 
 
 # =============================================================================
-# Fast CV Access
+# Fixed CV Access with Proper Rights Check
 # =============================================================================
 
-def _get_cv_fast(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
-    """Fast CV retrieval with proper access control."""
+def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
+    """Get CV with proper access control - fixed version."""
     try:
-        # Check permissions first
+        # First check if user has CV viewing permissions
         perms = _check_user_permissions(user_id)
-        if not perms.get("can_view_cvs", False):
+
+        # For CEO/Admin role or explicit can_view_cvs permission
+        if not (perms.get("role") in ("ceo", "admin") or perms.get("can_view_cvs", False)):
             return None, None, "no_permission"
 
-        # Single query to get CV
-        conn = get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                            SELECT cv_file, cv_filename, resume_link
-                            FROM candidates
-                            WHERE candidate_id = %s
-                            """, (candidate_id,))
-                result = cur.fetchone()
+        # Use the secure CV fetch function with proper actor_id
+        result = get_candidate_cv_secure(candidate_id, user_id)
 
-                if not result:
-                    return None, None, "not_found"
+        # Handle different return formats from get_candidate_cv_secure
+        if isinstance(result, tuple):
+            if len(result) == 4:
+                cv_bytes, cv_filename, mime_type, reason = result
+            elif len(result) == 3:
+                cv_bytes, cv_filename, reason = result
+                mime_type = None
+            else:
+                return None, None, "error"
 
-                cv_file, cv_filename, resume_link = result
-
-                if cv_file:
-                    return bytes(cv_file), cv_filename or f"{candidate_id}.pdf", "ok"
-                elif resume_link and resume_link.strip():
-                    return None, resume_link.strip(), "link_only"
-                else:
-                    return None, None, "not_found"
-
-        finally:
-            conn.close()
+            if reason == "ok" and cv_bytes:
+                return bytes(cv_bytes), cv_filename or f"{candidate_id}.pdf", "ok"
+            elif reason == "no_permission":
+                return None, None, "no_permission"
+            elif reason == "not_found":
+                return None, None, "not_found"
+            else:
+                return None, None, "error"
+        elif isinstance(result, (bytes, bytearray)):
+            return bytes(result), f"{candidate_id}.pdf", "ok"
+        else:
+            return None, None, "not_found"
 
     except Exception as e:
         st.error(f"CV fetch error: {e}")
@@ -179,16 +188,222 @@ def _get_cv_fast(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Opti
 
 
 # =============================================================================
+# Complete Form Data Display - Fixed
+# =============================================================================
+
+def _render_complete_application_details(candidate: Dict[str, Any]):
+    """Render ALL application details from both top-level and form_data fields."""
+
+    st.markdown("### 📋 Complete Application Details")
+
+    # Combine data from top-level fields and form_data
+    form_data = candidate.get('form_data', {}) or {}
+
+    # Field mapping for better display
+    field_labels = {
+        "name": "👤 Full Name",
+        "email": "📧 Email Address",
+        "phone": "📱 Phone Number",
+        "dob": "🎂 Date of Birth",
+        "address": "🏠 Address (from record)",
+        "current_address": "🏠 Current Address",
+        "permanent_address": "🏡 Permanent Address",
+        "caste": "📋 Caste",
+        "sub_caste": "📋 Sub-caste",
+        "marital_status": "💑 Marital Status",
+        "highest_qualification": "🎓 Highest Qualification",
+        "work_experience": "💼 Work Experience",
+        "referral": "📢 How did you hear about us?",
+        "ready_festivals": "🎊 Ready to work on festivals?",
+        "ready_late_nights": "🌙 Ready to work late nights?",
+        "created_at": "📅 Application Created",
+        "updated_at": "🕐 Last Updated"
+    }
+
+    # Create comprehensive data dictionary
+    all_data = {}
+
+    # Add top-level fields
+    for key in ["name", "email", "phone", "address", "dob", "caste", "created_at", "updated_at"]:
+        value = candidate.get(key)
+        if value and str(value).strip():
+            all_data[key] = value
+
+    # Add form_data fields (these take precedence for duplicates)
+    for key, value in form_data.items():
+        if value and str(value).strip():
+            all_data[key] = value
+
+    if not all_data:
+        st.info("📋 No detailed application information available")
+        return
+
+    # Display in two columns for better layout
+    col1, col2 = st.columns(2)
+
+    # Split data into two columns
+    data_items = list(all_data.items())
+    mid_point = (len(data_items) + 1) // 2
+
+    with col1:
+        for key, value in data_items[:mid_point]:
+            if value and str(value).strip():
+                label = field_labels.get(key, key.replace('_', ' ').title())
+
+                # Special formatting for specific fields
+                if key in ["ready_festivals", "ready_late_nights"]:
+                    display_value = "✅ Yes" if str(value).lower() == "yes" else "❌ No"
+                elif key in ["dob", "created_at", "updated_at"]:
+                    display_value = _format_datetime(value)
+                else:
+                    display_value = str(value)
+
+                st.markdown(f"**{label}:** {display_value}")
+
+    with col2:
+        for key, value in data_items[mid_point:]:
+            if value and str(value).strip():
+                label = field_labels.get(key, key.replace('_', ' ').title())
+
+                # Special formatting for specific fields
+                if key in ["ready_festivals", "ready_late_nights"]:
+                    display_value = "✅ Yes" if str(value).lower() == "yes" else "❌ No"
+                elif key in ["dob", "created_at", "updated_at"]:
+                    display_value = _format_datetime(value)
+                else:
+                    display_value = str(value)
+
+                st.markdown(f"**{label}:** {display_value}")
+
+
+# =============================================================================
+# Fixed Interview History Display
+# =============================================================================
+
+def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
+    """Get interview history with better filtering."""
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            # Get all history records, not just those without 'created' in details
+            cur.execute("""
+                        SELECT id, actor, created_at, details, actor_id
+                        FROM candidate_history
+                        WHERE candidate_id = %s
+                        ORDER BY created_at DESC LIMIT 50
+                        """, (candidate_id,))
+
+            history = []
+            for row in cur.fetchall():
+                history.append({
+                    'id': row[0],
+                    'actor': row[1] or 'Unknown',
+                    'created_at': row[2],
+                    'details': row[3] or '',
+                    'actor_id': row[4]
+                })
+
+            conn.close()
+            return history
+    except Exception as e:
+        st.error(f"Error loading interview history: {e}")
+        return []
+
+
+def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
+    """Render interview history with better categorization."""
+    if not history_records:
+        st.info("📝 No interview history found")
+        return
+
+    # Separate different types of records
+    interviews = []
+    assessments = []
+    system_records = []
+
+    for record in history_records:
+        details = record.get('details', '').lower()
+
+        # Categorize based on content
+        if any(keyword in details for keyword in ['interview', 'meeting', 'discussion', 'call']):
+            interviews.append(record)
+        elif any(keyword in details for keyword in ['assessment', 'test', 'evaluation', 'score']):
+            assessments.append(record)
+        elif any(keyword in details for keyword in ['created', 'system', 'automatic']):
+            system_records.append(record)
+        else:
+            # If it has substantial content, treat as interview
+            if len(details.strip()) > 20:
+                interviews.append(record)
+            else:
+                system_records.append(record)
+
+    # Display interviews
+    if interviews:
+        st.markdown("#### 🎤 Interviews & Discussions")
+        for interview in interviews:
+            _render_single_record(interview)
+
+    # Display assessments
+    if assessments:
+        st.markdown("#### 📊 Assessments")
+        for assessment in assessments:
+            _render_single_record(assessment)
+
+    # Display system records if they contain useful info
+    if system_records:
+        with st.expander("🔧 System Records", expanded=False):
+            for record in system_records:
+                _render_single_record(record)
+
+    if not interviews and not assessments:
+        st.info("📝 No interviews or assessments recorded yet")
+
+
+def _render_single_record(record: Dict[str, Any]):
+    """Render a single history record."""
+    actor = record.get('actor', 'Unknown')
+    when = _format_datetime(record.get('created_at'))
+    details = record.get('details', '')
+
+    with st.container():
+        st.markdown(f"**👤 {actor}** • {when}")
+
+        if details:
+            # Try to parse as JSON for structured display
+            try:
+                if details.strip().startswith('{') and details.strip().endswith('}'):
+                    data = json.loads(details)
+                    if isinstance(data, dict):
+                        for key, value in data.items():
+                            if value and str(value).strip():
+                                clean_key = key.replace('_', ' ').title()
+                                st.markdown(f"• **{clean_key}:** {value}")
+                    else:
+                        st.markdown(f"📝 {details}")
+                else:
+                    st.markdown(f"📝 {details}")
+            except json.JSONDecodeError:
+                st.markdown(f"📝 {details}")
+
+        st.markdown("---")
+
+
+# =============================================================================
 # Utility Functions
 # =============================================================================
 
 def _format_datetime(dt) -> str:
-    """Fast datetime formatting."""
+    """Format datetime with better handling."""
     if not dt:
         return "—"
     if isinstance(dt, str):
         try:
-            dt = datetime.fromisoformat(dt)
+            # Handle ISO format strings
+            if 'T' in dt:
+                dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+            else:
+                dt = datetime.fromisoformat(dt)
         except:
             return dt
     try:
@@ -198,7 +413,7 @@ def _format_datetime(dt) -> str:
 
 
 def _detect_mimetype(filename: str) -> str:
-    """Fast mimetype detection."""
+    """Detect mimetype from filename."""
     if not filename:
         return "application/octet-stream"
 
@@ -216,198 +431,182 @@ def _detect_mimetype(filename: str) -> str:
 
 
 # =============================================================================
-# Fast Form Data Display
+# Enhanced PDF Preview
 # =============================================================================
 
-def _render_application_details_fast(form_data: Dict[str, Any]):
-    """Fast rendering of complete application details."""
-    if not form_data or not isinstance(form_data, dict):
-        st.info("📋 No application details available")
+def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool, has_resume_link: bool):
+    """Render CV section with proper access control."""
+    st.markdown("### 📄 CV & Documents")
+
+    if not (has_cv_file or has_resume_link):
+        st.info("📂 No CV uploaded")
         return
 
-    # Field mapping for better display
-    field_labels = {
-        "name": "👤 Full Name",
-        "email": "📧 Email Address",
-        "phone": "📱 Phone Number",
-        "dob": "🎂 Date of Birth",
-        "current_address": "🏠 Current Address",
-        "permanent_address": "🏡 Permanent Address",
-        "caste": "📋 Caste",
-        "sub_caste": "📋 Sub-caste",
-        "marital_status": "💑 Marital Status",
-        "highest_qualification": "🎓 Highest Qualification",
-        "work_experience": "💼 Work Experience",
-        "referral": "📢 How did you hear about us?",
-        "ready_festivals": "🎊 Ready to work on festivals?",
-        "ready_late_nights": "🌙 Ready to work late nights?",
-        "updated_at": "🕐 Last Updated"
-    }
+    # Check permissions
+    perms = _check_user_permissions(user_id)
+    can_view = perms.get("role") in ("ceo", "admin") or perms.get("can_view_cvs", False)
 
-    st.markdown("### 📋 Complete Application Details")
+    if not can_view:
+        st.warning("🔒 You don't have permission to view CVs")
+        return
 
-    # Create two columns for better layout
-    col1, col2 = st.columns(2)
+    # Get CV data
+    cv_bytes, cv_name, status = _get_cv_with_proper_access(candidate_id, user_id)
 
-    form_items = list(form_data.items())
-    mid_point = len(form_items) // 2
+    if status == "ok" and cv_bytes:
+        # Create download button
+        st.download_button(
+            "📥 Download CV",
+            data=cv_bytes,
+            file_name=cv_name or f"{candidate_id}_cv.pdf",
+            mime=_detect_mimetype(cv_name or ""),
+            key=f"cv_dl_{candidate_id}"
+        )
 
-    with col1:
-        for key, value in form_items[:mid_point]:
-            if value and str(value).strip():
-                label = field_labels.get(key, key.replace('_', ' ').title())
+        # Show PDF preview if it's a PDF
+        if cv_name and cv_name.lower().endswith('.pdf'):
+            try:
+                b64 = base64.b64encode(cv_bytes).decode()
+                st.markdown(f"""
+                    <iframe 
+                        src="data:application/pdf;base64,{b64}" 
+                        width="100%" 
+                        height="500px" 
+                        style="border: 1px solid #ddd; border-radius: 5px;">
+                    </iframe>
+                """, unsafe_allow_html=True)
+            except Exception:
+                st.info("📄 PDF preview not available, but file can be downloaded")
 
-                if key in ["ready_festivals", "ready_late_nights"]:
-                    display_value = "✅ Yes" if str(value).lower() == "yes" else "❌ No"
-                elif key == "dob":
-                    try:
-                        if isinstance(value, str):
-                            dt = datetime.fromisoformat(value)
-                            display_value = dt.strftime("%B %d, %Y")
-                        else:
-                            display_value = str(value)
-                    except:
-                        display_value = str(value)
-                else:
-                    display_value = str(value)
-
-                st.markdown(f"**{label}:** {display_value}")
-
-    with col2:
-        for key, value in form_items[mid_point:]:
-            if value and str(value).strip():
-                label = field_labels.get(key, key.replace('_', ' ').title())
-
-                if key in ["ready_festivals", "ready_late_nights"]:
-                    display_value = "✅ Yes" if str(value).lower() == "yes" else "❌ No"
-                elif key == "dob":
-                    try:
-                        if isinstance(value, str):
-                            dt = datetime.fromisoformat(value)
-                            display_value = dt.strftime("%B %d, %Y")
-                        else:
-                            display_value = str(value)
-                    except:
-                        display_value = str(value)
-                else:
-                    display_value = str(value)
-
-                st.markdown(f"**{label}:** {display_value}")
+    elif status == "no_permission":
+        st.warning("🔒 Access denied to CV")
+    elif status == "not_found":
+        st.info("📂 CV file not found")
+    else:
+        st.error("❌ Error accessing CV")
 
 
 # =============================================================================
-# Fast Interview History
+# Fixed User Management - Only Show Actual Users
 # =============================================================================
 
-def _get_interview_history_fast(candidate_id: str) -> List[Dict[str, Any]]:
-    """Fast interview history loading."""
+def _get_actual_users_only():
+    """Get only actual system users, not candidate records."""
     try:
         conn = get_conn()
         with conn.cursor() as cur:
+            # Get users from the users table, not candidates table
             cur.execute("""
-                        SELECT id, actor, created_at, details, actor_id
-                        FROM candidate_history
-                        WHERE candidate_id = %s
-                          AND (details NOT ILIKE '%candidate record created%' 
-                     AND details NOT ILIKE '%record created%'
-                     AND details NOT ILIKE '%system%')
-                        ORDER BY created_at DESC LIMIT 20
-                        """, (candidate_id,))
+                        SELECT u.id,
+                               u.email,
+                               u.created_at,
+                               u.role,
+                               up.can_view_cvs,
+                               up.can_delete_records
+                        FROM users u
+                                 LEFT JOIN user_permissions up ON u.id = up.user_id
+                        WHERE u.email IS NOT NULL
+                          AND u.email != ''
+                        ORDER BY u.created_at DESC
+                        """)
 
-            history = []
+            users = []
             for row in cur.fetchall():
-                history.append({
+                users.append({
                     'id': row[0],
-                    'actor': row[1],
+                    'email': row[1],
                     'created_at': row[2],
-                    'details': row[3],
-                    'actor_id': row[4]
+                    'role': row[3] or 'user',
+                    'can_view_cvs': bool(row[4]) if row[4] is not None else False,
+                    'can_delete_records': bool(row[5]) if row[5] is not None else False
                 })
 
             conn.close()
-            return history
-    except Exception:
+            return users
+    except Exception as e:
+        st.error(f"Error loading users: {e}")
         return []
 
 
-def _render_interview_fast(interview: Dict[str, Any]):
-    """Fast interview rendering."""
-    actor = interview.get('actor', '—')
-    when = _format_datetime(interview.get('created_at'))
-    details = interview.get('details', '')
+def show_user_management_panel():
+    """Fixed user management panel - only shows actual users."""
+    require_login()
 
-    with st.container():
-        st.markdown(f"**👤 {actor}** • {when}")
+    user = get_current_user(refresh=True)
+    perms = _check_user_permissions(user.get("id"))
 
-        if details:
-            # Try to parse as JSON for structured display
-            try:
-                if details.startswith('{') and details.endswith('}'):
-                    data = json.loads(details)
-                    for key, value in data.items():
-                        if value:
-                            clean_key = key.replace('_', ' ').title()
-                            st.markdown(f"• **{clean_key}:** {value}")
-                else:
-                    st.markdown(f"📝 {details}")
-            except:
-                st.markdown(f"📝 {details}")
+    if not perms.get("can_manage_users", False):
+        st.error("Access denied. Admin privileges required.")
+        st.stop()
 
-        st.markdown("---")
+    st.title("👥 User Management")
+    st.caption("Manage system user permissions")
+
+    users = _get_actual_users_only()
+
+    if not users:
+        st.info("No system users found.")
+        return
+
+    for user_data in users:
+        user_id = user_data.get('id')
+        user_email = user_data.get('email', 'No email')
+        user_role = user_data.get('role', 'user')
+
+        with st.expander(f"👤 {user_email} (Role: {user_role})"):
+            st.markdown(f"""
+            **User ID:** {user_id}  
+            **Email:** {user_email}  
+            **Role:** {user_role}  
+            **Created:** {_format_datetime(user_data.get('created_at'))}
+            """)
+
+            # Permission controls (only for non-CEO/admin users)
+            if user_role.lower() not in ('ceo', 'admin'):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    can_view_cvs = st.checkbox(
+                        "Can View CVs",
+                        value=user_data.get('can_view_cvs', False),
+                        key=f"cv_{user_id}",
+                        help="Allow this user to view candidate CVs"
+                    )
+
+                with col2:
+                    can_delete = st.checkbox(
+                        "Can Delete Records",
+                        value=user_data.get('can_delete_records', False),
+                        key=f"del_{user_id}",
+                        help="Allow this user to delete candidate records"
+                    )
+
+                if st.button("💾 Update Permissions", key=f"save_{user_id}"):
+                    new_perms = {
+                        "can_view_cvs": can_view_cvs,
+                        "can_delete_records": can_delete
+                    }
+
+                    try:
+                        if update_user_permissions(user_id, new_perms):
+                            st.success("✅ Permissions updated!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Update failed")
+                    except Exception as e:
+                        st.error(f"Error updating permissions: {e}")
+            else:
+                st.info("🔑 CEO/Admin users have all permissions by default")
 
 
 # =============================================================================
-# Simple PDF Preview
-# =============================================================================
-
-def _pdf_preview_fast(pdf_bytes: bytes, candidate_id: str):
-    """Fast PDF preview with fallback options."""
-    try:
-        b64 = base64.b64encode(pdf_bytes).decode()
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                "📥 Download PDF",
-                data=pdf_bytes,
-                file_name=f"{candidate_id}_cv.pdf",
-                mime="application/pdf",
-                key=f"pdf_dl_{candidate_id}"
-            )
-
-        with col2:
-            if st.button("🔗 Open in New Tab", key=f"pdf_open_{candidate_id}"):
-                components.html(f"""
-                    <script>
-                    window.open('data:application/pdf;base64,{b64}', '_blank');
-                    </script>
-                    <p>Opening in new tab...</p>
-                """, height=50)
-
-        # Simple iframe preview
-        st.markdown(f"""
-            <iframe 
-                src="data:application/pdf;base64,{b64}" 
-                width="100%" 
-                height="500px" 
-                style="border: 1px solid #ddd;">
-            </iframe>
-        """, unsafe_allow_html=True)
-
-        return True
-    except Exception:
-        return False
-
-
-# =============================================================================
-# Main CEO Dashboard - Optimized
+# Main CEO Dashboard - Fixed Version
 # =============================================================================
 
 def show_ceo_panel():
-    """Optimized CEO dashboard with fast loading."""
+    """Fixed CEO dashboard with proper access controls and complete data display."""
     require_login()
 
-    # Get current user and check permissions
     user = get_current_user(refresh=True)
     if not user:
         st.error("Please log in again.")
@@ -423,7 +622,7 @@ def show_ceo_panel():
     st.title("🎯 CEO Dashboard")
     st.caption(f"Welcome {user.get('email', 'User')} | Role: {perms.get('role', 'Unknown').title()}")
 
-    # Quick stats with caching
+    # Quick stats
     with st.spinner("Loading dashboard..."):
         stats = _get_stats_fast()
 
@@ -439,15 +638,14 @@ def show_ceo_panel():
 
     st.markdown("---")
 
-    # Fast candidate management
+    # Candidate management section
     st.header("👥 Candidate Management")
 
-    # Controls row
+    # Controls
     ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([3, 1, 1, 1])
 
     with ctrl_col1:
-        search_term = st.text_input("🔍 Search candidates", key="search",
-                                    help="Search by name, email, or candidate ID")
+        search_term = st.text_input("🔍 Search candidates", key="search")
 
     with ctrl_col2:
         show_no_cv = st.checkbox("📂 No CV only", key="filter_no_cv")
@@ -456,18 +654,18 @@ def show_ceo_panel():
         select_all = st.checkbox("☑️ Select all", key="select_all")
 
     with ctrl_col4:
-        if st.button("🔄 Refresh", help="Reload data"):
+        if st.button("🔄 Refresh"):
             _clear_candidate_cache()
             st.rerun()
 
-    # Load candidates with caching
+    # Load candidates
     candidates = _get_candidates_fast()
 
     if not candidates:
         st.warning("No candidates found.")
         return
 
-    # Fast filtering
+    # Filter candidates
     filtered_candidates = []
     search_lower = search_term.lower().strip() if search_term else ""
 
@@ -512,7 +710,12 @@ def show_ceo_panel():
     # Batch actions
     if perms.get("can_delete_records") and selected:
         if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary"):
-            _batch_delete_fast(list(selected), user_id)
+            success_count = 0
+            for candidate_id in list(selected):
+                if _delete_candidate_fast(candidate_id, user_id):
+                    success_count += 1
+
+            st.success(f"Deleted {success_count} candidates")
             st.session_state.selected_candidates.clear()
             _clear_candidate_cache()
             st.rerun()
@@ -539,59 +742,21 @@ def show_ceo_panel():
                     main_col, action_col = st.columns([3, 1])
 
                     with main_col:
-                        # Basic info
-                        st.markdown(f"""
-                        **📧 Email:** {candidate.get('email', '—')}  
-                        **📱 Phone:** {candidate.get('phone', '—')}  
-                        **📅 Created:** {_format_datetime(candidate.get('created_at'))}  
-                        **✏️ Can Edit:** {'Yes' if candidate.get('can_edit') else 'No'}
-                        """)
+                        # Complete application details - FIXED
+                        _render_complete_application_details(candidate)
 
-                        # Application details
-                        if candidate.get('form_data'):
-                            with st.expander("📋 Application Details", expanded=True):
-                                _render_application_details_fast(candidate.get('form_data', {}))
+                        # CV Section - FIXED with proper access control
+                        _render_cv_section_fixed(
+                            candidate_id,
+                            user_id,
+                            candidate.get('has_cv_file', False),
+                            candidate.get('has_resume_link', False)
+                        )
 
-                        # CV Section
-                        if perms.get("can_view_cvs"):
-                            st.markdown("### 📄 CV & Documents")
-
-                            if candidate.get('has_cv_file') or candidate.get('has_resume_link'):
-                                cv_bytes, cv_name, status = _get_cv_fast(candidate_id, user_id)
-
-                                if status == "ok" and cv_bytes:
-                                    mimetype = _detect_mimetype(cv_name or "")
-
-                                    if mimetype == "application/pdf":
-                                        _pdf_preview_fast(cv_bytes, candidate_id)
-                                    else:
-                                        st.download_button(
-                                            f"📥 Download {cv_name or 'CV'}",
-                                            data=cv_bytes,
-                                            file_name=cv_name or f"{candidate_id}_cv",
-                                            key=f"cv_dl_{candidate_id}"
-                                        )
-
-                                elif status == "link_only":
-                                    st.markdown(f"🔗 [Open CV Link]({cv_name})")
-
-                                elif status == "no_permission":
-                                    st.warning("🔒 No permission to view CV")
-
-                                else:
-                                    st.info("❌ CV access error")
-                            else:
-                                st.info("📂 No CV uploaded")
-
-                        # Interview History
+                        # Interview History - FIXED
                         st.markdown("### 🎤 Interview History")
-                        history = _get_interview_history_fast(candidate_id)
-
-                        if history:
-                            for interview in history[:5]:  # Show last 5
-                                _render_interview_fast(interview)
-                        else:
-                            st.info("No interviews recorded")
+                        history = _get_interview_history_fixed(candidate_id)
+                        _render_interview_history_fixed(history)
 
                     with action_col:
                         st.markdown("### ⚙️ Actions")
@@ -605,7 +770,7 @@ def show_ceo_panel():
                             try:
                                 success = set_candidate_permission(candidate_id, not current_can_edit)
                                 if success:
-                                    st.success(f"Updated edit permission")
+                                    st.success("Updated edit permission")
                                     _clear_candidate_cache()
                                     st.rerun()
                                 else:
@@ -625,82 +790,13 @@ def show_ceo_panel():
 
 
 def _delete_candidate_fast(candidate_id: str, user_id: int) -> bool:
-    """Fast candidate deletion."""
+    """Delete candidate with proper error handling."""
     try:
-        ok, reason = delete_candidate(candidate_id, user_id)
-        return ok
-    except Exception:
+        success, reason = delete_candidate(candidate_id, user_id)
+        return success
+    except Exception as e:
+        st.error(f"Delete error: {e}")
         return False
-
-
-def _batch_delete_fast(candidate_ids: List[str], user_id: int):
-    """Fast batch deletion."""
-    try:
-        for cid in candidate_ids:
-            delete_candidate(cid, user_id)
-        st.success(f"Deleted {len(candidate_ids)} candidates")
-    except Exception as e:
-        st.error(f"Batch delete failed: {e}")
-
-
-# =============================================================================
-# User Management - Simplified
-# =============================================================================
-
-def show_user_management_panel():
-    """Simplified user management."""
-    require_login()
-
-    user = get_current_user(refresh=True)
-    perms = _check_user_permissions(user.get("id"))
-
-    if not perms.get("can_manage_users", False):
-        st.error("Access denied. Admin privileges required.")
-        st.stop()
-
-    st.title("👥 User Management")
-
-    try:
-        users = get_all_users_with_permissions() or []
-    except Exception as e:
-        st.error(f"Failed to load users: {e}")
-        return
-
-    for user_data in users:
-        with st.expander(f"👤 {user_data.get('email', 'No email')}"):
-            st.markdown(f"""
-            **ID:** {user_data.get('id')}  
-            **Role:** {user_data.get('role', 'user')}  
-            **Created:** {_format_datetime(user_data.get('created_at'))}
-            """)
-
-            # Permission controls
-            can_view_cvs = st.checkbox(
-                "Can View CVs",
-                value=bool(user_data.get('can_view_cvs', False)),
-                key=f"cv_{user_data.get('id')}"
-            )
-
-            can_delete = st.checkbox(
-                "Can Delete Records",
-                value=bool(user_data.get('can_delete_records', False)),
-                key=f"del_{user_data.get('id')}"
-            )
-
-            if st.button("💾 Update Permissions", key=f"save_{user_data.get('id')}"):
-                new_perms = {
-                    "can_view_cvs": can_view_cvs,
-                    "can_delete_records": can_delete
-                }
-
-                try:
-                    if update_user_permissions(user_data.get('id'), new_perms):
-                        st.success("✅ Permissions updated!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Update failed")
-                except Exception as e:
-                    st.error(f"Error: {e}")
 
 
 # =============================================================================
@@ -736,7 +832,7 @@ def main():
 
     selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ Optimized for speed and reliability")
+    st.sidebar.caption("⚡ Fixed: CV Access, Complete Data Display, User Management")
 
     # Run selected page
     pages[selected_page]()
