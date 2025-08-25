@@ -12,6 +12,7 @@ import uuid
 import mimetypes
 import traceback
 import re
+import psycopg2
 from smtp_mailer import send_email
 import streamlit as st
 import streamlit.components.v1 as components
@@ -47,12 +48,36 @@ def _get_candidates_fast():
     try:
         conn = get_conn()
         with conn.cursor() as cur:
+            # First check which address columns exist
             cur.execute("""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'candidates'
+                          AND column_name IN ('address', 'current_address', 'permanent_address')
+                        """)
+            existing_address_cols = {row[0] for row in cur.fetchall()}
+
+            # Build query based on available columns
+            address_select = []
+            if 'current_address' in existing_address_cols:
+                address_select.append('current_address')
+            if 'permanent_address' in existing_address_cols:
+                address_select.append('permanent_address')
+            if 'address' in existing_address_cols:
+                address_select.append('address')
+
+            # If no address columns, use NULL
+            if not address_select:
+                address_select = ['NULL as current_address', 'NULL as permanent_address']
+
+            address_fields = ', '.join(address_select)
+
+            cur.execute(f"""
                         SELECT candidate_id,
                                name,
                                email,
                                phone,
-                               address,
+                               {address_fields},
                                dob,
                                caste,
                                created_at,
@@ -68,23 +93,49 @@ def _get_candidates_fast():
             candidates = []
             for row in cur.fetchall():
                 # Parse form_data to get complete application details
-                form_data = row[12] if row[12] else {}
+                form_data = row[-1] if row[-1] else {}  # form_data is always last
+
+                # Handle different address column configurations
+                address_data = {}
+                col_index = 4  # Start after phone column
+
+                if 'current_address' in existing_address_cols:
+                    address_data['current_address'] = row[col_index]
+                    col_index += 1
+                if 'permanent_address' in existing_address_cols:
+                    address_data['permanent_address'] = row[col_index]
+                    col_index += 1
+                if 'address' in existing_address_cols:
+                    address_data['address'] = row[col_index]
+                    col_index += 1
+
+                # Adjust remaining column indices
+                dob_idx = col_index
+                caste_idx = col_index + 1
+                created_at_idx = col_index + 2
+                updated_at_idx = col_index + 3
+                can_edit_idx = col_index + 4
+                has_cv_idx = col_index + 5
+                has_resume_idx = col_index + 6
 
                 candidate = {
                     'candidate_id': row[0],
                     'name': row[1],
                     'email': row[2],
                     'phone': row[3],
-                    'address': row[4],
-                    'dob': row[5],
-                    'caste': row[6],
-                    'created_at': row[7],
-                    'updated_at': row[8],
-                    'can_edit': row[9],
-                    'has_cv_file': row[10],
-                    'has_resume_link': row[11],
+                    'dob': row[dob_idx] if dob_idx < len(row) else None,
+                    'caste': row[caste_idx] if caste_idx < len(row) else None,
+                    'created_at': row[created_at_idx] if created_at_idx < len(row) else None,
+                    'updated_at': row[updated_at_idx] if updated_at_idx < len(row) else None,
+                    'can_edit': row[can_edit_idx] if can_edit_idx < len(row) else False,
+                    'has_cv_file': row[has_cv_idx] if has_cv_idx < len(row) else False,
+                    'has_resume_link': row[has_resume_idx] if has_resume_idx < len(row) else False,
                     'form_data': form_data
                 }
+
+                # Add address data
+                candidate.update(address_data)
+
                 candidates.append(candidate)
 
             conn.close()
@@ -156,31 +207,32 @@ def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optiona
         if not (perms.get("role") in ("ceo", "admin") or perms.get("can_view_cvs", False)):
             return None, None, "no_permission"
 
-        # Use the secure CV fetch function with proper actor_id
-        result = get_candidate_cv_secure(candidate_id, user_id)
+        # Direct database query since get_candidate_cv_secure has issues
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                            SELECT cv_file, cv_filename, resume_link
+                            FROM candidates
+                            WHERE candidate_id = %s
+                            """, (candidate_id,))
+                result = cur.fetchone()
 
-        # Handle different return formats from get_candidate_cv_secure
-        if isinstance(result, tuple):
-            if len(result) == 4:
-                cv_bytes, cv_filename, mime_type, reason = result
-            elif len(result) == 3:
-                cv_bytes, cv_filename, reason = result
-                mime_type = None
-            else:
-                return None, None, "error"
+                if not result:
+                    return None, None, "not_found"
 
-            if reason == "ok" and cv_bytes:
-                return bytes(cv_bytes), cv_filename or f"{candidate_id}.pdf", "ok"
-            elif reason == "no_permission":
-                return None, None, "no_permission"
-            elif reason == "not_found":
-                return None, None, "not_found"
-            else:
-                return None, None, "error"
-        elif isinstance(result, (bytes, bytearray)):
-            return bytes(result), f"{candidate_id}.pdf", "ok"
-        else:
-            return None, None, "not_found"
+                cv_file, cv_filename, resume_link = result
+
+                if cv_file:
+                    return bytes(cv_file), cv_filename or f"{candidate_id}.pdf", "ok"
+                elif resume_link and resume_link.strip():
+                    # For resume links, return the link as filename
+                    return None, resume_link.strip(), "link_only"
+                else:
+                    return None, None, "not_found"
+
+        finally:
+            conn.close()
 
     except Exception as e:
         st.error(f"CV fetch error: {e}")
@@ -281,33 +333,110 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
 # =============================================================================
 
 def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
-    """Get interview history with better filtering."""
+    """Get interview history with better error handling and multiple table support."""
+    history = []
+
     try:
         conn = get_conn()
         with conn.cursor() as cur:
-            # Get all history records, not just those without 'created' in details
-            cur.execute("""
-                        SELECT id, actor, created_at, details, actor_id
-                        FROM candidate_history
-                        WHERE candidate_id = %s
-                        ORDER BY created_at DESC LIMIT 50
-                        """, (candidate_id,))
+            # Try to get from candidate_history table first
+            try:
+                cur.execute("""
+                            SELECT id, actor, created_at, details, actor_id
+                            FROM candidate_history
+                            WHERE candidate_id = %s
+                            ORDER BY created_at DESC LIMIT 50
+                            """, (candidate_id,))
 
-            history = []
-            for row in cur.fetchall():
-                history.append({
-                    'id': row[0],
-                    'actor': row[1] or 'Unknown',
-                    'created_at': row[2],
-                    'details': row[3] or '',
-                    'actor_id': row[4]
-                })
+                for row in cur.fetchall():
+                    history.append({
+                        'id': row[0],
+                        'actor': row[1] or 'Unknown',
+                        'created_at': row[2],
+                        'details': row[3] or '',
+                        'actor_id': row[4],
+                        'source': 'history'
+                    })
+            except psycopg2.errors.UndefinedTable:
+                # candidate_history table doesn't exist, skip
+                pass
+            except Exception as e:
+                st.error(f"Error loading candidate history: {e}")
+
+            # Also get from interviews table
+            try:
+                cur.execute("""
+                            SELECT id, interviewer, created_at, scheduled_at, result, notes
+                            FROM interviews
+                            WHERE candidate_id = %s
+                            ORDER BY COALESCE(scheduled_at, created_at) DESC LIMIT 20
+                            """, (candidate_id,))
+
+                for row in cur.fetchall():
+                    interview_details = []
+                    if row[4]:  # result
+                        interview_details.append(f"Result: {row[4]}")
+                    if row[5]:  # notes
+                        interview_details.append(f"Notes: {row[5]}")
+
+                    history.append({
+                        'id': f"interview_{row[0]}",
+                        'actor': row[1] or 'Interviewer',
+                        'created_at': row[3] or row[2],  # prefer scheduled_at over created_at
+                        'details': '; '.join(interview_details) if interview_details else 'Interview scheduled',
+                        'actor_id': None,
+                        'source': 'interview'
+                    })
+            except Exception as e:
+                st.error(f"Error loading interviews: {e}")
+
+            # Also get from receptionist_assessments table
+            try:
+                cur.execute("""
+                            SELECT id,
+                                   created_at,
+                                   speed_test,
+                                   accuracy_test,
+                                   work_commitment,
+                                   english_understanding,
+                                   comments
+                            FROM receptionist_assessments
+                            WHERE candidate_id = %s
+                            ORDER BY created_at DESC LIMIT 10
+                            """, (candidate_id,))
+
+                for row in cur.fetchall():
+                    assessment_details = []
+                    if row[2] is not None:  # speed_test
+                        assessment_details.append(f"Speed: {row[2]}")
+                    if row[3] is not None:  # accuracy_test
+                        assessment_details.append(f"Accuracy: {row[3]}")
+                    if row[4]:  # work_commitment
+                        assessment_details.append(f"Commitment: {row[4]}")
+                    if row[5]:  # english_understanding
+                        assessment_details.append(f"English: {row[5]}")
+                    if row[6]:  # comments
+                        assessment_details.append(f"Comments: {row[6]}")
+
+                    history.append({
+                        'id': f"assessment_{row[0]}",
+                        'actor': 'Receptionist',
+                        'created_at': row[1],
+                        'details': '; '.join(assessment_details) if assessment_details else 'Assessment completed',
+                        'actor_id': None,
+                        'source': 'assessment'
+                    })
+            except Exception as e:
+                st.error(f"Error loading assessments: {e}")
 
             conn.close()
-            return history
+
     except Exception as e:
-        st.error(f"Error loading interview history: {e}")
-        return []
+        st.error(f"Error connecting to database: {e}")
+
+    # Sort by created_at desc
+    history.sort(key=lambda x: x.get('created_at') or datetime.min, reverse=True)
+    return history
 
 
 def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
@@ -319,28 +448,32 @@ def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
     # Separate different types of records
     interviews = []
     assessments = []
+    history_records_list = []
     system_records = []
 
     for record in history_records:
+        source = record.get('source', '')
         details = record.get('details', '').lower()
 
-        # Categorize based on content
-        if any(keyword in details for keyword in ['interview', 'meeting', 'discussion', 'call']):
+        if source == 'interview' or any(keyword in details for keyword in ['interview', 'result:', 'scheduled']):
             interviews.append(record)
-        elif any(keyword in details for keyword in ['assessment', 'test', 'evaluation', 'score']):
+        elif source == 'assessment' or any(
+                keyword in details for keyword in ['assessment', 'speed:', 'accuracy:', 'receptionist']):
             assessments.append(record)
+        elif source == 'history':
+            history_records_list.append(record)
         elif any(keyword in details for keyword in ['created', 'system', 'automatic']):
             system_records.append(record)
         else:
-            # If it has substantial content, treat as interview
-            if len(details.strip()) > 20:
-                interviews.append(record)
+            # If it has substantial content, treat as general history
+            if len(details.strip()) > 10:
+                history_records_list.append(record)
             else:
                 system_records.append(record)
 
     # Display interviews
     if interviews:
-        st.markdown("#### 🎤 Interviews & Discussions")
+        st.markdown("#### 🎤 Interviews")
         for interview in interviews:
             _render_single_record(interview)
 
@@ -350,14 +483,20 @@ def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
         for assessment in assessments:
             _render_single_record(assessment)
 
+    # Display general history records
+    if history_records_list:
+        st.markdown("#### 📋 History Records")
+        for record in history_records_list:
+            _render_single_record(record)
+
     # Display system records if they contain useful info
     if system_records:
         with st.expander("🔧 System Records", expanded=False):
             for record in system_records:
                 _render_single_record(record)
 
-    if not interviews and not assessments:
-        st.info("📝 No interviews or assessments recorded yet")
+    if not interviews and not assessments and not history_records_list:
+        st.info("📝 No substantial interview or assessment records found")
 
 
 def _render_single_record(record: Dict[str, Any]):
@@ -477,6 +616,34 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
                 """, unsafe_allow_html=True)
             except Exception:
                 st.info("📄 PDF preview not available, but file can be downloaded")
+
+    elif status == "link_only" and cv_name:
+        # Handle resume link
+        st.markdown(f"🔗 **Resume Link:** [Open CV]({cv_name})")
+
+        # Try to embed if it's a Google Drive link
+        if "drive.google.com" in cv_name:
+            try:
+                # Convert Google Drive links for embedding
+                if "file/d/" in cv_name:
+                    file_id = cv_name.split("file/d/")[1].split("/")[0]
+                    embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                elif "id=" in cv_name:
+                    file_id = cv_name.split("id=")[1].split("&")[0]
+                    embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                else:
+                    embed_url = cv_name
+
+                st.markdown(f"""
+                    <iframe 
+                        src="{embed_url}" 
+                        width="100%" 
+                        height="500px" 
+                        style="border: 1px solid #ddd; border-radius: 5px;">
+                    </iframe>
+                """, unsafe_allow_html=True)
+            except Exception:
+                st.info("📄 CV link preview not available")
 
     elif status == "no_permission":
         st.warning("🔒 Access denied to CV")
