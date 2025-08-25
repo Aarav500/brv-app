@@ -1,5 +1,5 @@
 # =============================================================================
-# Fixed CEO Control Panel - Access Rights & Data Display Corrected
+# Fixed CEO Control Panel - Corrected Access Rights & Data Display
 # =============================================================================
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def _get_candidates_fast():
             # Optional columns - add if they exist
             optional_columns = ['address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
                                 'marital_status', 'highest_qualification', 'work_experience', 'referral',
-                                'ready_festivals', 'ready_late_nights', 'cv_filename']
+                                'ready_festivals', 'ready_late_nights', 'cv_filename', 'resume_link']
             for col in optional_columns:
                 if col in existing_columns:
                     select_parts.append(col)
@@ -90,7 +90,7 @@ def _get_candidates_fast():
             column_mapping['has_cv_file'] = len(select_parts) - 1
 
             if 'resume_link' in existing_columns:
-                select_parts.append('resume_link IS NOT NULL as has_resume_link')
+                select_parts.append('resume_link IS NOT NULL AND resume_link != \'\' as has_resume_link')
             else:
                 select_parts.append('FALSE as has_resume_link')
             column_mapping['has_resume_link'] = len(select_parts) - 1
@@ -127,7 +127,7 @@ def _get_candidates_fast():
                 # Optional fields - only add if they exist in the table
                 for col in ['address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
                             'marital_status', 'highest_qualification', 'work_experience', 'referral', 'ready_festivals',
-                            'ready_late_nights', 'cv_filename']:
+                            'ready_late_nights', 'cv_filename', 'resume_link']:
                     if col in column_mapping:
                         candidate[col] = row[column_mapping[col]]
 
@@ -159,11 +159,11 @@ def _clear_candidate_cache():
 
 
 # =============================================================================
-# Fixed Access Rights Check
+# FIXED Access Rights Check - Strict Permission Enforcement
 # =============================================================================
 
 def _check_user_permissions(user_id: int) -> Dict[str, Any]:
-    """Check user permissions with proper error handling."""
+    """Check user permissions with STRICT enforcement - no bypasses."""
     try:
         perms = get_user_permissions(user_id)
         if not perms:
@@ -171,20 +171,12 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
 
         role = (perms.get("role") or "user").lower()
 
-        # CEO and admin get all permissions automatically
-        if role in ("ceo", "admin"):
-            return {
-                "role": role,
-                "can_view_cvs": True,
-                "can_delete_records": True,
-                "can_manage_users": True
-            }
-
+        # Only return actual permissions from database - NO automatic grants
         return {
             "role": role,
             "can_view_cvs": bool(perms.get("can_view_cvs", False)),
             "can_delete_records": bool(perms.get("can_delete_records", False)),
-            "can_manage_users": role == "admin"  # Only admins can manage users
+            "can_manage_users": role in ("ceo", "admin")  # Only for user management panel access
         }
     except Exception as e:
         st.error(f"Permission check failed: {e}")
@@ -192,17 +184,16 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
 
 
 # =============================================================================
-# Fixed CV Access with Proper Rights Check
+# FIXED CV Access with STRICT Rights Check
 # =============================================================================
 
 def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
-    """Get CV with proper access control - works with actual database schema."""
+    """Get CV with STRICT access control - only if explicitly granted permission."""
     try:
-        # First check if user has CV viewing permissions
+        # STRICT permission check - must have explicit can_view_cvs permission
         perms = _check_user_permissions(user_id)
 
-        # For CEO/Admin role or explicit can_view_cvs permission
-        if not (perms.get("role") in ("ceo", "admin") or perms.get("can_view_cvs", False)):
+        if not perms.get("can_view_cvs", False):
             return None, None, "no_permission"
 
         # Check what CV-related columns exist in the database
@@ -269,7 +260,7 @@ def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optiona
 
 
 # =============================================================================
-# Complete Form Data Display - Fixed
+# FIXED Complete Form Data Display - Shows ALL Information
 # =============================================================================
 
 def _render_complete_application_details(candidate: Dict[str, Any]):
@@ -286,7 +277,7 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
         "email": "📧 Email Address",
         "phone": "📱 Phone Number",
         "dob": "🎂 Date of Birth",
-        "address": "🏠 Address (from record)",
+        "address": "🏠 Address (Legacy)",
         "current_address": "🏠 Current Address",
         "permanent_address": "🏡 Permanent Address",
         "caste": "📋 Caste",
@@ -298,67 +289,144 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
         "ready_festivals": "🎊 Ready to work on festivals?",
         "ready_late_nights": "🌙 Ready to work late nights?",
         "created_at": "📅 Application Created",
-        "updated_at": "🕐 Last Updated"
+        "updated_at": "🕐 Last Updated",
+        "cv_filename": "📄 CV File Name",
+        "resume_link": "🔗 Resume Link"
     }
 
-    # Create comprehensive data dictionary
+    # Create comprehensive data dictionary - form_data takes precedence
     all_data = {}
 
-    # Add top-level fields
-    for key in ["name", "email", "phone", "address", "dob", "caste", "created_at", "updated_at"]:
+    # Add top-level fields first
+    for key in ["name", "email", "phone", "address", "current_address", "permanent_address",
+                "dob", "caste", "sub_caste", "marital_status", "highest_qualification",
+                "work_experience", "referral", "ready_festivals", "ready_late_nights",
+                "created_at", "updated_at", "cv_filename", "resume_link"]:
         value = candidate.get(key)
         if value and str(value).strip():
             all_data[key] = value
 
     # Add form_data fields (these take precedence for duplicates)
-    for key, value in form_data.items():
-        if value and str(value).strip():
-            all_data[key] = value
+    if isinstance(form_data, dict):
+        for key, value in form_data.items():
+            if value and str(value).strip():
+                all_data[key] = value
 
     if not all_data:
         st.info("📋 No detailed application information available")
         return
 
-    # Display in two columns for better layout
-    col1, col2 = st.columns(2)
+    # Display in organized sections
+    with st.container():
+        # Basic Information
+        st.markdown("#### 👤 Basic Information")
+        basic_fields = ["name", "email", "phone"]
+        basic_col1, basic_col2 = st.columns(2)
 
-    # Split data into two columns
-    data_items = list(all_data.items())
-    mid_point = (len(data_items) + 1) // 2
+        basic_items = [(k, v) for k, v in all_data.items() if k in basic_fields]
+        mid_basic = len(basic_items) // 2
 
-    with col1:
-        for key, value in data_items[:mid_point]:
-            if value and str(value).strip():
+        with basic_col1:
+            for key, value in basic_items[:mid_basic + 1]:
                 label = field_labels.get(key, key.replace('_', ' ').title())
+                st.markdown(f"**{label}:** {value}")
 
-                # Special formatting for specific fields
-                if key in ["ready_festivals", "ready_late_nights"]:
-                    display_value = "✅ Yes" if str(value).lower() == "yes" else "❌ No"
-                elif key in ["dob", "created_at", "updated_at"]:
+        with basic_col2:
+            for key, value in basic_items[mid_basic + 1:]:
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                st.markdown(f"**{label}:** {value}")
+
+        # Address Information
+        address_fields = ["address", "current_address", "permanent_address"]
+        address_items = [(k, v) for k, v in all_data.items() if k in address_fields]
+
+        if address_items:
+            st.markdown("#### 🏠 Address Information")
+            for key, value in address_items:
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                st.markdown(f"**{label}:** {value}")
+
+        # Personal Details
+        personal_fields = ["dob", "caste", "sub_caste", "marital_status"]
+        personal_items = [(k, v) for k, v in all_data.items() if k in personal_fields]
+
+        if personal_items:
+            st.markdown("#### 👥 Personal Details")
+            personal_col1, personal_col2 = st.columns(2)
+            mid_personal = len(personal_items) // 2
+
+            with personal_col1:
+                for key, value in personal_items[:mid_personal + 1]:
+                    label = field_labels.get(key, key.replace('_', ' ').title())
+                    display_value = _format_datetime(value) if key == "dob" else str(value)
+                    st.markdown(f"**{label}:** {display_value}")
+
+            with personal_col2:
+                for key, value in personal_items[mid_personal + 1:]:
+                    label = field_labels.get(key, key.replace('_', ' ').title())
+                    display_value = _format_datetime(value) if key == "dob" else str(value)
+                    st.markdown(f"**{label}:** {display_value}")
+
+        # Professional Information
+        prof_fields = ["highest_qualification", "work_experience", "referral"]
+        prof_items = [(k, v) for k, v in all_data.items() if k in prof_fields]
+
+        if prof_items:
+            st.markdown("#### 💼 Professional Information")
+            for key, value in prof_items:
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                st.markdown(f"**{label}:** {value}")
+
+        # Work Preferences
+        pref_fields = ["ready_festivals", "ready_late_nights"]
+        pref_items = [(k, v) for k, v in all_data.items() if k in pref_fields]
+
+        if pref_items:
+            st.markdown("#### ⚙️ Work Preferences")
+            pref_col1, pref_col2 = st.columns(2)
+
+            with pref_col1:
+                for key, value in pref_items[:1]:
+                    label = field_labels.get(key, key.replace('_', ' ').title())
+                    display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
+                    st.markdown(f"**{label}:** {display_value}")
+
+            with pref_col2:
+                for key, value in pref_items[1:]:
+                    label = field_labels.get(key, key.replace('_', ' ').title())
+                    display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
+                    st.markdown(f"**{label}:** {display_value}")
+
+        # System Information
+        system_fields = ["created_at", "updated_at", "cv_filename", "resume_link"]
+        system_items = [(k, v) for k, v in all_data.items() if k in system_fields]
+
+        if system_items:
+            st.markdown("#### 🔧 System Information")
+            for key, value in system_items:
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                if key in ["created_at", "updated_at"]:
                     display_value = _format_datetime(value)
+                elif key == "resume_link":
+                    display_value = f"[Open Link]({value})" if value else str(value)
                 else:
                     display_value = str(value)
-
                 st.markdown(f"**{label}:** {display_value}")
 
-    with col2:
-        for key, value in data_items[mid_point:]:
-            if value and str(value).strip():
-                label = field_labels.get(key, key.replace('_', ' ').title())
+        # Additional form data not covered above
+        remaining_items = [(k, v) for k, v in all_data.items()
+                           if k not in (basic_fields + address_fields + personal_fields +
+                                        prof_fields + pref_fields + system_fields)]
 
-                # Special formatting for specific fields
-                if key in ["ready_festivals", "ready_late_nights"]:
-                    display_value = "✅ Yes" if str(value).lower() == "yes" else "❌ No"
-                elif key in ["dob", "created_at", "updated_at"]:
-                    display_value = _format_datetime(value)
-                else:
-                    display_value = str(value)
-
-                st.markdown(f"**{label}:** {display_value}")
+        if remaining_items:
+            st.markdown("#### 📋 Additional Information")
+            for key, value in remaining_items:
+                label = key.replace('_', ' ').title()
+                st.markdown(f"**{label}:** {value}")
 
 
 # =============================================================================
-# Fixed Interview History Display
+# FIXED Interview History Display
 # =============================================================================
 
 def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
@@ -448,28 +516,6 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                 except Exception as e:
                     st.warning(f"Could not load assessments: {e}")
 
-            # Get from candidate_history table if it exists (this might not exist in your schema)
-            if 'candidate_history' in existing_tables:
-                try:
-                    cur.execute("""
-                                SELECT id, actor, created_at, details, actor_id
-                                FROM candidate_history
-                                WHERE candidate_id = %s
-                                ORDER BY created_at DESC LIMIT 20
-                                """, (candidate_id,))
-
-                    for row in cur.fetchall():
-                        history.append({
-                            'id': row[0],
-                            'actor': row[1] or 'System',
-                            'created_at': row[2],
-                            'details': row[3] or 'Record updated',
-                            'actor_id': row[4],
-                            'source': 'history'
-                        })
-                except Exception as e:
-                    st.warning(f"Could not load candidate history: {e}")
-
             conn.close()
 
     except Exception as e:
@@ -489,28 +535,14 @@ def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
     # Separate different types of records
     interviews = []
     assessments = []
-    history_records_list = []
-    system_records = []
 
     for record in history_records:
         source = record.get('source', '')
-        details = record.get('details', '').lower()
 
-        if source == 'interview' or any(keyword in details for keyword in ['interview', 'result:', 'scheduled']):
+        if source == 'interview':
             interviews.append(record)
-        elif source == 'assessment' or any(
-                keyword in details for keyword in ['assessment', 'speed:', 'accuracy:', 'receptionist']):
+        elif source == 'assessment':
             assessments.append(record)
-        elif source == 'history':
-            history_records_list.append(record)
-        elif any(keyword in details for keyword in ['created', 'system', 'automatic']):
-            system_records.append(record)
-        else:
-            # If it has substantial content, treat as general history
-            if len(details.strip()) > 10:
-                history_records_list.append(record)
-            else:
-                system_records.append(record)
 
     # Display interviews
     if interviews:
@@ -524,20 +556,8 @@ def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
         for assessment in assessments:
             _render_single_record(assessment)
 
-    # Display general history records
-    if history_records_list:
-        st.markdown("#### 📋 History Records")
-        for record in history_records_list:
-            _render_single_record(record)
-
-    # Display system records if they contain useful info
-    if system_records:
-        with st.expander("🔧 System Records", expanded=False):
-            for record in system_records:
-                _render_single_record(record)
-
-    if not interviews and not assessments and not history_records_list:
-        st.info("📝 No substantial interview or assessment records found")
+    if not interviews and not assessments:
+        st.info("📝 No interview or assessment records found")
 
 
 def _render_single_record(record: Dict[str, Any]):
@@ -548,24 +568,8 @@ def _render_single_record(record: Dict[str, Any]):
 
     with st.container():
         st.markdown(f"**👤 {actor}** • {when}")
-
         if details:
-            # Try to parse as JSON for structured display
-            try:
-                if details.strip().startswith('{') and details.strip().endswith('}'):
-                    data = json.loads(details)
-                    if isinstance(data, dict):
-                        for key, value in data.items():
-                            if value and str(value).strip():
-                                clean_key = key.replace('_', ' ').title()
-                                st.markdown(f"• **{clean_key}:** {value}")
-                    else:
-                        st.markdown(f"📝 {details}")
-                else:
-                    st.markdown(f"📝 {details}")
-            except json.JSONDecodeError:
-                st.markdown(f"📝 {details}")
-
+            st.markdown(f"📝 {details}")
         st.markdown("---")
 
 
@@ -611,23 +615,23 @@ def _detect_mimetype(filename: str) -> str:
 
 
 # =============================================================================
-# Enhanced PDF Preview
+# FIXED CV Section with STRICT Access Control
 # =============================================================================
 
 def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool, has_resume_link: bool):
-    """Render CV section with proper access control."""
+    """Render CV section with STRICT access control - only with explicit permission."""
     st.markdown("### 📄 CV & Documents")
 
     if not (has_cv_file or has_resume_link):
         st.info("📂 No CV uploaded")
         return
 
-    # Check permissions
+    # STRICT permission check
     perms = _check_user_permissions(user_id)
-    can_view = perms.get("role") in ("ceo", "admin") or perms.get("can_view_cvs", False)
+    can_view = perms.get("can_view_cvs", False)  # Must be explicitly granted
 
     if not can_view:
-        st.warning("🔒 You don't have permission to view CVs")
+        st.warning("🔒 Access Denied: You need 'View CVs' permission to access candidate documents")
         return
 
     # Get CV data
@@ -687,7 +691,7 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
                 st.info("📄 CV link preview not available")
 
     elif status == "no_permission":
-        st.warning("🔒 Access denied to CV")
+        st.warning("🔒 Access Denied: CV viewing permission required")
     elif status == "not_found":
         st.info("📂 CV file not found")
     else:
@@ -695,52 +699,11 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
 
 
 # =============================================================================
-# Fixed User Management Functions
+# FIXED User Management Functions - Removed Unnecessary Features
 # =============================================================================
 
-def _get_all_users_fast():
-    """Fast user loading - fallback if main function doesn't work."""
-    try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("""
-                        SELECT u.id,
-                               u.email,
-                               u.created_at,
-                               u.role,
-                               up.can_view_cvs,
-                               up.can_delete_records,
-                               up.can_grant_delete,
-                               u.force_password_reset
-                        FROM users u
-                                 LEFT JOIN user_permissions up ON u.id = up.user_id
-                        WHERE u.email IS NOT NULL
-                          AND u.email != ''
-                        ORDER BY u.created_at DESC
-                        """)
-
-            users = []
-            for row in cur.fetchall():
-                users.append({
-                    'id': row[0],
-                    'email': row[1],
-                    'created_at': row[2],
-                    'role': row[3] or 'user',
-                    'can_view_cvs': bool(row[4]) if row[4] is not None else False,
-                    'can_delete_records': bool(row[5]) if row[5] is not None else False,
-                    'can_grant_delete': bool(row[6]) if row[6] is not None else False,
-                    'force_password_reset': bool(row[7]) if row[7] is not None else False
-                })
-
-            conn.close()
-            return users
-    except Exception as e:
-        st.error(f"Error loading users: {e}")
-        return []
-
-
 def show_user_management_panel():
-    """Fixed user management panel - uses the actual database functions."""
+    """FIXED user management panel - clean interface without unnecessary features."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -753,13 +716,12 @@ def show_user_management_panel():
     st.title("👥 User Management")
     st.caption("Manage system user permissions")
 
-    # Try to use the existing database function first, fallback if needed
+    # Load users
     try:
         users = get_all_users_with_permissions()
     except Exception as e:
-        st.warning(f"Primary user loading failed: {e}")
-        st.info("Using fallback method...")
-        users = _get_all_users_fast()
+        st.error(f"Failed to load users: {e}")
+        return
 
     if not users:
         st.info("No system users found.")
@@ -779,59 +741,88 @@ def show_user_management_panel():
 **Email:** {user_email}
 **Role:** {user_role}
 **Created:** {_format_datetime(user_data.get('created_at'))}
-**Force Password Reset:** {'Yes' if user_data.get('force_password_reset') else 'No'}
 """)
 
-            # Permission controls (only for non-CEO/admin users)
-            if user_role.lower() not in ('ceo', 'admin'):
-                col1, col2 = st.columns(2)
+            # Permission controls
+            col1, col2 = st.columns(2)
 
-                with col1:
-                    can_view_cvs = st.checkbox(
-                        "Can View CVs",
-                        value=bool(user_data.get('can_view_cvs', False)),
-                        key=f"cv_{user_id}",
-                        help="Allow this user to view candidate CVs"
-                    )
+            with col1:
+                can_view_cvs = st.checkbox(
+                    "Can View CVs",
+                    value=bool(user_data.get('can_view_cvs', False)),
+                    key=f"cv_{user_id}",
+                    help="Allow this user to view candidate CVs"
+                )
 
-                with col2:
-                    can_delete = st.checkbox(
-                        "Can Delete Records",
-                        value=bool(user_data.get('can_delete_records', False)),
-                        key=f"del_{user_id}",
-                        help="Allow this user to delete candidate records"
-                    )
+            with col2:
+                can_delete = st.checkbox(
+                    "Can Delete Records",
+                    value=bool(user_data.get('can_delete_records', False)),
+                    key=f"del_{user_id}",
+                    help="Allow this user to delete candidate records"
+                )
 
-                if st.button("💾 Update Permissions", key=f"save_{user_id}"):
-                    new_perms = {
-                        "can_view_cvs": can_view_cvs,
-                        "can_delete_records": can_delete
-                    }
+            if st.button("💾 Update Permissions", key=f"save_{user_id}"):
+                new_perms = {
+                    "can_view_cvs": can_view_cvs,
+                    "can_delete_records": can_delete
+                }
 
-                    try:
-                        if update_user_permissions(user_id, new_perms):
-                            st.success("✅ Permissions updated!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Update failed")
-                    except Exception as e:
-                        st.error(f"Error updating permissions: {e}")
-            else:
-                st.info("🔑 CEO/Admin users have all permissions by default")
+                try:
+                    if update_user_permissions(user_id, new_perms):
+                        st.success("✅ Permissions updated!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Update failed")
+                except Exception as e:
+                    st.error(f"Error updating permissions: {e}")
 
             # Show current permissions for reference
             st.markdown("**Current Permissions:**")
             st.markdown(f"- View CVs: {'✅' if user_data.get('can_view_cvs') else '❌'}")
             st.markdown(f"- Delete Records: {'✅' if user_data.get('can_delete_records') else '❌'}")
-            st.markdown(f"- Grant Delete Rights: {'✅' if user_data.get('can_grant_delete') else '❌'}")
 
 
 # =============================================================================
-# Main CEO Dashboard - Fixed Version
+# FIXED Delete Function with Proper Error Handling
+# =============================================================================
+
+def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
+    """Delete candidate with proper error handling and user feedback."""
+    try:
+        # Check permissions first
+        perms = _check_user_permissions(user_id)
+        if not perms.get("can_delete_records", False):
+            st.error("🔒 Access Denied: You need 'Delete Records' permission")
+            return False
+
+        success, reason = delete_candidate(candidate_id, user_id)
+
+        if success:
+            st.success(f"✅ Candidate {candidate_id} deleted successfully")
+            return True
+        else:
+            if reason == "no_permission":
+                st.error("🔒 Access Denied: Insufficient permissions")
+            elif reason == "not_found":
+                st.error("❌ Candidate not found")
+            elif reason == "db_error":
+                st.error("❌ Database error during deletion")
+            else:
+                st.error(f"❌ Delete failed: {reason}")
+            return False
+
+    except Exception as e:
+        st.error(f"❌ Delete error: {e}")
+        return False
+
+
+# =============================================================================
+# Main CEO Dashboard - FIXED Version with Strict Permissions
 # =============================================================================
 
 def show_ceo_panel():
-    """Fixed CEO dashboard with proper access controls and complete data display."""
+    """FIXED CEO dashboard with strict access controls and complete data display."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -842,6 +833,7 @@ def show_ceo_panel():
     user_id = user.get("id")
     perms = _check_user_permissions(user_id)
 
+    # Allow access for CEO and admin roles
     if perms.get("role") not in ("ceo", "admin"):
         st.error("Access denied. CEO/Admin role required.")
         st.stop()
@@ -864,6 +856,12 @@ def show_ceo_panel():
         st.metric("📋 Assessments", stats.get("total_assessments", 0))
 
     st.markdown("---")
+
+    # Show user permissions clearly
+    st.sidebar.markdown("### 🔑 Your Permissions")
+    st.sidebar.markdown(f"- **View CVs:** {'✅ Enabled' if perms.get('can_view_cvs') else '❌ Disabled'}")
+    st.sidebar.markdown(f"- **Delete Records:** {'✅ Enabled' if perms.get('can_delete_records') else '❌ Disabled'}")
+    st.sidebar.markdown(f"- **Manage Users:** {'✅ Enabled' if perms.get('can_manage_users') else '❌ Disabled'}")
 
     # Candidate management section
     st.header("👥 Candidate Management")
@@ -943,7 +941,7 @@ def show_ceo_panel():
         # Clear selection if select_all was just unchecked
         selected.clear()
 
-    # Batch actions
+    # Batch actions - only show if user has delete permission
     if perms.get("can_delete_records") and selected:
         st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
         if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary"):
@@ -952,7 +950,7 @@ def show_ceo_panel():
 
             with st.spinner("Deleting candidates..."):
                 for candidate_id in list(selected):
-                    if _delete_candidate_fast(candidate_id, user_id):
+                    if _delete_candidate_with_feedback(candidate_id, user_id):
                         success_count += 1
                         selected.discard(candidate_id)  # Remove from selection immediately
                     else:
@@ -966,6 +964,8 @@ def show_ceo_panel():
             # Clear cache and refresh
             _clear_candidate_cache()
             st.rerun()
+    elif not perms.get("can_delete_records") and selected:
+        st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
 
     # Display selected count if any
     if selected:
@@ -983,21 +983,24 @@ def show_ceo_panel():
             sel_col, content_col = st.columns([0.05, 0.95])
 
             with sel_col:
-                # Individual selection checkbox
-                if st.checkbox("", value=is_selected, key=f"sel_{candidate_id}"):
-                    selected.add(candidate_id)
+                # Individual selection checkbox - only show if user can delete
+                if perms.get("can_delete_records"):
+                    if st.checkbox("", value=is_selected, key=f"sel_{candidate_id}"):
+                        selected.add(candidate_id)
+                    else:
+                        selected.discard(candidate_id)
                 else:
-                    selected.discard(candidate_id)
+                    st.write("")  # Empty space to maintain alignment
 
             with content_col:
                 with st.expander(f"👤 {candidate_name} ({candidate_id})", expanded=False):
                     main_col, action_col = st.columns([3, 1])
 
                     with main_col:
-                        # Complete application details - FIXED
+                        # Complete application details - FIXED to show ALL data
                         _render_complete_application_details(candidate)
 
-                        # CV Section - FIXED with proper access control
+                        # CV Section - FIXED with strict access control
                         _render_cv_section_fixed(
                             candidate_id,
                             user_id,
@@ -1014,9 +1017,10 @@ def show_ceo_panel():
                         st.markdown("### ⚙️ Actions")
                         st.caption(f"ID: {candidate_id}")
 
-                        # Show selection status
-                        if is_selected:
-                            st.success("✅ Selected for batch action")
+                        # Show selection status - only if user can delete
+                        if perms.get("can_delete_records"):
+                            if is_selected:
+                                st.success("✅ Selected for batch action")
 
                         # Toggle edit permission
                         current_can_edit = candidate.get('can_edit', False)
@@ -1040,25 +1044,15 @@ def show_ceo_panel():
                         else:
                             st.info("🔒 Cannot edit application")
 
-                        # Delete single candidate
+                        # Delete single candidate - only show if user has permission
                         if perms.get("can_delete_records"):
                             st.markdown("---")
                             if st.button("🗑️ Delete This Candidate", key=f"del_{candidate_id}", type="primary"):
                                 if st.button("⚠️ Confirm Delete", key=f"confirm_del_{candidate_id}"):
-                                    if _delete_candidate_fast(candidate_id, user_id):
-                                        st.success("✅ Candidate deleted")
+                                    if _delete_candidate_with_feedback(candidate_id, user_id):
                                         selected.discard(candidate_id)  # Remove from selection
                                         _clear_candidate_cache()
                                         st.rerun()
-                                    else:
-                                        st.error("❌ Delete failed")
-
-                        # Email candidate (if email exists)
-                        candidate_email = candidate.get('email')
-                        if candidate_email and candidate_email.strip():
-                            st.markdown("---")
-                            if st.button("📧 Send Email", key=f"email_{candidate_id}"):
-                                st.info(f"📧 Email feature coming soon for: {candidate_email}")
 
                         # Additional metadata
                         st.markdown("---")
@@ -1085,80 +1079,10 @@ def show_ceo_panel():
             f"📊 Showing {len(page_candidates)} of {total_candidates} candidates (Page {page if total_pages > 1 else 1} of {total_pages})")
 
         if selected:
-            st.warning(f"⚠️ {len(selected)} candidates selected for batch operations")
-
-
-def _delete_candidate_fast(candidate_id: str, user_id: int) -> bool:
-    """Delete candidate with proper error handling."""
-    try:
-        success, reason = delete_candidate(candidate_id, user_id)
-        if not success and reason:
-            st.error(f"Delete failed: {reason}")
-        return success
-    except Exception as e:
-        st.error(f"Delete error: {e}")
-        return False
-
-
-# =============================================================================
-# Additional Utility Functions
-# =============================================================================
-
-def _send_candidate_email(candidate_email: str, subject: str, body: str) -> bool:
-    """Send email to candidate - placeholder for future implementation."""
-    try:
-        # This would use your existing smtp_mailer
-        result = send_email(
-            to_email=candidate_email,
-            subject=subject,
-            body=body
-        )
-        return result
-    except Exception as e:
-        st.error(f"Email send failed: {e}")
-        return False
-
-
-def _export_candidates_csv(candidates: List[Dict[str, Any]]) -> str:
-    """Export candidates to CSV format."""
-    import csv
-    import io
-
-    output = io.StringIO()
-
-    if not candidates:
-        return ""
-
-    # Get all possible fields from all candidates
-    all_fields = set()
-    for candidate in candidates:
-        all_fields.update(candidate.keys())
-        form_data = candidate.get('form_data', {})
-        if isinstance(form_data, dict):
-            all_fields.update(form_data.keys())
-
-    # Remove internal fields
-    all_fields.discard('form_data')
-    all_fields = sorted(list(all_fields))
-
-    writer = csv.DictWriter(output, fieldnames=all_fields)
-    writer.writeheader()
-
-    for candidate in candidates:
-        row = {}
-        form_data = candidate.get('form_data', {}) or {}
-
-        # Combine top-level and form_data fields
-        for field in all_fields:
-            value = candidate.get(field) or form_data.get(field)
-            if value is not None:
-                row[field] = str(value)
+            if perms.get("can_delete_records"):
+                st.warning(f"⚠️ {len(selected)} candidates selected for batch operations")
             else:
-                row[field] = ""
-
-        writer.writerow(row)
-
-    return output.getvalue()
+                st.info(f"📋 {len(selected)} candidates selected (Delete permission needed for operations)")
 
 
 # =============================================================================
@@ -1194,14 +1118,8 @@ def main():
 
     selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
 
-    # Show permissions in sidebar
-    st.sidebar.markdown("**Your Permissions:**")
-    st.sidebar.markdown(f"- View CVs: {'✅' if perms.get('can_view_cvs') else '❌'}")
-    st.sidebar.markdown(f"- Delete Records: {'✅' if perms.get('can_delete_records') else '❌'}")
-    st.sidebar.markdown(f"- Manage Users: {'✅' if perms.get('can_manage_users') else '❌'}")
-
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ Features: CV Access, Complete Data Display, User Management, Batch Operations")
+    st.sidebar.caption("⚡ Features: Strict Access Control, Complete Data Display, User Management, Batch Operations")
 
     # Run selected page
     try:
