@@ -693,61 +693,54 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
     else:
         st.error("❌ Error accessing CV")
 
-        # =============================================================================
-        # Complete Form Data Display - Fixed
-        # =============================================================================email, u.created_at, u.role,
-        up.can_view_cvs, up.can_delete_records
-    FROM
-    users
-    u
-    LEFT
-    JOIN
-    user_permissions
-    up
-    ON
-    u.id = up.user_id
-    WHERE
-    u.email
-    IS
-    NOT
-    NULL
-    AND
-    u.email != ''
-    ORDER
-    BY
-    u.created_at
-    DESC
-    """)
 
-users = []
-for row in cur.fetchall():
-users.append({
-'id': row[0],
-'email': row[1],
-'created_at': row[2],
-'role': row[3] or 'user',
-'can_view_cvs': bool(row[4]) if row[4] is not None else False,
-'can_delete_records': bool(row[5]) if row[5] is not None else False
-})
+# =============================================================================
+# Fixed User Management Functions
+# =============================================================================
 
-conn.close()
-return users
-except Exception as e:
-st.error(f"Error loading users: {e}")
-return []
+def _get_all_users_fast():
+    """Fast user loading - fallback if main function doesn't work."""
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                        SELECT u.id,
+                               u.email,
+                               u.created_at,
+                               u.role,
+                               up.can_view_cvs,
+                               up.can_delete_records,
+                               up.can_grant_delete,
+                               u.force_password_reset
+                        FROM users u
+                                 LEFT JOIN user_permissions up ON u.id = up.user_id
+                        WHERE u.email IS NOT NULL
+                          AND u.email != ''
+                        ORDER BY u.created_at DESC
+                        """)
+
+            users = []
+            for row in cur.fetchall():
+                users.append({
+                    'id': row[0],
+                    'email': row[1],
+                    'created_at': row[2],
+                    'role': row[3] or 'user',
+                    'can_view_cvs': bool(row[4]) if row[4] is not None else False,
+                    'can_delete_records': bool(row[5]) if row[5] is not None else False,
+                    'can_grant_delete': bool(row[6]) if row[6] is not None else False,
+                    'force_password_reset': bool(row[7]) if row[7] is not None else False
+                })
+
+            conn.close()
+            return users
+    except Exception as e:
+        st.error(f"Error loading users: {e}")
+        return []
 
 
 def show_user_management_panel():
-"""
-    Fixed
-    user
-    management
-    panel - uses
-    the
-    actual
-    database
-    functions.
-    """
+    """Fixed user management panel - uses the actual database functions."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -760,16 +753,20 @@ def show_user_management_panel():
     st.title("👥 User Management")
     st.caption("Manage system user permissions")
 
-    # Use the existing database function
+    # Try to use the existing database function first, fallback if needed
     try:
         users = get_all_users_with_permissions()
     except Exception as e:
-        st.error(f"Failed to load users: {e}")
-        return
+        st.warning(f"Primary user loading failed: {e}")
+        st.info("Using fallback method...")
+        users = _get_all_users_fast()
 
     if not users:
         st.info("No system users found.")
         return
+
+    # Display current user count
+    st.info(f"Found {len(users)} system users")
 
     for user_data in users:
         user_id = user_data.get('id')
@@ -778,59 +775,55 @@ def show_user_management_panel():
 
         with st.expander(f"👤 {user_email} (Role: {user_role})"):
             st.markdown(f"""
-
-** User
-ID: ** {user_id}
-** Email: ** {user_email}
-** Role: ** {user_role}
-** Created: ** {_format_datetime(user_data.get('created_at'))}
-** Force
-Password
-Reset: ** {'Yes' if user_data.get('force_password_reset') else 'No'}
+**User ID:** {user_id}
+**Email:** {user_email}
+**Role:** {user_role}
+**Created:** {_format_datetime(user_data.get('created_at'))}
+**Force Password Reset:** {'Yes' if user_data.get('force_password_reset') else 'No'}
 """)
 
-# Permission controls (only for non-CEO/admin users)
-if user_role.lower() not in ('ceo', 'admin'):
-    col1, col2 = st.columns(2)
+            # Permission controls (only for non-CEO/admin users)
+            if user_role.lower() not in ('ceo', 'admin'):
+                col1, col2 = st.columns(2)
 
-    with col1:
-        can_view_cvs = st.checkbox(
-            "Can View CVs",
-            value=bool(user_data.get('can_view_cvs', False)),
-            key=f"cv_{user_id}",
-            help="Allow this user to view candidate CVs"
-        )
+                with col1:
+                    can_view_cvs = st.checkbox(
+                        "Can View CVs",
+                        value=bool(user_data.get('can_view_cvs', False)),
+                        key=f"cv_{user_id}",
+                        help="Allow this user to view candidate CVs"
+                    )
 
-    with col2:
-        can_delete = st.checkbox(
-            "Can Delete Records",
-            value=bool(user_data.get('can_delete_records', False)),
-            key=f"del_{user_id}",
-            help="Allow this user to delete candidate records"
-        )
+                with col2:
+                    can_delete = st.checkbox(
+                        "Can Delete Records",
+                        value=bool(user_data.get('can_delete_records', False)),
+                        key=f"del_{user_id}",
+                        help="Allow this user to delete candidate records"
+                    )
 
-    if st.button("💾 Update Permissions", key=f"save_{user_id}"):
-        new_perms = {
-            "can_view_cvs": can_view_cvs,
-            "can_delete_records": can_delete
-        }
+                if st.button("💾 Update Permissions", key=f"save_{user_id}"):
+                    new_perms = {
+                        "can_view_cvs": can_view_cvs,
+                        "can_delete_records": can_delete
+                    }
 
-        try:
-            if update_user_permissions(user_id, new_perms):
-                st.success("✅ Permissions updated!")
-                st.rerun()
+                    try:
+                        if update_user_permissions(user_id, new_perms):
+                            st.success("✅ Permissions updated!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Update failed")
+                    except Exception as e:
+                        st.error(f"Error updating permissions: {e}")
             else:
-                st.error("❌ Update failed")
-        except Exception as e:
-            st.error(f"Error updating permissions: {e}")
-else:
-    st.info("🔑 CEO/Admin users have all permissions by default")
+                st.info("🔑 CEO/Admin users have all permissions by default")
 
-# Show current permissions for reference
-st.markdown("**Current Permissions:**")
-st.markdown(f"- View CVs: {'✅' if user_data.get('can_view_cvs') else '❌'}")
-st.markdown(f"- Delete Records: {'✅' if user_data.get('can_delete_records') else '❌'}")
-st.markdown(f"- Grant Delete Rights: {'✅' if user_data.get('can_grant_delete') else '❌'}")
+            # Show current permissions for reference
+            st.markdown("**Current Permissions:**")
+            st.markdown(f"- View CVs: {'✅' if user_data.get('can_view_cvs') else '❌'}")
+            st.markdown(f"- Delete Records: {'✅' if user_data.get('can_delete_records') else '❌'}")
+            st.markdown(f"- Grant Delete Rights: {'✅' if user_data.get('can_grant_delete') else '❌'}")
 
 
 # =============================================================================
@@ -838,11 +831,7 @@ st.markdown(f"- Grant Delete Rights: {'✅' if user_data.get('can_grant_delete')
 # =============================================================================
 
 def show_ceo_panel():
-"""
-Fixed
-CEO
-dashboard
-with proper access controls and complete data display."""
+    """Fixed CEO dashboard with proper access controls and complete data display."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -945,18 +934,42 @@ with proper access controls and complete data display."""
 
     selected = st.session_state.selected_candidates
 
+    # Update selection based on select_all checkbox
+    if select_all:
+        # Add all current page candidates to selection
+        for candidate in page_candidates:
+            selected.add(candidate.get('candidate_id', ''))
+    elif 'select_all' in st.session_state and not select_all:
+        # Clear selection if select_all was just unchecked
+        selected.clear()
+
     # Batch actions
     if perms.get("can_delete_records") and selected:
+        st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
         if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary"):
             success_count = 0
-            for candidate_id in list(selected):
-                if _delete_candidate_fast(candidate_id, user_id):
-                    success_count += 1
+            failed_count = 0
 
-            st.success(f"Deleted {success_count} candidates")
-            st.session_state.selected_candidates.clear()
+            with st.spinner("Deleting candidates..."):
+                for candidate_id in list(selected):
+                    if _delete_candidate_fast(candidate_id, user_id):
+                        success_count += 1
+                        selected.discard(candidate_id)  # Remove from selection immediately
+                    else:
+                        failed_count += 1
+
+            if success_count > 0:
+                st.success(f"✅ Deleted {success_count} candidates")
+            if failed_count > 0:
+                st.error(f"❌ Failed to delete {failed_count} candidates")
+
+            # Clear cache and refresh
             _clear_candidate_cache()
             st.rerun()
+
+    # Display selected count if any
+    if selected:
+        st.info(f"📋 {len(selected)} candidates selected across all pages")
 
     # Render candidates
     for candidate in page_candidates:
@@ -964,12 +977,13 @@ with proper access controls and complete data display."""
         candidate_name = candidate.get('name', 'Unnamed')
 
         # Selection checkbox
-        is_selected = select_all or candidate_id in selected
+        is_selected = candidate_id in selected
 
         with st.container():
             sel_col, content_col = st.columns([0.05, 0.95])
 
             with sel_col:
+                # Individual selection checkbox
                 if st.checkbox("", value=is_selected, key=f"sel_{candidate_id}"):
                     selected.add(candidate_id)
                 else:
@@ -1000,6 +1014,10 @@ with proper access controls and complete data display."""
                         st.markdown("### ⚙️ Actions")
                         st.caption(f"ID: {candidate_id}")
 
+                        # Show selection status
+                        if is_selected:
+                            st.success("✅ Selected for batch action")
+
                         # Toggle edit permission
                         current_can_edit = candidate.get('can_edit', False)
                         toggle_label = "🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit"
@@ -1008,33 +1026,139 @@ with proper access controls and complete data display."""
                             try:
                                 success = set_candidate_permission(candidate_id, not current_can_edit)
                                 if success:
-                                    st.success("Updated edit permission")
+                                    st.success("✅ Updated edit permission")
                                     _clear_candidate_cache()
                                     st.rerun()
                                 else:
-                                    st.error("Failed to update permission")
+                                    st.error("❌ Failed to update permission")
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
+                        # Current permission status
+                        if current_can_edit:
+                            st.info("✏️ Can edit application")
+                        else:
+                            st.info("🔒 Cannot edit application")
+
                         # Delete single candidate
                         if perms.get("can_delete_records"):
-                            if st.button("🗑️ Delete", key=f"del_{candidate_id}", type="primary"):
-                                if _delete_candidate_fast(candidate_id, user_id):
-                                    st.success("Candidate deleted")
-                                    _clear_candidate_cache()
-                                    st.rerun()
-                                else:
-                                    st.error("Delete failed")
+                            st.markdown("---")
+                            if st.button("🗑️ Delete This Candidate", key=f"del_{candidate_id}", type="primary"):
+                                if st.button("⚠️ Confirm Delete", key=f"confirm_del_{candidate_id}"):
+                                    if _delete_candidate_fast(candidate_id, user_id):
+                                        st.success("✅ Candidate deleted")
+                                        selected.discard(candidate_id)  # Remove from selection
+                                        _clear_candidate_cache()
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Delete failed")
+
+                        # Email candidate (if email exists)
+                        candidate_email = candidate.get('email')
+                        if candidate_email and candidate_email.strip():
+                            st.markdown("---")
+                            if st.button("📧 Send Email", key=f"email_{candidate_id}"):
+                                st.info(f"📧 Email feature coming soon for: {candidate_email}")
+
+                        # Additional metadata
+                        st.markdown("---")
+                        st.caption("**Metadata:**")
+                        st.caption(f"Created: {_format_datetime(candidate.get('created_at'))}")
+                        st.caption(f"Updated: {_format_datetime(candidate.get('updated_at'))}")
+
+                        # Show CV status
+                        cv_status = []
+                        if candidate.get('has_cv_file'):
+                            cv_status.append("📄 File")
+                        if candidate.get('has_resume_link'):
+                            cv_status.append("🔗 Link")
+
+                        if cv_status:
+                            st.caption(f"CV: {' + '.join(cv_status)}")
+                        else:
+                            st.caption("CV: ❌ None")
+
+    # Summary at bottom
+    if filtered_candidates:
+        st.markdown("---")
+        st.info(
+            f"📊 Showing {len(page_candidates)} of {total_candidates} candidates (Page {page if total_pages > 1 else 1} of {total_pages})")
+
+        if selected:
+            st.warning(f"⚠️ {len(selected)} candidates selected for batch operations")
 
 
 def _delete_candidate_fast(candidate_id: str, user_id: int) -> bool:
     """Delete candidate with proper error handling."""
     try:
         success, reason = delete_candidate(candidate_id, user_id)
+        if not success and reason:
+            st.error(f"Delete failed: {reason}")
         return success
     except Exception as e:
         st.error(f"Delete error: {e}")
         return False
+
+
+# =============================================================================
+# Additional Utility Functions
+# =============================================================================
+
+def _send_candidate_email(candidate_email: str, subject: str, body: str) -> bool:
+    """Send email to candidate - placeholder for future implementation."""
+    try:
+        # This would use your existing smtp_mailer
+        result = send_email(
+            to_email=candidate_email,
+            subject=subject,
+            body=body
+        )
+        return result
+    except Exception as e:
+        st.error(f"Email send failed: {e}")
+        return False
+
+
+def _export_candidates_csv(candidates: List[Dict[str, Any]]) -> str:
+    """Export candidates to CSV format."""
+    import csv
+    import io
+
+    output = io.StringIO()
+
+    if not candidates:
+        return ""
+
+    # Get all possible fields from all candidates
+    all_fields = set()
+    for candidate in candidates:
+        all_fields.update(candidate.keys())
+        form_data = candidate.get('form_data', {})
+        if isinstance(form_data, dict):
+            all_fields.update(form_data.keys())
+
+    # Remove internal fields
+    all_fields.discard('form_data')
+    all_fields = sorted(list(all_fields))
+
+    writer = csv.DictWriter(output, fieldnames=all_fields)
+    writer.writeheader()
+
+    for candidate in candidates:
+        row = {}
+        form_data = candidate.get('form_data', {}) or {}
+
+        # Combine top-level and form_data fields
+        for field in all_fields:
+            value = candidate.get(field) or form_data.get(field)
+            if value is not None:
+                row[field] = str(value)
+            else:
+                row[field] = ""
+
+        writer.writerow(row)
+
+    return output.getvalue()
 
 
 # =============================================================================
@@ -1069,11 +1193,22 @@ def main():
     }
 
     selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
+
+    # Show permissions in sidebar
+    st.sidebar.markdown("**Your Permissions:**")
+    st.sidebar.markdown(f"- View CVs: {'✅' if perms.get('can_view_cvs') else '❌'}")
+    st.sidebar.markdown(f"- Delete Records: {'✅' if perms.get('can_delete_records') else '❌'}")
+    st.sidebar.markdown(f"- Manage Users: {'✅' if perms.get('can_manage_users') else '❌'}")
+
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ Fixed: CV Access, Complete Data Display, User Management")
+    st.sidebar.caption("⚡ Features: CV Access, Complete Data Display, User Management, Batch Operations")
 
     # Run selected page
-    pages[selected_page]()
+    try:
+        pages[selected_page]()
+    except Exception as e:
+        st.error(f"Page error: {e}")
+        st.exception(e)
 
 
 if __name__ == "__main__":
