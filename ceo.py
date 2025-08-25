@@ -1,5 +1,5 @@
 # =============================================================================
-# Fixed CEO Control Panel - Complete Data Display & Working Delete
+# FIXED CEO Control Panel - Proper Interview History, Bulk Delete, Fast Refresh
 # =============================================================================
 
 from __future__ import annotations
@@ -39,10 +39,10 @@ from auth import require_login, get_current_user
 
 
 # =============================================================================
-# Performance Optimizations
+# Performance Optimizations with Better Caching
 # =============================================================================
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)  # Reduced TTL for faster updates
 def _get_candidates_fast():
     """Fast candidate loading with ALL available data from both columns and form_data."""
     try:
@@ -127,7 +127,7 @@ def _get_candidates_fast():
         return []
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def _get_stats_fast():
     """Fast statistics loading."""
     try:
@@ -227,13 +227,13 @@ def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optiona
 
 
 # =============================================================================
-# FIXED Complete Application Details Display - Shows ALL Information
+# FIXED Personal Details Display - Better Organization
 # =============================================================================
 
-def _render_complete_application_details(candidate: Dict[str, Any]):
-    """Render ALL application details from both direct columns and form_data."""
+def _render_personal_details_organized(candidate: Dict[str, Any]):
+    """Render personal details in a well-organized, comprehensive format."""
 
-    st.markdown("### 📋 Complete Application Details")
+    st.markdown("### 👤 Personal Details")
 
     # Comprehensive field mapping for better display
     field_labels = {
@@ -241,9 +241,9 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
         "email": "📧 Email Address",
         "phone": "📱 Phone Number",
         "dob": "🎂 Date of Birth",
-        "address": "🏠 Address",
         "current_address": "🏠 Current Address",
         "permanent_address": "🏡 Permanent Address",
+        "address": "🏠 Address",
         "caste": "📋 Caste",
         "sub_caste": "📋 Sub-caste",
         "marital_status": "💑 Marital Status",
@@ -282,62 +282,77 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
                 all_data[key] = value
 
     if not all_data:
-        st.info("📋 No detailed application information available")
+        st.info("📋 No detailed personal information available")
         return
 
-    # Display in organized sections
+    # Display in organized sections with better formatting
     with st.container():
         # Basic Information Section
         st.markdown("#### 👤 Basic Information")
-        basic_fields = ["name", "email", "phone"]
-        basic_col1, basic_col2 = st.columns(2)
+        basic_col1, basic_col2, basic_col3 = st.columns(3)
 
+        basic_fields = ["name", "email", "phone", "dob"]
         basic_items = [(k, v) for k, v in all_data.items() if k in basic_fields]
+
         if basic_items:
-            mid_basic = len(basic_items) // 2
+            for i, (key, value) in enumerate(basic_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                display_value = _format_datetime(value) if key == "dob" else str(value)
 
-            with basic_col1:
-                for key, value in basic_items[:mid_basic + 1]:
-                    label = field_labels.get(key, key.replace('_', ' ').title())
-                    st.markdown(f"**{label}:** {value}")
-
-            with basic_col2:
-                for key, value in basic_items[mid_basic + 1:]:
-                    label = field_labels.get(key, key.replace('_', ' ').title())
-                    st.markdown(f"**{label}:** {value}")
+                if i % 3 == 0:
+                    with basic_col1:
+                        st.markdown(f"**{label}:**")
+                        st.write(display_value)
+                elif i % 3 == 1:
+                    with basic_col2:
+                        st.markdown(f"**{label}:**")
+                        st.write(display_value)
+                else:
+                    with basic_col3:
+                        st.markdown(f"**{label}:**")
+                        st.write(display_value)
 
         # Address Information Section
         st.markdown("#### 🏠 Address Information")
-        address_fields = ["address", "current_address", "permanent_address"]
+        address_fields = ["current_address", "permanent_address", "address"]
         address_items = [(k, v) for k, v in all_data.items() if k in address_fields]
 
         if address_items:
-            for key, value in address_items:
+            addr_col1, addr_col2 = st.columns(2)
+            for i, (key, value) in enumerate(address_items):
                 label = field_labels.get(key, key.replace('_', ' ').title())
-                st.markdown(f"**{label}:** {value}")
+                if i % 2 == 0:
+                    with addr_col1:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+                else:
+                    with addr_col2:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
         else:
             st.info("No address information available")
 
-        # Personal Details Section
-        st.markdown("#### 👥 Personal Details")
-        personal_fields = ["dob", "caste", "sub_caste", "marital_status"]
+        # Personal & Family Details Section
+        st.markdown("#### 👥 Personal & Family Details")
+        personal_fields = ["caste", "sub_caste", "marital_status"]
         personal_items = [(k, v) for k, v in all_data.items() if k in personal_fields]
 
         if personal_items:
-            personal_col1, personal_col2 = st.columns(2)
-            mid_personal = len(personal_items) // 2
-
-            with personal_col1:
-                for key, value in personal_items[:mid_personal + 1]:
-                    label = field_labels.get(key, key.replace('_', ' ').title())
-                    display_value = _format_datetime(value) if key == "dob" else str(value)
-                    st.markdown(f"**{label}:** {display_value}")
-
-            with personal_col2:
-                for key, value in personal_items[mid_personal + 1:]:
-                    label = field_labels.get(key, key.replace('_', ' ').title())
-                    display_value = _format_datetime(value) if key == "dob" else str(value)
-                    st.markdown(f"**{label}:** {display_value}")
+            pers_col1, pers_col2, pers_col3 = st.columns(3)
+            for i, (key, value) in enumerate(personal_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                if i % 3 == 0:
+                    with pers_col1:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+                elif i % 3 == 1:
+                    with pers_col2:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+                else:
+                    with pers_col3:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
         else:
             st.info("No personal details available")
 
@@ -349,7 +364,9 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
         if prof_items:
             for key, value in prof_items:
                 label = field_labels.get(key, key.replace('_', ' ').title())
-                st.markdown(f"**{label}:** {value}")
+                st.markdown(f"**{label}:**")
+                st.write(value)
+                st.markdown("")  # Add spacing
         else:
             st.info("No professional information available")
 
@@ -360,18 +377,16 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
 
         if pref_items:
             pref_col1, pref_col2 = st.columns(2)
+            for i, (key, value) in enumerate(pref_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
 
-            with pref_col1:
-                for key, value in pref_items[:1]:
-                    label = field_labels.get(key, key.replace('_', ' ').title())
-                    display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
-                    st.markdown(f"**{label}:** {display_value}")
-
-            with pref_col2:
-                for key, value in pref_items[1:]:
-                    label = field_labels.get(key, key.replace('_', ' ').title())
-                    display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
-                    st.markdown(f"**{label}:** {display_value}")
+                if i % 2 == 0:
+                    with pref_col1:
+                        st.markdown(f"**{label}:** {display_value}")
+                else:
+                    with pref_col2:
+                        st.markdown(f"**{label}:** {display_value}")
         else:
             st.info("No work preference information available")
 
@@ -381,7 +396,8 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
         system_items = [(k, v) for k, v in all_data.items() if k in system_fields]
 
         if system_items:
-            for key, value in system_items:
+            sys_col1, sys_col2 = st.columns(2)
+            for i, (key, value) in enumerate(system_items):
                 label = field_labels.get(key, key.replace('_', ' ').title())
                 if key in ["created_at", "updated_at"]:
                     display_value = _format_datetime(value)
@@ -389,7 +405,13 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
                     display_value = f"[Open Link]({value})" if value else str(value)
                 else:
                     display_value = str(value)
-                st.markdown(f"**{label}:** {display_value}")
+
+                if i % 2 == 0:
+                    with sys_col1:
+                        st.markdown(f"**{label}:** {display_value}")
+                else:
+                    with sys_col2:
+                        st.markdown(f"**{label}:** {display_value}")
 
         # Additional Information Section (for any remaining fields)
         remaining_items = [(k, v) for k, v in all_data.items()
@@ -398,17 +420,23 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
 
         if remaining_items:
             st.markdown("#### 📋 Additional Information")
-            for key, value in remaining_items:
+            add_col1, add_col2 = st.columns(2)
+            for i, (key, value) in enumerate(remaining_items):
                 label = key.replace('_', ' ').title()
-                st.markdown(f"**{label}:** {value}")
+                if i % 2 == 0:
+                    with add_col1:
+                        st.markdown(f"**{label}:** {value}")
+                else:
+                    with add_col2:
+                        st.markdown(f"**{label}:** {value}")
 
 
 # =============================================================================
-# Interview History Display (Fixed)
+# FIXED Interview History Display with Proper Formatting
 # =============================================================================
 
-def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
-    """Get interview history from available tables."""
+def _get_interview_history_comprehensive(candidate_id: str) -> List[Dict[str, Any]]:
+    """Get comprehensive interview history with proper formatting."""
     history = []
 
     try:
@@ -434,20 +462,34 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                                 """, (candidate_id,))
 
                     for row in cur.fetchall():
-                        interview_details = []
-                        if row[4]:  # result
-                            interview_details.append(f"Result: {row[4]}")
-                        if row[5]:  # notes
-                            interview_details.append(f"Notes: {row[5]}")
+                        interview_id, interviewer, created_at, scheduled_at, result, notes = row
 
-                        event_time = row[3] if row[3] else row[2]
+                        # Build detailed interview information
+                        details = []
+                        if result:
+                            details.append(f"**Result:** {result}")
+                        if interviewer:
+                            details.append(f"**Interviewer:** {interviewer}")
+                        if scheduled_at:
+                            details.append(f"**Scheduled:** {_format_datetime(scheduled_at)}")
+                        if notes and notes.strip():
+                            details.append(f"**Notes:** {notes}")
+
+                        event_time = scheduled_at if scheduled_at else created_at
 
                         history.append({
-                            'id': f"interview_{row[0]}",
-                            'actor': row[1] or 'Interviewer',
+                            'id': f"interview_{interview_id}",
+                            'type': 'interview',
+                            'title': '🎤 Interview',
+                            'actor': interviewer or 'Interviewer',
                             'created_at': event_time,
-                            'details': '; '.join(interview_details) if interview_details else 'Interview scheduled',
-                            'source': 'interview'
+                            'details': details,
+                            'raw_details': {
+                                'result': result,
+                                'interviewer': interviewer,
+                                'scheduled_at': scheduled_at,
+                                'notes': notes
+                            }
                         })
                 except Exception as e:
                     st.warning(f"Could not load interviews: {e}")
@@ -469,24 +511,35 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                                 """, (candidate_id,))
 
                     for row in cur.fetchall():
-                        assessment_details = []
-                        if row[2] is not None:  # speed_test
-                            assessment_details.append(f"Speed Test: {row[2]}")
-                        if row[3] is not None:  # accuracy_test
-                            assessment_details.append(f"Accuracy Test: {row[3]}")
-                        if row[4]:  # work_commitment
-                            assessment_details.append(f"Work Commitment: {row[4]}")
-                        if row[5]:  # english_understanding
-                            assessment_details.append(f"English Understanding: {row[5]}")
-                        if row[6]:  # comments
-                            assessment_details.append(f"Comments: {row[6]}")
+                        assess_id, created_at, speed_test, accuracy_test, work_commitment, english_understanding, comments = row
+
+                        # Build detailed assessment information
+                        details = []
+                        if speed_test is not None:
+                            details.append(f"**Speed Test:** {speed_test}/100")
+                        if accuracy_test is not None:
+                            details.append(f"**Accuracy Test:** {accuracy_test}/100")
+                        if work_commitment:
+                            details.append(f"**Work Commitment:** {work_commitment}")
+                        if english_understanding:
+                            details.append(f"**English Understanding:** {english_understanding}")
+                        if comments and comments.strip():
+                            details.append(f"**Comments:** {comments}")
 
                         history.append({
-                            'id': f"assessment_{row[0]}",
+                            'id': f"assessment_{assess_id}",
+                            'type': 'assessment',
+                            'title': '📊 Receptionist Assessment',
                             'actor': 'Receptionist',
-                            'created_at': row[1],
-                            'details': '; '.join(assessment_details) if assessment_details else 'Assessment completed',
-                            'source': 'assessment'
+                            'created_at': created_at,
+                            'details': details,
+                            'raw_details': {
+                                'speed_test': speed_test,
+                                'accuracy_test': accuracy_test,
+                                'work_commitment': work_commitment,
+                                'english_understanding': english_understanding,
+                                'comments': comments
+                            }
                         })
                 except Exception as e:
                     st.warning(f"Could not load assessments: {e}")
@@ -501,10 +554,13 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
     return history
 
 
-def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
-    """Render interview history with better categorization."""
+def _render_interview_history_comprehensive(history_records: List[Dict[str, Any]]):
+    """Render interview history with comprehensive formatting and details."""
+
+    st.markdown("### 🎤 Interview & Assessment History")
+
     if not history_records:
-        st.info("📝 No interview history found")
+        st.info("📝 No interview or assessment history found")
         return
 
     # Separate different types of records
@@ -512,39 +568,86 @@ def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
     assessments = []
 
     for record in history_records:
-        source = record.get('source', '')
-        if source == 'interview':
+        record_type = record.get('type', '')
+        if record_type == 'interview':
             interviews.append(record)
-        elif source == 'assessment':
+        elif record_type == 'assessment':
             assessments.append(record)
 
-    # Display interviews
+    # Display interviews with detailed formatting
     if interviews:
-        st.markdown("#### 🎤 Interviews")
+        st.markdown("#### 🎤 Interview History")
         for interview in interviews:
-            _render_single_record(interview)
+            _render_interview_record_detailed(interview)
 
-    # Display assessments
+    # Display assessments with detailed formatting
     if assessments:
-        st.markdown("#### 📊 Assessments")
+        st.markdown("#### 📊 Assessment History")
         for assessment in assessments:
-            _render_single_record(assessment)
+            _render_assessment_record_detailed(assessment)
 
     if not interviews and not assessments:
         st.info("📝 No interview or assessment records found")
 
 
-def _render_single_record(record: Dict[str, Any]):
-    """Render a single history record."""
+def _render_interview_record_detailed(record: Dict[str, Any]):
+    """Render a detailed interview record with all information."""
+
+    title = record.get('title', '🎤 Interview')
     actor = record.get('actor', 'Unknown')
     when = _format_datetime(record.get('created_at'))
-    details = record.get('details', '')
+    details = record.get('details', [])
+    raw_details = record.get('raw_details', {})
 
-    with st.container():
-        st.markdown(f"**👤 {actor}** • {when}")
+    # Use expander for each interview record
+    with st.expander(f"{title} • {actor} • {when}", expanded=False):
         if details:
-            st.markdown(f"📝 {details}")
+            for detail in details:
+                st.markdown(detail)
+        else:
+            st.markdown("📝 No additional details available")
+
+        # Add visual separator
         st.markdown("---")
+        st.caption(f"🕐 Recorded on {when}")
+
+
+def _render_assessment_record_detailed(record: Dict[str, Any]):
+    """Render a detailed assessment record with all information."""
+
+    title = record.get('title', '📊 Assessment')
+    actor = record.get('actor', 'Unknown')
+    when = _format_datetime(record.get('created_at'))
+    details = record.get('details', [])
+    raw_details = record.get('raw_details', {})
+
+    # Use expander for each assessment record
+    with st.expander(f"{title} • {actor} • {when}", expanded=False):
+        if details:
+            # Display assessment scores prominently
+            speed = raw_details.get('speed_test')
+            accuracy = raw_details.get('accuracy_test')
+
+            if speed is not None or accuracy is not None:
+                col1, col2 = st.columns(2)
+                if speed is not None:
+                    with col1:
+                        st.metric("Speed Test", f"{speed}/100", delta=None)
+                if accuracy is not None:
+                    with col2:
+                        st.metric("Accuracy Test", f"{accuracy}/100", delta=None)
+                st.markdown("---")
+
+            # Display other details
+            for detail in details:
+                if not any(test in detail for test in ["Speed Test:", "Accuracy Test:"]):
+                    st.markdown(detail)
+        else:
+            st.markdown("📝 No additional details available")
+
+        # Add visual separator
+        st.markdown("---")
+        st.caption(f"🕐 Recorded on {when}")
 
 
 # =============================================================================
@@ -665,7 +768,7 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
 
 
 # =============================================================================
-# FIXED User Management - Removed Candidate Records Management
+# User Management Panel
 # =============================================================================
 
 def show_user_management_panel():
@@ -748,7 +851,7 @@ def show_user_management_panel():
 
 
 # =============================================================================
-# FIXED Delete Function with Proper Error Handling
+# FIXED Delete Function with Proper Error Handling and Fast Refresh
 # =============================================================================
 
 def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
@@ -781,12 +884,34 @@ def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
         return False
 
 
+def _bulk_delete_candidates(candidate_ids: List[str], user_id: int) -> Tuple[int, int]:
+    """Bulk delete candidates with proper error handling."""
+    try:
+        perms = _check_user_permissions(user_id)
+        if not perms.get("can_delete_records", False):
+            st.error("🔒 Access Denied: You need 'Delete Records' permission")
+            return 0, len(candidate_ids)
+
+        # Call the delete function from db_postgres with list
+        success, reason = delete_candidate(candidate_ids, user_id)
+
+        if success:
+            return len(candidate_ids), 0
+        else:
+            st.error(f"❌ Bulk delete failed: {reason}")
+            return 0, len(candidate_ids)
+
+    except Exception as e:
+        st.error(f"❌ Bulk delete error: {e}")
+        return 0, len(candidate_ids)
+
+
 # =============================================================================
-# Main CEO Dashboard - FIXED Version
+# Main CEO Dashboard - FIXED Version with Bulk Delete and Fast Refresh
 # =============================================================================
 
 def show_ceo_panel():
-    """FIXED CEO dashboard with working delete and complete data display."""
+    """FIXED CEO dashboard with working bulk delete, comprehensive data display, and fast refresh."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -877,6 +1002,52 @@ def show_ceo_panel():
         st.info("No candidates match your filters.")
         return
 
+    # Selection management
+    if 'selected_candidates' not in st.session_state:
+        st.session_state.selected_candidates = set()
+
+    selected = st.session_state.selected_candidates
+
+    # Update selection based on select_all checkbox
+    if select_all:
+        for candidate in filtered_candidates:  # Select all filtered candidates
+            selected.add(candidate.get('candidate_id', ''))
+    elif 'select_all' in st.session_state and not select_all:
+        selected.clear()
+
+    # Bulk actions - FIXED with proper delete functionality
+    if perms.get("can_delete_records") and selected:
+        st.markdown("### 🗑️ Bulk Actions")
+
+        bulk_col1, bulk_col2, bulk_col3 = st.columns([2, 1, 1])
+
+        with bulk_col1:
+            st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
+
+        with bulk_col2:
+            if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary", key="bulk_delete"):
+                # Confirmation step
+                st.session_state.confirm_bulk_delete = True
+
+        with bulk_col3:
+            if st.session_state.get('confirm_bulk_delete', False):
+                if st.button("⚠️ CONFIRM DELETE", type="secondary", key="confirm_bulk"):
+                    with st.spinner(f"Deleting {len(selected)} candidates..."):
+                        success_count, failed_count = _bulk_delete_candidates(list(selected), user_id)
+
+                    if success_count > 0:
+                        st.success(f"✅ Deleted {success_count} candidates successfully")
+                        selected.clear()
+                        _clear_candidate_cache()
+                        st.session_state.confirm_bulk_delete = False
+                        st.rerun()
+
+                    if failed_count > 0:
+                        st.error(f"❌ Failed to delete {failed_count} candidates")
+
+    elif not perms.get("can_delete_records") and selected:
+        st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
+
     # Pagination
     items_per_page = 10
     total_pages = (total_candidates + items_per_page - 1) // items_per_page
@@ -890,49 +1061,11 @@ def show_ceo_panel():
     else:
         page_candidates = filtered_candidates
 
-    # Selection management
-    if 'selected_candidates' not in st.session_state:
-        st.session_state.selected_candidates = set()
-
-    selected = st.session_state.selected_candidates
-
-    # Update selection based on select_all checkbox
-    if select_all:
-        for candidate in page_candidates:
-            selected.add(candidate.get('candidate_id', ''))
-    elif 'select_all' in st.session_state and not select_all:
-        selected.clear()
-
-    # Batch actions - only show if user has delete permission
-    if perms.get("can_delete_records") and selected:
-        st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
-        if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary"):
-            success_count = 0
-            failed_count = 0
-
-            with st.spinner("Deleting candidates..."):
-                for candidate_id in list(selected):
-                    if _delete_candidate_with_feedback(candidate_id, user_id):
-                        success_count += 1
-                        selected.discard(candidate_id)
-                    else:
-                        failed_count += 1
-
-            if success_count > 0:
-                st.success(f"✅ Deleted {success_count} candidates")
-            if failed_count > 0:
-                st.error(f"❌ Failed to delete {failed_count} candidates")
-
-            _clear_candidate_cache()
-            st.rerun()
-    elif not perms.get("can_delete_records") and selected:
-        st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
-
     # Display selected count if any
     if selected:
         st.info(f"📋 {len(selected)} candidates selected across all pages")
 
-    # Render candidates
+    # Render candidates with improved layout
     for candidate in page_candidates:
         candidate_id = candidate.get('candidate_id', '')
         candidate_name = candidate.get('name', 'Unnamed')
@@ -955,8 +1088,8 @@ def show_ceo_panel():
                     main_col, action_col = st.columns([3, 1])
 
                     with main_col:
-                        # Complete application details - FIXED to show ALL data
-                        _render_complete_application_details(candidate)
+                        # FIXED Personal details - comprehensive and well-organized
+                        _render_personal_details_organized(candidate)
 
                         # CV Section - FIXED with proper access control
                         _render_cv_section_fixed(
@@ -966,10 +1099,9 @@ def show_ceo_panel():
                             candidate.get('has_resume_link', False)
                         )
 
-                        # Interview History - FIXED
-                        st.markdown("### 🎤 Interview History")
-                        history = _get_interview_history_fixed(candidate_id)
-                        _render_interview_history_fixed(history)
+                        # FIXED Interview History - comprehensive with proper formatting
+                        history = _get_interview_history_comprehensive(candidate_id)
+                        _render_interview_history_comprehensive(history)
 
                     with action_col:
                         st.markdown("### ⚙️ Actions")
@@ -1005,7 +1137,7 @@ def show_ceo_panel():
                         if perms.get("can_delete_records"):
                             st.markdown("---")
                             if st.button("🗑️ Delete This Candidate", key=f"del_{candidate_id}", type="primary"):
-                                # Double confirmation for safety
+                                # Confirmation for single delete
                                 if st.button("⚠️ Confirm Delete", key=f"confirm_del_{candidate_id}"):
                                     if _delete_candidate_with_feedback(candidate_id, user_id):
                                         selected.discard(candidate_id)
@@ -1063,6 +1195,12 @@ def main():
         st.error("Access denied. CEO/Admin role required.")
         st.stop()
 
+    # Initialize session state
+    if 'selected_candidates' not in st.session_state:
+        st.session_state.selected_candidates = set()
+    if 'confirm_bulk_delete' not in st.session_state:
+        st.session_state.confirm_bulk_delete = False
+
     # Sidebar navigation
     st.sidebar.title("🎯 CEO Control Panel")
     st.sidebar.caption(f"👤 {user.get('email', 'User')}")
@@ -1077,7 +1215,12 @@ def main():
     selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
 
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ Features: Complete Data Display, Working Delete, User Management, Batch Operations")
+    st.sidebar.caption("⚡ Features:")
+    st.sidebar.caption("- Complete Personal Details")
+    st.sidebar.caption("- Comprehensive Interview History")
+    st.sidebar.caption("- Working Bulk Delete")
+    st.sidebar.caption("- Fast Refresh (30s cache)")
+    st.sidebar.caption("- User Management")
 
     # Run selected page
     try:
