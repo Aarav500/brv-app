@@ -44,97 +44,95 @@ from auth import require_login, get_current_user
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _get_candidates_fast():
-    """Fast candidate loading with complete form data."""
+    """Fast candidate loading with complete form data - dynamically checks existing columns."""
     try:
         conn = get_conn()
         with conn.cursor() as cur:
-            # First check which address columns exist
+            # Get ALL existing columns in candidates table
             cur.execute("""
                         SELECT column_name
                         FROM information_schema.columns
                         WHERE table_name = 'candidates'
-                          AND column_name IN ('address', 'current_address', 'permanent_address')
+                        ORDER BY ordinal_position
                         """)
-            existing_address_cols = {row[0] for row in cur.fetchall()}
+            existing_columns = [row[0] for row in cur.fetchall()]
 
-            # Build query based on available columns
-            address_select = []
-            if 'current_address' in existing_address_cols:
-                address_select.append('current_address')
-            if 'permanent_address' in existing_address_cols:
-                address_select.append('permanent_address')
-            if 'address' in existing_address_cols:
-                address_select.append('address')
+            # Build dynamic SELECT based on what columns actually exist
+            select_parts = []
+            column_mapping = {}  # Maps our expected names to actual positions
 
-            # If no address columns, use NULL
-            if not address_select:
-                address_select = ['NULL as current_address', 'NULL as permanent_address']
+            # Core columns that should always exist
+            core_columns = ['candidate_id', 'name', 'email', 'phone', 'created_at', 'updated_at', 'can_edit',
+                            'form_data']
+            for col in core_columns:
+                if col in existing_columns:
+                    select_parts.append(col)
+                    column_mapping[col] = len(select_parts) - 1
+                else:
+                    # Add NULL placeholder for missing core columns
+                    select_parts.append(f'NULL as {col}')
+                    column_mapping[col] = len(select_parts) - 1
 
-            address_fields = ', '.join(address_select)
+            # Optional columns - add if they exist
+            optional_columns = ['address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
+                                'marital_status', 'highest_qualification', 'work_experience', 'referral',
+                                'ready_festivals', 'ready_late_nights', 'cv_filename']
+            for col in optional_columns:
+                if col in existing_columns:
+                    select_parts.append(col)
+                    column_mapping[col] = len(select_parts) - 1
 
-            cur.execute(f"""
-                        SELECT candidate_id,
-                               name,
-                               email,
-                               phone,
-                               {address_fields},
-                               dob,
-                               caste,
-                               created_at,
-                               updated_at,
-                               can_edit,
-                               cv_file IS NOT NULL     as has_cv_file,
-                               resume_link IS NOT NULL as has_resume_link,
-                               form_data
-                        FROM candidates
-                        ORDER BY created_at DESC LIMIT 1000
-                        """)
+            # CV file and resume link checks
+            if 'cv_file' in existing_columns:
+                select_parts.append('cv_file IS NOT NULL as has_cv_file')
+            else:
+                select_parts.append('FALSE as has_cv_file')
+            column_mapping['has_cv_file'] = len(select_parts) - 1
+
+            if 'resume_link' in existing_columns:
+                select_parts.append('resume_link IS NOT NULL as has_resume_link')
+            else:
+                select_parts.append('FALSE as has_resume_link')
+            column_mapping['has_resume_link'] = len(select_parts) - 1
+
+            # Build and execute query
+            query = f"""
+                SELECT {', '.join(select_parts)}
+                FROM candidates
+                ORDER BY created_at DESC LIMIT 1000
+            """
+
+            cur.execute(query)
 
             candidates = []
             for row in cur.fetchall():
-                # Parse form_data to get complete application details
-                form_data = row[-1] if row[-1] else {}  # form_data is always last
+                # Parse form_data if it exists
+                form_data_idx = column_mapping.get('form_data')
+                form_data = row[form_data_idx] if form_data_idx is not None and row[form_data_idx] else {}
 
-                # Handle different address column configurations
-                address_data = {}
-                col_index = 4  # Start after phone column
+                # Build candidate dict using column mapping
+                candidate = {}
 
-                if 'current_address' in existing_address_cols:
-                    address_data['current_address'] = row[col_index]
-                    col_index += 1
-                if 'permanent_address' in existing_address_cols:
-                    address_data['permanent_address'] = row[col_index]
-                    col_index += 1
-                if 'address' in existing_address_cols:
-                    address_data['address'] = row[col_index]
-                    col_index += 1
+                # Core fields
+                candidate['candidate_id'] = row[column_mapping.get('candidate_id', 0)] or ''
+                candidate['name'] = row[column_mapping.get('name', 1)] or ''
+                candidate['email'] = row[column_mapping.get('email', 2)] or ''
+                candidate['phone'] = row[column_mapping.get('phone', 3)] or ''
+                candidate['created_at'] = row[column_mapping.get('created_at', 4)]
+                candidate['updated_at'] = row[column_mapping.get('updated_at', 5)]
+                candidate['can_edit'] = row[column_mapping.get('can_edit', 6)] or False
+                candidate['has_cv_file'] = row[column_mapping.get('has_cv_file', 7)] or False
+                candidate['has_resume_link'] = row[column_mapping.get('has_resume_link', 8)] or False
 
-                # Adjust remaining column indices
-                dob_idx = col_index
-                caste_idx = col_index + 1
-                created_at_idx = col_index + 2
-                updated_at_idx = col_index + 3
-                can_edit_idx = col_index + 4
-                has_cv_idx = col_index + 5
-                has_resume_idx = col_index + 6
+                # Optional fields - only add if they exist in the table
+                for col in ['address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
+                            'marital_status', 'highest_qualification', 'work_experience', 'referral', 'ready_festivals',
+                            'ready_late_nights', 'cv_filename']:
+                    if col in column_mapping:
+                        candidate[col] = row[column_mapping[col]]
 
-                candidate = {
-                    'candidate_id': row[0],
-                    'name': row[1],
-                    'email': row[2],
-                    'phone': row[3],
-                    'dob': row[dob_idx] if dob_idx < len(row) else None,
-                    'caste': row[caste_idx] if caste_idx < len(row) else None,
-                    'created_at': row[created_at_idx] if created_at_idx < len(row) else None,
-                    'updated_at': row[updated_at_idx] if updated_at_idx < len(row) else None,
-                    'can_edit': row[can_edit_idx] if can_edit_idx < len(row) else False,
-                    'has_cv_file': row[has_cv_idx] if has_cv_idx < len(row) else False,
-                    'has_resume_link': row[has_resume_idx] if has_resume_idx < len(row) else False,
-                    'form_data': form_data
-                }
-
-                # Add address data
-                candidate.update(address_data)
+                # Store form_data for complete application details
+                candidate['form_data'] = form_data
 
                 candidates.append(candidate)
 
@@ -198,7 +196,7 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
 # =============================================================================
 
 def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
-    """Get CV with proper access control - fixed version."""
+    """Get CV with proper access control - works with actual database schema."""
     try:
         # First check if user has CV viewing permissions
         perms = _check_user_permissions(user_id)
@@ -207,22 +205,53 @@ def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optiona
         if not (perms.get("role") in ("ceo", "admin") or perms.get("can_view_cvs", False)):
             return None, None, "no_permission"
 
-        # Direct database query since get_candidate_cv_secure has issues
+        # Check what CV-related columns exist in the database
         conn = get_conn()
         try:
             with conn.cursor() as cur:
+                # First check what columns exist
                 cur.execute("""
-                            SELECT cv_file, cv_filename, resume_link
-                            FROM candidates
-                            WHERE candidate_id = %s
-                            """, (candidate_id,))
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_name = 'candidates'
+                              AND column_name IN ('cv_file', 'cv_filename', 'resume_link')
+                            """)
+                existing_cols = {row[0] for row in cur.fetchall()}
+
+                # Build dynamic query based on existing columns
+                select_parts = []
+                if 'cv_file' in existing_cols:
+                    select_parts.append('cv_file')
+                else:
+                    select_parts.append('NULL as cv_file')
+
+                if 'cv_filename' in existing_cols:
+                    select_parts.append('cv_filename')
+                else:
+                    select_parts.append('NULL as cv_filename')
+
+                if 'resume_link' in existing_cols:
+                    select_parts.append('resume_link')
+                else:
+                    select_parts.append('NULL as resume_link')
+
+                query = f"""
+                    SELECT {', '.join(select_parts)}
+                    FROM candidates
+                    WHERE candidate_id = %s
+                """
+
+                cur.execute(query, (candidate_id,))
                 result = cur.fetchone()
 
                 if not result:
                     return None, None, "not_found"
 
-                cv_file, cv_filename, resume_link = result
+                cv_file = result[0] if len(result) > 0 else None
+                cv_filename = result[1] if len(result) > 1 else None
+                resume_link = result[2] if len(result) > 2 else None
 
+                # Priority: cv_file > resume_link
                 if cv_file:
                     return bytes(cv_file), cv_filename or f"{candidate_id}.pdf", "ok"
                 elif resume_link and resume_link.strip():
@@ -333,106 +362,118 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
 # =============================================================================
 
 def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
-    """Get interview history with better error handling and multiple table support."""
+    """Get interview history from available tables in the database."""
     history = []
 
     try:
         conn = get_conn()
         with conn.cursor() as cur:
-            # Try to get from candidate_history table first
-            try:
-                cur.execute("""
-                            SELECT id, actor, created_at, details, actor_id
-                            FROM candidate_history
-                            WHERE candidate_id = %s
-                            ORDER BY created_at DESC LIMIT 50
-                            """, (candidate_id,))
+            # Check what tables exist
+            cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name IN ('candidate_history', 'interviews', 'receptionist_assessments')
+                        """)
+            existing_tables = {row[0] for row in cur.fetchall()}
 
-                for row in cur.fetchall():
-                    history.append({
-                        'id': row[0],
-                        'actor': row[1] or 'Unknown',
-                        'created_at': row[2],
-                        'details': row[3] or '',
-                        'actor_id': row[4],
-                        'source': 'history'
-                    })
-            except psycopg2.errors.UndefinedTable:
-                # candidate_history table doesn't exist, skip
-                pass
-            except Exception as e:
-                st.error(f"Error loading candidate history: {e}")
+            # Get from interviews table if it exists
+            if 'interviews' in existing_tables:
+                try:
+                    cur.execute("""
+                                SELECT id, interviewer, created_at, scheduled_at, result, notes
+                                FROM interviews
+                                WHERE candidate_id = %s
+                                ORDER BY COALESCE(scheduled_at, created_at) DESC
+                                """, (candidate_id,))
 
-            # Also get from interviews table
-            try:
-                cur.execute("""
-                            SELECT id, interviewer, created_at, scheduled_at, result, notes
-                            FROM interviews
-                            WHERE candidate_id = %s
-                            ORDER BY COALESCE(scheduled_at, created_at) DESC LIMIT 20
-                            """, (candidate_id,))
+                    for row in cur.fetchall():
+                        interview_details = []
+                        if row[4]:  # result
+                            interview_details.append(f"Result: {row[4]}")
+                        if row[5]:  # notes
+                            interview_details.append(f"Notes: {row[5]}")
 
-                for row in cur.fetchall():
-                    interview_details = []
-                    if row[4]:  # result
-                        interview_details.append(f"Result: {row[4]}")
-                    if row[5]:  # notes
-                        interview_details.append(f"Notes: {row[5]}")
+                        # Use scheduled_at if available, otherwise created_at
+                        event_time = row[3] if row[3] else row[2]
 
-                    history.append({
-                        'id': f"interview_{row[0]}",
-                        'actor': row[1] or 'Interviewer',
-                        'created_at': row[3] or row[2],  # prefer scheduled_at over created_at
-                        'details': '; '.join(interview_details) if interview_details else 'Interview scheduled',
-                        'actor_id': None,
-                        'source': 'interview'
-                    })
-            except Exception as e:
-                st.error(f"Error loading interviews: {e}")
+                        history.append({
+                            'id': f"interview_{row[0]}",
+                            'actor': row[1] or 'Interviewer',
+                            'created_at': event_time,
+                            'details': '; '.join(interview_details) if interview_details else 'Interview scheduled',
+                            'actor_id': None,
+                            'source': 'interview'
+                        })
+                except Exception as e:
+                    st.warning(f"Could not load interviews: {e}")
 
-            # Also get from receptionist_assessments table
-            try:
-                cur.execute("""
-                            SELECT id,
-                                   created_at,
-                                   speed_test,
-                                   accuracy_test,
-                                   work_commitment,
-                                   english_understanding,
-                                   comments
-                            FROM receptionist_assessments
-                            WHERE candidate_id = %s
-                            ORDER BY created_at DESC LIMIT 10
-                            """, (candidate_id,))
+            # Get from receptionist_assessments table if it exists
+            if 'receptionist_assessments' in existing_tables:
+                try:
+                    cur.execute("""
+                                SELECT id,
+                                       created_at,
+                                       speed_test,
+                                       accuracy_test,
+                                       work_commitment,
+                                       english_understanding,
+                                       comments
+                                FROM receptionist_assessments
+                                WHERE candidate_id = %s
+                                ORDER BY created_at DESC
+                                """, (candidate_id,))
 
-                for row in cur.fetchall():
-                    assessment_details = []
-                    if row[2] is not None:  # speed_test
-                        assessment_details.append(f"Speed: {row[2]}")
-                    if row[3] is not None:  # accuracy_test
-                        assessment_details.append(f"Accuracy: {row[3]}")
-                    if row[4]:  # work_commitment
-                        assessment_details.append(f"Commitment: {row[4]}")
-                    if row[5]:  # english_understanding
-                        assessment_details.append(f"English: {row[5]}")
-                    if row[6]:  # comments
-                        assessment_details.append(f"Comments: {row[6]}")
+                    for row in cur.fetchall():
+                        assessment_details = []
+                        if row[2] is not None:  # speed_test
+                            assessment_details.append(f"Speed Test: {row[2]}")
+                        if row[3] is not None:  # accuracy_test
+                            assessment_details.append(f"Accuracy Test: {row[3]}")
+                        if row[4]:  # work_commitment
+                            assessment_details.append(f"Work Commitment: {row[4]}")
+                        if row[5]:  # english_understanding
+                            assessment_details.append(f"English Understanding: {row[5]}")
+                        if row[6]:  # comments
+                            assessment_details.append(f"Comments: {row[6]}")
 
-                    history.append({
-                        'id': f"assessment_{row[0]}",
-                        'actor': 'Receptionist',
-                        'created_at': row[1],
-                        'details': '; '.join(assessment_details) if assessment_details else 'Assessment completed',
-                        'actor_id': None,
-                        'source': 'assessment'
-                    })
-            except Exception as e:
-                st.error(f"Error loading assessments: {e}")
+                        history.append({
+                            'id': f"assessment_{row[0]}",
+                            'actor': 'Receptionist',
+                            'created_at': row[1],
+                            'details': '; '.join(assessment_details) if assessment_details else 'Assessment completed',
+                            'actor_id': None,
+                            'source': 'assessment'
+                        })
+                except Exception as e:
+                    st.warning(f"Could not load assessments: {e}")
+
+            # Get from candidate_history table if it exists (this might not exist in your schema)
+            if 'candidate_history' in existing_tables:
+                try:
+                    cur.execute("""
+                                SELECT id, actor, created_at, details, actor_id
+                                FROM candidate_history
+                                WHERE candidate_id = %s
+                                ORDER BY created_at DESC LIMIT 20
+                                """, (candidate_id,))
+
+                    for row in cur.fetchall():
+                        history.append({
+                            'id': row[0],
+                            'actor': row[1] or 'System',
+                            'created_at': row[2],
+                            'details': row[3] or 'Record updated',
+                            'actor_id': row[4],
+                            'source': 'history'
+                        })
+                except Exception as e:
+                    st.warning(f"Could not load candidate history: {e}")
 
             conn.close()
 
     except Exception as e:
-        st.error(f"Error connecting to database: {e}")
+        st.error(f"Error connecting to database for history: {e}")
 
     # Sort by created_at desc
     history.sort(key=lambda x: x.get('created_at') or datetime.min, reverse=True)
@@ -652,51 +693,61 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
     else:
         st.error("❌ Error accessing CV")
 
+        # =============================================================================
+        # Complete Form Data Display - Fixed
+        # =============================================================================email, u.created_at, u.role,
+        up.can_view_cvs, up.can_delete_records
+    FROM
+    users
+    u
+    LEFT
+    JOIN
+    user_permissions
+    up
+    ON
+    u.id = up.user_id
+    WHERE
+    u.email
+    IS
+    NOT
+    NULL
+    AND
+    u.email != ''
+    ORDER
+    BY
+    u.created_at
+    DESC
+    """)
 
-# =============================================================================
-# Fixed User Management - Only Show Actual Users
-# =============================================================================
+users = []
+for row in cur.fetchall():
+users.append({
+'id': row[0],
+'email': row[1],
+'created_at': row[2],
+'role': row[3] or 'user',
+'can_view_cvs': bool(row[4]) if row[4] is not None else False,
+'can_delete_records': bool(row[5]) if row[5] is not None else False
+})
 
-def _get_actual_users_only():
-    """Get only actual system users, not candidate records."""
-    try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            # Get users from the users table, not candidates table
-            cur.execute("""
-                        SELECT u.id,
-                               u.email,
-                               u.created_at,
-                               u.role,
-                               up.can_view_cvs,
-                               up.can_delete_records
-                        FROM users u
-                                 LEFT JOIN user_permissions up ON u.id = up.user_id
-                        WHERE u.email IS NOT NULL
-                          AND u.email != ''
-                        ORDER BY u.created_at DESC
-                        """)
-
-            users = []
-            for row in cur.fetchall():
-                users.append({
-                    'id': row[0],
-                    'email': row[1],
-                    'created_at': row[2],
-                    'role': row[3] or 'user',
-                    'can_view_cvs': bool(row[4]) if row[4] is not None else False,
-                    'can_delete_records': bool(row[5]) if row[5] is not None else False
-                })
-
-            conn.close()
-            return users
-    except Exception as e:
-        st.error(f"Error loading users: {e}")
-        return []
+conn.close()
+return users
+except Exception as e:
+st.error(f"Error loading users: {e}")
+return []
 
 
 def show_user_management_panel():
-    """Fixed user management panel - only shows actual users."""
+"""
+    Fixed
+    user
+    management
+    panel - uses
+    the
+    actual
+    database
+    functions.
+    """
     require_login()
 
     user = get_current_user(refresh=True)
@@ -709,7 +760,12 @@ def show_user_management_panel():
     st.title("👥 User Management")
     st.caption("Manage system user permissions")
 
-    users = _get_actual_users_only()
+    # Use the existing database function
+    try:
+        users = get_all_users_with_permissions()
+    except Exception as e:
+        st.error(f"Failed to load users: {e}")
+        return
 
     if not users:
         st.info("No system users found.")
@@ -722,48 +778,59 @@ def show_user_management_panel():
 
         with st.expander(f"👤 {user_email} (Role: {user_role})"):
             st.markdown(f"""
-            **User ID:** {user_id}  
-            **Email:** {user_email}  
-            **Role:** {user_role}  
-            **Created:** {_format_datetime(user_data.get('created_at'))}
-            """)
 
-            # Permission controls (only for non-CEO/admin users)
-            if user_role.lower() not in ('ceo', 'admin'):
-                col1, col2 = st.columns(2)
+** User
+ID: ** {user_id}
+** Email: ** {user_email}
+** Role: ** {user_role}
+** Created: ** {_format_datetime(user_data.get('created_at'))}
+** Force
+Password
+Reset: ** {'Yes' if user_data.get('force_password_reset') else 'No'}
+""")
 
-                with col1:
-                    can_view_cvs = st.checkbox(
-                        "Can View CVs",
-                        value=user_data.get('can_view_cvs', False),
-                        key=f"cv_{user_id}",
-                        help="Allow this user to view candidate CVs"
-                    )
+# Permission controls (only for non-CEO/admin users)
+if user_role.lower() not in ('ceo', 'admin'):
+    col1, col2 = st.columns(2)
 
-                with col2:
-                    can_delete = st.checkbox(
-                        "Can Delete Records",
-                        value=user_data.get('can_delete_records', False),
-                        key=f"del_{user_id}",
-                        help="Allow this user to delete candidate records"
-                    )
+    with col1:
+        can_view_cvs = st.checkbox(
+            "Can View CVs",
+            value=bool(user_data.get('can_view_cvs', False)),
+            key=f"cv_{user_id}",
+            help="Allow this user to view candidate CVs"
+        )
 
-                if st.button("💾 Update Permissions", key=f"save_{user_id}"):
-                    new_perms = {
-                        "can_view_cvs": can_view_cvs,
-                        "can_delete_records": can_delete
-                    }
+    with col2:
+        can_delete = st.checkbox(
+            "Can Delete Records",
+            value=bool(user_data.get('can_delete_records', False)),
+            key=f"del_{user_id}",
+            help="Allow this user to delete candidate records"
+        )
 
-                    try:
-                        if update_user_permissions(user_id, new_perms):
-                            st.success("✅ Permissions updated!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Update failed")
-                    except Exception as e:
-                        st.error(f"Error updating permissions: {e}")
+    if st.button("💾 Update Permissions", key=f"save_{user_id}"):
+        new_perms = {
+            "can_view_cvs": can_view_cvs,
+            "can_delete_records": can_delete
+        }
+
+        try:
+            if update_user_permissions(user_id, new_perms):
+                st.success("✅ Permissions updated!")
+                st.rerun()
             else:
-                st.info("🔑 CEO/Admin users have all permissions by default")
+                st.error("❌ Update failed")
+        except Exception as e:
+            st.error(f"Error updating permissions: {e}")
+else:
+    st.info("🔑 CEO/Admin users have all permissions by default")
+
+# Show current permissions for reference
+st.markdown("**Current Permissions:**")
+st.markdown(f"- View CVs: {'✅' if user_data.get('can_view_cvs') else '❌'}")
+st.markdown(f"- Delete Records: {'✅' if user_data.get('can_delete_records') else '❌'}")
+st.markdown(f"- Grant Delete Rights: {'✅' if user_data.get('can_grant_delete') else '❌'}")
 
 
 # =============================================================================
@@ -771,7 +838,11 @@ def show_user_management_panel():
 # =============================================================================
 
 def show_ceo_panel():
-    """Fixed CEO dashboard with proper access controls and complete data display."""
+"""
+Fixed
+CEO
+dashboard
+with proper access controls and complete data display."""
     require_login()
 
     user = get_current_user(refresh=True)
