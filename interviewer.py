@@ -497,10 +497,8 @@ def interviewer_view():
     candidates = _get_candidates_cached(search_query)
 
     if search_query and search_query.strip():
-        st.info(f"Found {len(candidates)} candidate(s) for "
-        {search_query}
-        ".")
-        else:
+        st.info(f"Found {len(candidates)} candidate(s) for '{search_query}'.")
+    else:
         st.info(f"Showing {len(candidates)} most recent candidate(s).")
 
     if not candidates:
