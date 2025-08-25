@@ -1,5 +1,5 @@
 # =============================================================================
-# Fixed CEO Control Panel - Corrected Access Rights & Data Display
+# Fixed CEO Control Panel - Complete Data Display & Working Delete
 # =============================================================================
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from auth import require_login, get_current_user
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _get_candidates_fast():
-    """Fast candidate loading with complete form data - dynamically checks existing columns."""
+    """Fast candidate loading with ALL available data from both columns and form_data."""
     try:
         conn = get_conn()
         with conn.cursor() as cur:
@@ -57,43 +57,38 @@ def _get_candidates_fast():
                         """)
             existing_columns = [row[0] for row in cur.fetchall()]
 
-            # Build dynamic SELECT based on what columns actually exist
+            # Build comprehensive SELECT to get all data
             select_parts = []
-            column_mapping = {}  # Maps our expected names to actual positions
 
-            # Core columns that should always exist
-            core_columns = ['candidate_id', 'name', 'email', 'phone', 'created_at', 'updated_at', 'can_edit',
-                            'form_data']
+            # Always include these core columns
+            core_columns = ['candidate_id', 'name', 'email', 'phone', 'created_at', 'updated_at', 'can_edit']
             for col in core_columns:
                 if col in existing_columns:
                     select_parts.append(col)
-                    column_mapping[col] = len(select_parts) - 1
-                else:
-                    # Add NULL placeholder for missing core columns
-                    select_parts.append(f'NULL as {col}')
-                    column_mapping[col] = len(select_parts) - 1
 
-            # Optional columns - add if they exist
-            optional_columns = ['address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
-                                'marital_status', 'highest_qualification', 'work_experience', 'referral',
-                                'ready_festivals', 'ready_late_nights', 'cv_filename', 'resume_link']
-            for col in optional_columns:
+            # Add all additional columns that exist
+            additional_columns = [
+                'address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
+                'marital_status', 'highest_qualification', 'work_experience', 'referral',
+                'ready_festivals', 'ready_late_nights', 'cv_filename', 'resume_link',
+                'form_data', 'created_by'
+            ]
+
+            for col in additional_columns:
                 if col in existing_columns:
                     select_parts.append(col)
-                    column_mapping[col] = len(select_parts) - 1
 
-            # CV file and resume link checks
+            # Check for CV file existence
             if 'cv_file' in existing_columns:
                 select_parts.append('cv_file IS NOT NULL as has_cv_file')
             else:
                 select_parts.append('FALSE as has_cv_file')
-            column_mapping['has_cv_file'] = len(select_parts) - 1
 
+            # Check for resume link existence
             if 'resume_link' in existing_columns:
                 select_parts.append('resume_link IS NOT NULL AND resume_link != \'\' as has_resume_link')
             else:
                 select_parts.append('FALSE as has_resume_link')
-            column_mapping['has_resume_link'] = len(select_parts) - 1
 
             # Build and execute query
             query = f"""
@@ -103,36 +98,25 @@ def _get_candidates_fast():
             """
 
             cur.execute(query)
+            columns = [desc[0] for desc in cur.description]
 
             candidates = []
             for row in cur.fetchall():
-                # Parse form_data if it exists
-                form_data_idx = column_mapping.get('form_data')
-                form_data = row[form_data_idx] if form_data_idx is not None and row[form_data_idx] else {}
-
-                # Build candidate dict using column mapping
+                # Create candidate dict from row data
                 candidate = {}
+                for i, col_name in enumerate(columns):
+                    candidate[col_name] = row[i]
 
-                # Core fields
-                candidate['candidate_id'] = row[column_mapping.get('candidate_id', 0)] or ''
-                candidate['name'] = row[column_mapping.get('name', 1)] or ''
-                candidate['email'] = row[column_mapping.get('email', 2)] or ''
-                candidate['phone'] = row[column_mapping.get('phone', 3)] or ''
-                candidate['created_at'] = row[column_mapping.get('created_at', 4)]
-                candidate['updated_at'] = row[column_mapping.get('updated_at', 5)]
-                candidate['can_edit'] = row[column_mapping.get('can_edit', 6)] or False
-                candidate['has_cv_file'] = row[column_mapping.get('has_cv_file', 7)] or False
-                candidate['has_resume_link'] = row[column_mapping.get('has_resume_link', 8)] or False
-
-                # Optional fields - only add if they exist in the table
-                for col in ['address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
-                            'marital_status', 'highest_qualification', 'work_experience', 'referral', 'ready_festivals',
-                            'ready_late_nights', 'cv_filename', 'resume_link']:
-                    if col in column_mapping:
-                        candidate[col] = row[column_mapping[col]]
-
-                # Store form_data for complete application details
-                candidate['form_data'] = form_data
+                # Parse form_data if it exists and merge it with candidate data
+                form_data = candidate.get('form_data', {})
+                if isinstance(form_data, dict):
+                    # Merge form_data into candidate (form_data takes precedence for duplicates)
+                    for key, value in form_data.items():
+                        if value is not None and str(value).strip():  # Only non-empty values
+                            candidate[f'form_{key}'] = value  # Prefix to distinguish
+                            # Also add without prefix if column doesn't exist directly
+                            if key not in candidate:
+                                candidate[key] = value
 
                 candidates.append(candidate)
 
@@ -159,11 +143,11 @@ def _clear_candidate_cache():
 
 
 # =============================================================================
-# FIXED Access Rights Check - Strict Permission Enforcement
+# Access Rights Check - Strict Permission Enforcement
 # =============================================================================
 
 def _check_user_permissions(user_id: int) -> Dict[str, Any]:
-    """Check user permissions with STRICT enforcement - no bypasses."""
+    """Check user permissions with STRICT enforcement."""
     try:
         perms = get_user_permissions(user_id)
         if not perms:
@@ -171,12 +155,11 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
 
         role = (perms.get("role") or "user").lower()
 
-        # Only return actual permissions from database - NO automatic grants
         return {
             "role": role,
             "can_view_cvs": bool(perms.get("can_view_cvs", False)),
             "can_delete_records": bool(perms.get("can_delete_records", False)),
-            "can_manage_users": role in ("ceo", "admin")  # Only for user management panel access
+            "can_manage_users": role in ("ceo", "admin")
         }
     except Exception as e:
         st.error(f"Permission check failed: {e}")
@@ -184,23 +167,20 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
 
 
 # =============================================================================
-# FIXED CV Access with STRICT Rights Check
+# CV Access with Proper Rights Check
 # =============================================================================
 
 def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
-    """Get CV with STRICT access control - only if explicitly granted permission."""
+    """Get CV with proper access control."""
     try:
-        # STRICT permission check - must have explicit can_view_cvs permission
         perms = _check_user_permissions(user_id)
-
         if not perms.get("can_view_cvs", False):
             return None, None, "no_permission"
 
-        # Check what CV-related columns exist in the database
         conn = get_conn()
         try:
             with conn.cursor() as cur:
-                # First check what columns exist
+                # Check what CV columns exist
                 cur.execute("""
                             SELECT column_name
                             FROM information_schema.columns
@@ -209,44 +189,31 @@ def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optiona
                             """)
                 existing_cols = {row[0] for row in cur.fetchall()}
 
-                # Build dynamic query based on existing columns
                 select_parts = []
                 if 'cv_file' in existing_cols:
                     select_parts.append('cv_file')
-                else:
-                    select_parts.append('NULL as cv_file')
-
                 if 'cv_filename' in existing_cols:
                     select_parts.append('cv_filename')
-                else:
-                    select_parts.append('NULL as cv_filename')
-
                 if 'resume_link' in existing_cols:
                     select_parts.append('resume_link')
-                else:
-                    select_parts.append('NULL as resume_link')
 
-                query = f"""
-                    SELECT {', '.join(select_parts)}
-                    FROM candidates
-                    WHERE candidate_id = %s
-                """
+                if not select_parts:
+                    return None, None, "not_found"
 
+                query = f"SELECT {', '.join(select_parts)} FROM candidates WHERE candidate_id = %s"
                 cur.execute(query, (candidate_id,))
                 result = cur.fetchone()
 
                 if not result:
                     return None, None, "not_found"
 
-                cv_file = result[0] if len(result) > 0 else None
-                cv_filename = result[1] if len(result) > 1 else None
-                resume_link = result[2] if len(result) > 2 else None
+                cv_file = result[0] if len(result) > 0 and 'cv_file' in select_parts else None
+                cv_filename = result[1] if len(result) > 1 and 'cv_filename' in select_parts else None
+                resume_link = result[2] if len(result) > 2 and 'resume_link' in select_parts else None
 
-                # Priority: cv_file > resume_link
                 if cv_file:
                     return bytes(cv_file), cv_filename or f"{candidate_id}.pdf", "ok"
                 elif resume_link and resume_link.strip():
-                    # For resume links, return the link as filename
                     return None, resume_link.strip(), "link_only"
                 else:
                     return None, None, "not_found"
@@ -260,24 +227,21 @@ def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optiona
 
 
 # =============================================================================
-# FIXED Complete Form Data Display - Shows ALL Information
+# FIXED Complete Application Details Display - Shows ALL Information
 # =============================================================================
 
 def _render_complete_application_details(candidate: Dict[str, Any]):
-    """Render ALL application details from both top-level and form_data fields."""
+    """Render ALL application details from both direct columns and form_data."""
 
     st.markdown("### 📋 Complete Application Details")
 
-    # Combine data from top-level fields and form_data
-    form_data = candidate.get('form_data', {}) or {}
-
-    # Field mapping for better display
+    # Comprehensive field mapping for better display
     field_labels = {
         "name": "👤 Full Name",
         "email": "📧 Email Address",
         "phone": "📱 Phone Number",
         "dob": "🎂 Date of Birth",
-        "address": "🏠 Address (Legacy)",
+        "address": "🏠 Address",
         "current_address": "🏠 Current Address",
         "permanent_address": "🏡 Permanent Address",
         "caste": "📋 Caste",
@@ -291,22 +255,27 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
         "created_at": "📅 Application Created",
         "updated_at": "🕐 Last Updated",
         "cv_filename": "📄 CV File Name",
-        "resume_link": "🔗 Resume Link"
+        "resume_link": "🔗 Resume Link",
+        "created_by": "👥 Created By"
     }
 
-    # Create comprehensive data dictionary - form_data takes precedence
+    # Collect ALL available data
     all_data = {}
 
-    # Add top-level fields first
-    for key in ["name", "email", "phone", "address", "current_address", "permanent_address",
-                "dob", "caste", "sub_caste", "marital_status", "highest_qualification",
-                "work_experience", "referral", "ready_festivals", "ready_late_nights",
-                "created_at", "updated_at", "cv_filename", "resume_link"]:
-        value = candidate.get(key)
-        if value and str(value).strip():
-            all_data[key] = value
+    # Get data from direct columns
+    for key, value in candidate.items():
+        if key.startswith('form_'):
+            # This is from form_data, use the key without prefix
+            clean_key = key[5:]  # Remove 'form_' prefix
+            if value and str(value).strip():
+                all_data[clean_key] = value
+        elif not key.startswith('has_') and key not in ['id', 'form_data']:
+            # Regular column data
+            if value and str(value).strip():
+                all_data[key] = value
 
-    # Add form_data fields (these take precedence for duplicates)
+    # Also check form_data directly if it exists
+    form_data = candidate.get('form_data', {})
     if isinstance(form_data, dict):
         for key, value in form_data.items():
             if value and str(value).strip():
@@ -318,40 +287,43 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
 
     # Display in organized sections
     with st.container():
-        # Basic Information
+        # Basic Information Section
         st.markdown("#### 👤 Basic Information")
         basic_fields = ["name", "email", "phone"]
         basic_col1, basic_col2 = st.columns(2)
 
         basic_items = [(k, v) for k, v in all_data.items() if k in basic_fields]
-        mid_basic = len(basic_items) // 2
+        if basic_items:
+            mid_basic = len(basic_items) // 2
 
-        with basic_col1:
-            for key, value in basic_items[:mid_basic + 1]:
-                label = field_labels.get(key, key.replace('_', ' ').title())
-                st.markdown(f"**{label}:** {value}")
+            with basic_col1:
+                for key, value in basic_items[:mid_basic + 1]:
+                    label = field_labels.get(key, key.replace('_', ' ').title())
+                    st.markdown(f"**{label}:** {value}")
 
-        with basic_col2:
-            for key, value in basic_items[mid_basic + 1:]:
-                label = field_labels.get(key, key.replace('_', ' ').title())
-                st.markdown(f"**{label}:** {value}")
+            with basic_col2:
+                for key, value in basic_items[mid_basic + 1:]:
+                    label = field_labels.get(key, key.replace('_', ' ').title())
+                    st.markdown(f"**{label}:** {value}")
 
-        # Address Information
+        # Address Information Section
+        st.markdown("#### 🏠 Address Information")
         address_fields = ["address", "current_address", "permanent_address"]
         address_items = [(k, v) for k, v in all_data.items() if k in address_fields]
 
         if address_items:
-            st.markdown("#### 🏠 Address Information")
             for key, value in address_items:
                 label = field_labels.get(key, key.replace('_', ' ').title())
                 st.markdown(f"**{label}:** {value}")
+        else:
+            st.info("No address information available")
 
-        # Personal Details
+        # Personal Details Section
+        st.markdown("#### 👥 Personal Details")
         personal_fields = ["dob", "caste", "sub_caste", "marital_status"]
         personal_items = [(k, v) for k, v in all_data.items() if k in personal_fields]
 
         if personal_items:
-            st.markdown("#### 👥 Personal Details")
             personal_col1, personal_col2 = st.columns(2)
             mid_personal = len(personal_items) // 2
 
@@ -366,23 +338,27 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
                     label = field_labels.get(key, key.replace('_', ' ').title())
                     display_value = _format_datetime(value) if key == "dob" else str(value)
                     st.markdown(f"**{label}:** {display_value}")
+        else:
+            st.info("No personal details available")
 
-        # Professional Information
+        # Professional Information Section
+        st.markdown("#### 💼 Professional Information")
         prof_fields = ["highest_qualification", "work_experience", "referral"]
         prof_items = [(k, v) for k, v in all_data.items() if k in prof_fields]
 
         if prof_items:
-            st.markdown("#### 💼 Professional Information")
             for key, value in prof_items:
                 label = field_labels.get(key, key.replace('_', ' ').title())
                 st.markdown(f"**{label}:** {value}")
+        else:
+            st.info("No professional information available")
 
-        # Work Preferences
+        # Work Preferences Section
+        st.markdown("#### ⚙️ Work Preferences")
         pref_fields = ["ready_festivals", "ready_late_nights"]
         pref_items = [(k, v) for k, v in all_data.items() if k in pref_fields]
 
         if pref_items:
-            st.markdown("#### ⚙️ Work Preferences")
             pref_col1, pref_col2 = st.columns(2)
 
             with pref_col1:
@@ -396,13 +372,15 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
                     label = field_labels.get(key, key.replace('_', ' ').title())
                     display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
                     st.markdown(f"**{label}:** {display_value}")
+        else:
+            st.info("No work preference information available")
 
-        # System Information
-        system_fields = ["created_at", "updated_at", "cv_filename", "resume_link"]
+        # System Information Section
+        st.markdown("#### 🔧 System Information")
+        system_fields = ["created_at", "updated_at", "cv_filename", "resume_link", "created_by"]
         system_items = [(k, v) for k, v in all_data.items() if k in system_fields]
 
         if system_items:
-            st.markdown("#### 🔧 System Information")
             for key, value in system_items:
                 label = field_labels.get(key, key.replace('_', ' ').title())
                 if key in ["created_at", "updated_at"]:
@@ -413,7 +391,7 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
                     display_value = str(value)
                 st.markdown(f"**{label}:** {display_value}")
 
-        # Additional form data not covered above
+        # Additional Information Section (for any remaining fields)
         remaining_items = [(k, v) for k, v in all_data.items()
                            if k not in (basic_fields + address_fields + personal_fields +
                                         prof_fields + pref_fields + system_fields)]
@@ -426,11 +404,11 @@ def _render_complete_application_details(candidate: Dict[str, Any]):
 
 
 # =============================================================================
-# FIXED Interview History Display
+# Interview History Display (Fixed)
 # =============================================================================
 
 def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
-    """Get interview history from available tables in the database."""
+    """Get interview history from available tables."""
     history = []
 
     try:
@@ -445,7 +423,7 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                         """)
             existing_tables = {row[0] for row in cur.fetchall()}
 
-            # Get from interviews table if it exists
+            # Get from interviews table
             if 'interviews' in existing_tables:
                 try:
                     cur.execute("""
@@ -462,7 +440,6 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                         if row[5]:  # notes
                             interview_details.append(f"Notes: {row[5]}")
 
-                        # Use scheduled_at if available, otherwise created_at
                         event_time = row[3] if row[3] else row[2]
 
                         history.append({
@@ -470,13 +447,12 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                             'actor': row[1] or 'Interviewer',
                             'created_at': event_time,
                             'details': '; '.join(interview_details) if interview_details else 'Interview scheduled',
-                            'actor_id': None,
                             'source': 'interview'
                         })
                 except Exception as e:
                     st.warning(f"Could not load interviews: {e}")
 
-            # Get from receptionist_assessments table if it exists
+            # Get from receptionist_assessments table
             if 'receptionist_assessments' in existing_tables:
                 try:
                     cur.execute("""
@@ -510,7 +486,6 @@ def _get_interview_history_fixed(candidate_id: str) -> List[Dict[str, Any]]:
                             'actor': 'Receptionist',
                             'created_at': row[1],
                             'details': '; '.join(assessment_details) if assessment_details else 'Assessment completed',
-                            'actor_id': None,
                             'source': 'assessment'
                         })
                 except Exception as e:
@@ -538,7 +513,6 @@ def _render_interview_history_fixed(history_records: List[Dict[str, Any]]):
 
     for record in history_records:
         source = record.get('source', '')
-
         if source == 'interview':
             interviews.append(record)
         elif source == 'assessment':
@@ -583,7 +557,6 @@ def _format_datetime(dt) -> str:
         return "—"
     if isinstance(dt, str):
         try:
-            # Handle ISO format strings
             if 'T' in dt:
                 dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
             else:
@@ -615,30 +588,27 @@ def _detect_mimetype(filename: str) -> str:
 
 
 # =============================================================================
-# FIXED CV Section with STRICT Access Control
+# CV Section with Access Control
 # =============================================================================
 
 def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool, has_resume_link: bool):
-    """Render CV section with STRICT access control - only with explicit permission."""
+    """Render CV section with proper access control."""
     st.markdown("### 📄 CV & Documents")
 
     if not (has_cv_file or has_resume_link):
         st.info("📂 No CV uploaded")
         return
 
-    # STRICT permission check
     perms = _check_user_permissions(user_id)
-    can_view = perms.get("can_view_cvs", False)  # Must be explicitly granted
+    can_view = perms.get("can_view_cvs", False)
 
     if not can_view:
         st.warning("🔒 Access Denied: You need 'View CVs' permission to access candidate documents")
         return
 
-    # Get CV data
     cv_bytes, cv_name, status = _get_cv_with_proper_access(candidate_id, user_id)
 
     if status == "ok" and cv_bytes:
-        # Create download button
         st.download_button(
             "📥 Download CV",
             data=cv_bytes,
@@ -647,7 +617,6 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
             key=f"cv_dl_{candidate_id}"
         )
 
-        # Show PDF preview if it's a PDF
         if cv_name and cv_name.lower().endswith('.pdf'):
             try:
                 b64 = base64.b64encode(cv_bytes).decode()
@@ -663,13 +632,10 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
                 st.info("📄 PDF preview not available, but file can be downloaded")
 
     elif status == "link_only" and cv_name:
-        # Handle resume link
         st.markdown(f"🔗 **Resume Link:** [Open CV]({cv_name})")
 
-        # Try to embed if it's a Google Drive link
         if "drive.google.com" in cv_name:
             try:
-                # Convert Google Drive links for embedding
                 if "file/d/" in cv_name:
                     file_id = cv_name.split("file/d/")[1].split("/")[0]
                     embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
@@ -699,11 +665,11 @@ def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool,
 
 
 # =============================================================================
-# FIXED User Management Functions - Removed Unnecessary Features
+# FIXED User Management - Removed Candidate Records Management
 # =============================================================================
 
 def show_user_management_panel():
-    """FIXED user management panel - clean interface without unnecessary features."""
+    """Clean user management panel - only user permissions, no candidate records."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -716,7 +682,6 @@ def show_user_management_panel():
     st.title("👥 User Management")
     st.caption("Manage system user permissions")
 
-    # Load users
     try:
         users = get_all_users_with_permissions()
     except Exception as e:
@@ -727,7 +692,6 @@ def show_user_management_panel():
         st.info("No system users found.")
         return
 
-    # Display current user count
     st.info(f"Found {len(users)} system users")
 
     for user_data in users:
@@ -788,14 +752,14 @@ def show_user_management_panel():
 # =============================================================================
 
 def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
-    """Delete candidate with proper error handling and user feedback."""
+    """Delete candidate with proper error handling."""
     try:
-        # Check permissions first
         perms = _check_user_permissions(user_id)
         if not perms.get("can_delete_records", False):
             st.error("🔒 Access Denied: You need 'Delete Records' permission")
             return False
 
+        # Call the delete function from db_postgres
         success, reason = delete_candidate(candidate_id, user_id)
 
         if success:
@@ -818,11 +782,11 @@ def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
 
 
 # =============================================================================
-# Main CEO Dashboard - FIXED Version with Strict Permissions
+# Main CEO Dashboard - FIXED Version
 # =============================================================================
 
 def show_ceo_panel():
-    """FIXED CEO dashboard with strict access controls and complete data display."""
+    """FIXED CEO dashboard with working delete and complete data display."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -934,11 +898,9 @@ def show_ceo_panel():
 
     # Update selection based on select_all checkbox
     if select_all:
-        # Add all current page candidates to selection
         for candidate in page_candidates:
             selected.add(candidate.get('candidate_id', ''))
     elif 'select_all' in st.session_state and not select_all:
-        # Clear selection if select_all was just unchecked
         selected.clear()
 
     # Batch actions - only show if user has delete permission
@@ -952,7 +914,7 @@ def show_ceo_panel():
                 for candidate_id in list(selected):
                     if _delete_candidate_with_feedback(candidate_id, user_id):
                         success_count += 1
-                        selected.discard(candidate_id)  # Remove from selection immediately
+                        selected.discard(candidate_id)
                     else:
                         failed_count += 1
 
@@ -961,7 +923,6 @@ def show_ceo_panel():
             if failed_count > 0:
                 st.error(f"❌ Failed to delete {failed_count} candidates")
 
-            # Clear cache and refresh
             _clear_candidate_cache()
             st.rerun()
     elif not perms.get("can_delete_records") and selected:
@@ -975,22 +936,19 @@ def show_ceo_panel():
     for candidate in page_candidates:
         candidate_id = candidate.get('candidate_id', '')
         candidate_name = candidate.get('name', 'Unnamed')
-
-        # Selection checkbox
         is_selected = candidate_id in selected
 
         with st.container():
             sel_col, content_col = st.columns([0.05, 0.95])
 
             with sel_col:
-                # Individual selection checkbox - only show if user can delete
                 if perms.get("can_delete_records"):
                     if st.checkbox("", value=is_selected, key=f"sel_{candidate_id}"):
                         selected.add(candidate_id)
                     else:
                         selected.discard(candidate_id)
                 else:
-                    st.write("")  # Empty space to maintain alignment
+                    st.write("")
 
             with content_col:
                 with st.expander(f"👤 {candidate_name} ({candidate_id})", expanded=False):
@@ -1000,7 +958,7 @@ def show_ceo_panel():
                         # Complete application details - FIXED to show ALL data
                         _render_complete_application_details(candidate)
 
-                        # CV Section - FIXED with strict access control
+                        # CV Section - FIXED with proper access control
                         _render_cv_section_fixed(
                             candidate_id,
                             user_id,
@@ -1017,7 +975,6 @@ def show_ceo_panel():
                         st.markdown("### ⚙️ Actions")
                         st.caption(f"ID: {candidate_id}")
 
-                        # Show selection status - only if user can delete
                         if perms.get("can_delete_records"):
                             if is_selected:
                                 st.success("✅ Selected for batch action")
@@ -1048,9 +1005,10 @@ def show_ceo_panel():
                         if perms.get("can_delete_records"):
                             st.markdown("---")
                             if st.button("🗑️ Delete This Candidate", key=f"del_{candidate_id}", type="primary"):
+                                # Double confirmation for safety
                                 if st.button("⚠️ Confirm Delete", key=f"confirm_del_{candidate_id}"):
                                     if _delete_candidate_with_feedback(candidate_id, user_id):
-                                        selected.discard(candidate_id)  # Remove from selection
+                                        selected.discard(candidate_id)
                                         _clear_candidate_cache()
                                         st.rerun()
 
@@ -1119,7 +1077,7 @@ def main():
     selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
 
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ Features: Strict Access Control, Complete Data Display, User Management, Batch Operations")
+    st.sidebar.caption("⚡ Features: Complete Data Display, Working Delete, User Management, Batch Operations")
 
     # Run selected page
     try:
