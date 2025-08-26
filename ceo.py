@@ -924,54 +924,6 @@ def _render_candidate_delete_section(candidate_id: str, user_id: int, perms: Dic
             st.rerun()
 
 
-def _render_bulk_delete_section(selected: set, user_id: int, perms: Dict[str, Any]):
-    """Render bulk delete section with proper state management."""
-
-    if not perms.get("can_delete_records") or not selected:
-        return
-
-    st.markdown("### 🗑️ Bulk Actions")
-
-    # Check bulk confirmation state
-    if st.session_state.get('bulk_delete_confirmed', False):
-        # Show final confirmation
-        st.error(f"⚠️ FINAL WARNING: Delete {len(selected)} candidates?")
-        st.write("This action cannot be undone!")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button(f"🗑️ DELETE {len(selected)} CANDIDATES", key="final_bulk_delete", type="primary"):
-                with st.spinner(f"Deleting {len(selected)} candidates..."):
-                    success_count, failed_count = _bulk_delete_candidates(list(selected), user_id)
-
-                if success_count > 0:
-                    st.success(f"✅ Deleted {success_count} candidates successfully")
-                    selected.clear()
-                    _clear_candidate_cache()
-                    st.session_state.bulk_delete_confirmed = False
-                    st.rerun()
-
-                if failed_count > 0:
-                    st.error(f"❌ Failed to delete {failed_count} candidates")
-
-        with col2:
-            if st.button("❌ Cancel Bulk Delete", key="cancel_bulk_delete"):
-                st.session_state.bulk_delete_confirmed = False
-                st.rerun()
-
-    else:
-        # Show initial bulk delete UI
-        bulk_col1, bulk_col2 = st.columns([2, 1])
-
-        with bulk_col1:
-            st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
-
-        with bulk_col2:
-            if st.button(f"🗑️ Delete Selected ({len(selected)})", key="bulk_delete_init", type="primary"):
-                st.session_state.bulk_delete_confirmed = True
-                st.rerun()
-
 def _bulk_delete_candidates(candidate_ids: List[str], user_id: int) -> Tuple[int, int]:
     """Bulk delete candidates with proper error handling."""
     try:
@@ -994,12 +946,182 @@ def _bulk_delete_candidates(candidate_ids: List[str], user_id: int) -> Tuple[int
         return 0, len(candidate_ids)
 
 
+def _render_prominent_bulk_delete_button(selected: set, user_id: int, perms: Dict[str, Any]):
+    """Render a prominent bulk delete button at the top of the interface."""
+    if not perms.get("can_delete_records") or not selected:
+        return
+
+    # Create a prominent container for bulk actions
+    with st.container():
+        st.markdown("""
+        <div style="
+            background-color: #ffe6e6; 
+            padding: 1rem; 
+            border-radius: 0.5rem; 
+            border-left: 4px solid #ff4444;
+            margin: 1rem 0;
+        ">
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Main bulk action header
+        bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([3, 2, 2, 1])
+
+        with bulk_col1:
+            st.markdown(f"### 🗑️ **{len(selected)} Candidates Selected**")
+            st.caption("Ready for bulk operations")
+
+        with bulk_col2:
+            # Primary bulk delete button - large and prominent
+            if st.button(
+                    f"🗑️ DELETE ALL {len(selected)}",
+                    key="main_bulk_delete",
+                    type="primary",
+                    help=f"Delete all {len(selected)} selected candidates permanently"
+            ):
+                st.session_state.bulk_delete_confirmed = True
+                st.rerun()
+
+        with bulk_col3:
+            # Clear selection button
+            if st.button(
+                    "❌ Clear Selection",
+                    key="clear_bulk_selection",
+                    help="Unselect all candidates"
+            ):
+                selected.clear()
+                st.rerun()
+
+        with bulk_col4:
+            # Selection count badge
+            st.markdown(f"""
+            <div style="
+                background-color: #ff4444; 
+                color: white; 
+                padding: 0.5rem 1rem; 
+                border-radius: 50px; 
+                text-align: center;
+                font-weight: bold;
+                margin-top: 0.5rem;
+            ">
+                {len(selected)}
+            </div>
+            """, unsafe_allow_html=True)
+
+
+def _render_bulk_delete_confirmation(selected: set, user_id: int, perms: Dict[str, Any]):
+    """Render bulk delete confirmation dialog."""
+    if not st.session_state.get('bulk_delete_confirmed', False):
+        return
+
+    # Show prominent confirmation dialog
+    st.markdown("""
+    <div style="
+        background-color: #ffcccc; 
+        padding: 2rem; 
+        border-radius: 0.5rem; 
+        border: 2px solid #ff0000;
+        margin: 2rem 0;
+        text-align: center;
+    ">
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.error(f"⚠️ **FINAL WARNING: Permanently Delete {len(selected)} Candidates?**")
+    st.markdown("---")
+    st.markdown("### 🚨 This action CANNOT be undone!")
+    st.markdown("**The following candidates will be permanently removed:**")
+
+    # Show list of candidates to be deleted
+    candidates = _get_candidates_fast()
+    candidates_to_delete = [c for c in candidates if c.get('candidate_id') in selected]
+
+    if candidates_to_delete:
+        delete_col1, delete_col2 = st.columns(2)
+        for i, candidate in enumerate(candidates_to_delete[:10]):  # Show first 10
+            candidate_id = candidate.get('candidate_id', 'Unknown ID')
+            candidate_name = candidate.get('name', 'Unknown Name')
+
+            if i % 2 == 0:
+                with delete_col1:
+                    st.write(f"• **{candidate_name}** ({candidate_id})")
+            else:
+                with delete_col2:
+                    st.write(f"• **{candidate_name}** ({candidate_id})")
+
+        if len(candidates_to_delete) > 10:
+            st.write(f"... and {len(candidates_to_delete) - 10} more candidates")
+
+    st.markdown("---")
+
+    # Confirmation buttons
+    confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 2, 1])
+
+    with confirm_col1:
+        if st.button("❌ **CANCEL**", key="cancel_final_bulk_delete", type="secondary"):
+            st.session_state.bulk_delete_confirmed = False
+            st.rerun()
+
+    with confirm_col2:
+        # Require typing confirmation
+        confirmation_text = st.text_input(
+            f"Type 'DELETE {len(selected)} CANDIDATES' to confirm:",
+            key="bulk_delete_confirmation_text"
+        )
+
+        expected_text = f"DELETE {len(selected)} CANDIDATES"
+        confirmation_matches = confirmation_text.strip() == expected_text
+
+    with confirm_col3:
+        if confirmation_matches:
+            if st.button(
+                    f"🗑️ **DELETE {len(selected)}**",
+                    key="execute_bulk_delete",
+                    type="primary"
+            ):
+                with st.spinner(f"Deleting {len(selected)} candidates..."):
+                    success_count, failed_count = _bulk_delete_candidates(list(selected), user_id)
+
+                if success_count > 0:
+                    st.success(f"✅ Successfully deleted {success_count} candidates!")
+                    selected.clear()
+                    _clear_candidate_cache()
+                    st.session_state.bulk_delete_confirmed = False
+                    st.rerun()
+
+                if failed_count > 0:
+                    st.error(f"❌ Failed to delete {failed_count} candidates")
+        else:
+            st.button(
+                f"Type confirmation text",
+                key="disabled_bulk_delete",
+                disabled=True
+            )
+
+    if not confirmation_matches and confirmation_text:
+        st.error(f"Please type exactly: '{expected_text}'")
+
+
+def _render_bulk_delete_section(selected: set, user_id: int, perms: Dict[str, Any]):
+    """Render bulk delete section with proper state management."""
+
+    if not perms.get("can_delete_records") or not selected:
+        return
+
+    # Show confirmation dialog if in confirmation state
+    if st.session_state.get('bulk_delete_confirmed', False):
+        _render_bulk_delete_confirmation(selected, user_id, perms)
+    else:
+        # Show prominent bulk delete button
+        _render_prominent_bulk_delete_button(selected, user_id, perms)
+
+
 # =============================================================================
-# Main CEO Dashboard - FIXED Version with Bulk Delete and Fast Refresh
+# Main CEO Dashboard - ENHANCED Version with Prominent Bulk Delete
 # =============================================================================
 
 def show_ceo_panel():
-    """FIXED CEO dashboard with working bulk delete, comprehensive data display, and fast refresh."""
+    """ENHANCED CEO dashboard with prominent bulk delete functionality."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -1059,6 +1181,7 @@ def show_ceo_panel():
         if st.button("🔄 Refresh"):
             _clear_candidate_cache()
             st.rerun()
+
     # Load candidates
     candidates = _get_candidates_fast()
 
@@ -1101,29 +1224,13 @@ def show_ceo_panel():
             selected.add(candidate.get('candidate_id', ''))
     elif 'select_all' in st.session_state and not select_all:
         selected.clear()
-        # Header delete button - show when candidates are selected
-        if perms.get("can_delete_records") and selected:
-            st.markdown("---")
-            header_col1, header_col2, header_col3 = st.columns([2, 1, 1])
 
-            with header_col1:
-                st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
+    # ENHANCED: Show prominent bulk delete section at top
+    _render_bulk_delete_section(selected, user_id, perms)
 
-            with header_col2:
-                if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary", key="header_bulk_delete"):
-                    st.session_state.bulk_delete_confirmed = True
-                    st.rerun()
-
-            with header_col3:
-                if st.button("❌ Clear Selection", key="clear_selection"):
-                    selected.clear()
-                    st.rerun()
-
-        # FIXED: Bulk actions with proper state management
-        _render_bulk_delete_section(selected, user_id, perms)
-
-        if not perms.get("can_delete_records") and selected:
-            st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
+    # Show selection info if no delete permissions but candidates are selected
+    if not perms.get("can_delete_records") and selected:
+        st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
 
     # Pagination
     items_per_page = 10
@@ -1210,8 +1317,8 @@ def show_ceo_panel():
                         else:
                             st.info("🔒 Cannot edit application")
 
-                            # FIXED: Single candidate delete with proper state management
-                            _render_candidate_delete_section(candidate_id, user_id, perms)
+                        # FIXED: Single candidate delete with proper state management
+                        _render_candidate_delete_section(candidate_id, user_id, perms)
 
                         # Additional metadata
                         st.markdown("---")
@@ -1267,8 +1374,8 @@ def main():
     # Initialize session state
     if 'selected_candidates' not in st.session_state:
         st.session_state.selected_candidates = set()
-    if 'confirm_bulk_delete' not in st.session_state:
-        st.session_state.confirm_bulk_delete = False
+    if 'bulk_delete_confirmed' not in st.session_state:
+        st.session_state.bulk_delete_confirmed = False
 
     # Sidebar navigation
     st.sidebar.title("🎯 CEO Control Panel")
@@ -1287,9 +1394,10 @@ def main():
     st.sidebar.caption("⚡ Features:")
     st.sidebar.caption("- Complete Personal Details")
     st.sidebar.caption("- Comprehensive Interview History")
-    st.sidebar.caption("- Working Bulk Delete")
+    st.sidebar.caption("- **PROMINENT Bulk Delete**")
     st.sidebar.caption("- Fast Refresh (10s cache)")
     st.sidebar.caption("- User Management")
+    st.sidebar.caption("- Enhanced UI/UX")
 
     # Run selected page
     try:
