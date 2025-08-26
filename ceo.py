@@ -1043,22 +1043,24 @@ def show_ceo_panel():
     # Candidate management section
     st.header("👥 Candidate Management")
 
-    # Controls
-    ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([3, 1, 1, 1])
+    # Delete controls row - show only when candidates are selected
+    if perms.get("can_delete_records") and selected:
+        st.markdown("---")
+        delete_col1, delete_col2, delete_col3 = st.columns([2, 1, 1])
 
-    with ctrl_col1:
-        search_term = st.text_input("🔍 Search candidates", key="search")
+        with delete_col1:
+            st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
 
-    with ctrl_col2:
-        show_no_cv = st.checkbox("📂 No CV only", key="filter_no_cv")
+        with delete_col2:
+            if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary", key="header_bulk_delete"):
+                st.session_state.bulk_delete_confirmed = True
+                st.rerun()
 
-    with ctrl_col3:
-        select_all = st.checkbox("☑️ Select all", key="select_all")
+        with delete_col3:
+            if st.button("❌ Clear Selection", key="clear_selection"):
+                selected.clear()
+                st.rerun()
 
-    with ctrl_col4:
-        if st.button("🔄 Refresh"):
-            _clear_candidate_cache()
-            st.rerun()
     # Load candidates
     candidates = _get_candidates_fast()
 
