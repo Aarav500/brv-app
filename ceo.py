@@ -1059,7 +1059,6 @@ def show_ceo_panel():
         if st.button("🔄 Refresh"):
             _clear_candidate_cache()
             st.rerun()
-
     # Load candidates
     candidates = _get_candidates_fast()
 
