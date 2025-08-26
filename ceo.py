@@ -42,7 +42,7 @@ from auth import require_login, get_current_user
 # Performance Optimizations with Better Caching
 # =============================================================================
 
-@st.cache_data(ttl=10, show_spinner=False)  # Much shorter TTL for faster updates
+@st.cache_data(ttl=300, show_spinner=False)  # 5 minute cache for better performance
 def _get_candidates_fast():
     """Fast candidate loading with ALL available data from both columns and form_data."""
     try:
@@ -946,65 +946,77 @@ def _bulk_delete_candidates(candidate_ids: List[str], user_id: int) -> Tuple[int
         return 0, len(candidate_ids)
 
 
-def _render_prominent_bulk_delete_button(selected: set, user_id: int, perms: Dict[str, Any]):
-    """Render a prominent bulk delete button at the top of the interface."""
-    if not perms.get("can_delete_records") or not selected:
+def _render_always_visible_bulk_delete_bar(selected: set, user_id: int, perms: Dict[str, Any]):
+    """Always show a bulk action bar, even when no candidates are selected."""
+    if not perms.get("can_delete_records"):
         return
 
-    # Create a prominent container for bulk actions
+    # Always visible bulk action bar
     with st.container():
-        st.markdown("""
-        <div style="
-            background-color: #ffe6e6; 
-            padding: 1rem; 
-            border-radius: 0.5rem; 
-            border-left: 4px solid #ff4444;
-            margin: 1rem 0;
-        ">
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Main bulk action header
-        bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([3, 2, 2, 1])
-
-        with bulk_col1:
-            st.markdown(f"### 🗑️ **{len(selected)} Candidates Selected**")
-            st.caption("Ready for bulk operations")
-
-        with bulk_col2:
-            # Primary bulk delete button - large and prominent
-            if st.button(
-                    f"🗑️ DELETE ALL {len(selected)}",
-                    key="main_bulk_delete",
-                    type="primary",
-                    help=f"Delete all {len(selected)} selected candidates permanently"
-            ):
-                st.session_state.bulk_delete_confirmed = True
-                st.rerun()
-
-        with bulk_col3:
-            # Clear selection button
-            if st.button(
-                    "❌ Clear Selection",
-                    key="clear_bulk_selection",
-                    help="Unselect all candidates"
-            ):
-                selected.clear()
-                st.rerun()
-
-        with bulk_col4:
-            # Selection count badge
-            st.markdown(f"""
+        if selected:
+            # Show prominent delete options when candidates are selected
+            st.markdown("""
             <div style="
-                background-color: #ff4444; 
-                color: white; 
-                padding: 0.5rem 1rem; 
-                border-radius: 50px; 
-                text-align: center;
-                font-weight: bold;
-                margin-top: 0.5rem;
+                background: linear-gradient(90deg, #ff4444, #ff6666);
+                color: white;
+                padding: 1rem;
+                border-radius: 10px;
+                margin: 1rem 0;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             ">
-                {len(selected)}
+            </div>
+            """, unsafe_allow_html=True)
+
+            bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([4, 2, 2, 2])
+
+            with bulk_col1:
+                st.markdown(f"### 🗑️ **{len(selected)} Candidates Selected for Deletion**")
+
+            with bulk_col2:
+                if st.button(
+                        f"🗑️ DELETE {len(selected)} NOW",
+                        key="instant_bulk_delete",
+                        type="primary",
+                        help=f"Delete {len(selected)} selected candidates"
+                ):
+                    st.session_state.bulk_delete_confirmed = True
+                    st.rerun()
+
+            with bulk_col3:
+                if st.button("❌ Clear Selection", key="clear_selection_main"):
+                    selected.clear()
+                    if 'select_all' in st.session_state:
+                        st.session_state.select_all = False
+                    st.rerun()
+
+            with bulk_col4:
+                # Show selection count
+                st.markdown(f"""
+                <div style="
+                    background-color: white;
+                    color: #ff4444;
+                    padding: 0.75rem;
+                    border-radius: 50px;
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 1.2rem;
+                    margin-top: 0.25rem;
+                ">
+                    {len(selected)}
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            # Show placeholder when no candidates selected
+            st.markdown("""
+            <div style="
+                background-color: #f0f0f0;
+                padding: 0.75rem;
+                border-radius: 8px;
+                margin: 1rem 0;
+                text-align: center;
+                color: #666;
+            ">
+                <strong>💡 Select candidates using checkboxes to enable bulk delete</strong>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1103,17 +1115,14 @@ def _render_bulk_delete_confirmation(selected: set, user_id: int, perms: Dict[st
 
 
 def _render_bulk_delete_section(selected: set, user_id: int, perms: Dict[str, Any]):
-    """Render bulk delete section with proper state management."""
+    """Render bulk delete section - always show the bar, handle confirmation separately."""
 
-    if not perms.get("can_delete_records") or not selected:
-        return
+    # Always show the bulk action bar
+    _render_always_visible_bulk_delete_bar(selected, user_id, perms)
 
     # Show confirmation dialog if in confirmation state
-    if st.session_state.get('bulk_delete_confirmed', False):
+    if st.session_state.get('bulk_delete_confirmed', False) and selected:
         _render_bulk_delete_confirmation(selected, user_id, perms)
-    else:
-        # Show prominent bulk delete button
-        _render_prominent_bulk_delete_button(selected, user_id, perms)
 
 
 # =============================================================================
@@ -1218,14 +1227,20 @@ def show_ceo_panel():
 
     selected = st.session_state.selected_candidates
 
-    # Update selection based on select_all checkbox
+    # Update selection based on select_all checkbox with instant feedback
     if select_all:
-        for candidate in filtered_candidates:  # Select all filtered candidates
+        # Select all filtered candidates immediately
+        for candidate in filtered_candidates:
             selected.add(candidate.get('candidate_id', ''))
-    elif 'select_all' in st.session_state and not select_all:
-        selected.clear()
+    else:
+        # If select_all was unchecked, clear selection
+        if 'previous_select_all' in st.session_state and st.session_state.previous_select_all:
+            selected.clear()
 
-    # ENHANCED: Show prominent bulk delete section at top
+    # Track previous select_all state
+    st.session_state.previous_select_all = select_all
+
+    # ALWAYS show bulk delete section (it handles empty selection internally)
     _render_bulk_delete_section(selected, user_id, perms)
 
     # Show selection info if no delete permissions but candidates are selected
