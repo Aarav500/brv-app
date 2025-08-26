@@ -29,9 +29,27 @@ def _get_candidates_cached(search_query=""):
     """Cached candidate loading to avoid database reload after each action."""
     try:
         if search_query and search_query.strip():
-            return _search_candidates_all_fields(search_query.strip())
+            candidates = _search_candidates_all_fields(search_query.strip())
         else:
-            return get_all_candidates()
+            candidates = get_all_candidates()
+
+        # Convert to serializable format
+        serializable_candidates = []
+        for candidate in candidates:
+            serializable_candidate = {}
+            for key, value in candidate.items():
+                # Handle datetime objects
+                if hasattr(value, 'isoformat'):
+                    serializable_candidate[key] = value.isoformat()
+                # Handle other non-serializable objects
+                elif value is None:
+                    serializable_candidate[key] = None
+                else:
+                    serializable_candidate[key] = str(value) if not isinstance(value, (str, int, float, bool, list,
+                                                                                       dict)) else value
+            serializable_candidates.append(serializable_candidate)
+
+        return serializable_candidates
     except Exception as e:
         st.error(f"Error loading candidates: {e}")
         return []

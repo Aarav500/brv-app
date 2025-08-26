@@ -28,9 +28,27 @@ def _get_candidates_cached(search_query=""):
     """Cached candidate loading to avoid database reload after each action."""
     try:
         if search_query and search_query.strip():
-            return search_candidates_by_name_or_email(search_query.strip())
+            candidates = search_candidates_by_name_or_email(search_query.strip())
         else:
-            return search_candidates_by_name_or_email("")
+            candidates = search_candidates_by_name_or_email("")
+
+        # Convert to serializable format
+        serializable_candidates = []
+        for candidate in candidates:
+            serializable_candidate = {}
+            for key, value in candidate.items():
+                # Handle datetime objects
+                if hasattr(value, 'isoformat'):
+                    serializable_candidate[key] = value.isoformat()
+                # Handle other non-serializable objects
+                elif value is None:
+                    serializable_candidate[key] = None
+                else:
+                    serializable_candidate[key] = str(value) if not isinstance(value, (str, int, float, bool, list,
+                                                                                       dict)) else value
+            serializable_candidates.append(serializable_candidate)
+
+        return serializable_candidates
     except Exception as e:
         st.error(f"Error loading candidates: {e}")
         return []
@@ -40,7 +58,24 @@ def _get_candidates_cached(search_query=""):
 def _get_users_cached():
     """Cached users loading for permission management."""
     try:
-        return get_all_users_with_permissions()
+        users = get_all_users_with_permissions()
+        # Convert to serializable format
+        serializable_users = []
+        for user in users:
+            serializable_user = {}
+            for key, value in user.items():
+                # Handle datetime objects
+                if hasattr(value, 'isoformat'):
+                    serializable_user[key] = value.isoformat()
+                # Handle other non-serializable objects
+                elif value is None:
+                    serializable_user[key] = None
+                else:
+                    serializable_user[key] = str(value) if not isinstance(value, (str, int, float, bool, list,
+                                                                                  dict)) else value
+            serializable_users.append(serializable_user)
+
+        return serializable_users
     except Exception as e:
         st.error(f"Failed to load users: {e}")
         return []

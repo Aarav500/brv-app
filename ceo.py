@@ -1,5 +1,5 @@
 # =============================================================================
-# FIXED CEO Control Panel - Proper Interview History, Bulk Delete, Fast Refresh
+# FIXED CEO Control Panel - Complete Version with All Functionality
 # =============================================================================
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from auth import require_login, get_current_user
 # Performance Optimizations with Better Caching
 # =============================================================================
 
-@st.cache_data(ttl=30, show_spinner=False)  # Reduced TTL for faster updates
+@st.cache_data(ttl=10, show_spinner=False)  # Much shorter TTL for faster updates
 def _get_candidates_fast():
     """Fast candidate loading with ALL available data from both columns and form_data."""
     try:
@@ -127,7 +127,7 @@ def _get_candidates_fast():
         return []
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def _get_stats_fast():
     """Fast statistics loading."""
     try:
@@ -851,7 +851,7 @@ def show_user_management_panel():
 
 
 # =============================================================================
-# FIXED Delete Function with Proper Error Handling and Fast Refresh
+# FIXED Delete Functions with Proper Error Handling and Fast Refresh
 # =============================================================================
 
 def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
@@ -1219,7 +1219,7 @@ def main():
     st.sidebar.caption("- Complete Personal Details")
     st.sidebar.caption("- Comprehensive Interview History")
     st.sidebar.caption("- Working Bulk Delete")
-    st.sidebar.caption("- Fast Refresh (30s cache)")
+    st.sidebar.caption("- Fast Refresh (10s cache)")
     st.sidebar.caption("- User Management")
 
     # Run selected page
