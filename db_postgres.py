@@ -634,7 +634,7 @@ def clear_candidate_cv(candidate_id: str) -> bool:
 
 def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Optional[bytes], Optional[str], Optional[str], str]:
     """
-    Securely fetch a candidate's CV.
+    Securely fetch a candidate's CV - FIXED VERSION
     Returns: (file_bytes, filename, mime_type, reason)
     reason ∈ {"ok", "no_permission", "not_found", "error"}
     """
@@ -645,43 +645,64 @@ def get_candidate_cv_secure(candidate_id: str, actor_user_id: int) -> Tuple[Opti
         if not (role in ("ceo", "admin") or perms.get("can_view_cvs")):
             return None, None, None, "no_permission"
 
-        # Fetch CV link from DB
-        cursor = conn.cursor()
-        cursor.execute("SELECT cv_link FROM candidates WHERE candidate_id = %s", (candidate_id,))
-        result = cursor.fetchone()
-        cursor.close()
+        # FIXED: Establish database connection
+        conn = get_conn()
+        try:
+            with conn.cursor() as cursor:
+                # Check what CV columns exist
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'candidates'
+                      AND column_name IN ('cv_file', 'cv_filename', 'resume_link')
+                """)
+                existing_cols = {row[0] for row in cursor.fetchall()}
 
-        if not result or not result[0]:
-            return None, None, None, "not_found"
+                # Build query based on available columns
+                select_parts = []
+                if 'cv_file' in existing_cols:
+                    select_parts.append('cv_file')
+                if 'cv_filename' in existing_cols:
+                    select_parts.append('cv_filename')
+                if 'resume_link' in existing_cols:
+                    select_parts.append('resume_link')
 
-        link = result[0]
+                if not select_parts:
+                    return None, None, None, "not_found"
 
-        # Handle Google Drive URLs for embedding
-        if "drive.google.com" in link:
-            if "file/d/" in link:
-                file_id = link.split("file/d/")[1].split("/")[0]
-                link = f"https://drive.google.com/file/d/{file_id}/preview"
-            elif "id=" in link:
-                file_id = link.split("id=")[1]
-                link = f"https://drive.google.com/file/d/{file_id}/preview"
-            # If it already has "view" in URL, we keep it as-is.
+                query = f"SELECT {', '.join(select_parts)} FROM candidates WHERE candidate_id = %s"
+                cursor.execute(query, (candidate_id,))
+                result = cursor.fetchone()
 
-        # We are returning just the link, so file_bytes, filename, mime_type = None
-        return None, link, "url", "ok"
+                if not result:
+                    return None, None, None, "not_found"
+
+                cv_file = result[0] if len(result) > 0 and 'cv_file' in select_parts else None
+                cv_filename = result[1] if len(result) > 1 and 'cv_filename' in select_parts else None
+                resume_link = result[2] if len(result) > 2 and 'resume_link' in select_parts else None
+
+                if cv_file:
+                    return bytes(cv_file), cv_filename or f"{candidate_id}.pdf", "application/pdf", "ok"
+                elif resume_link and resume_link.strip():
+                    # Handle Google Drive URLs for embedding
+                    link = resume_link.strip()
+                    if "drive.google.com" in link:
+                        if "file/d/" in link:
+                            file_id = link.split("file/d/")[1].split("/")[0]
+                            link = f"https://drive.google.com/file/d/{file_id}/preview"
+                        elif "id=" in link:
+                            file_id = link.split("id=")[1]
+                            link = f"https://drive.google.com/file/d/{file_id}/preview"
+                    return None, link, "url", "ok"
+                else:
+                    return None, None, None, "not_found"
+
+        finally:
+            conn.close()
 
     except Exception as e:
-        print(f"[ERROR] Failed to fetch CV for {candidate_id}: {e}")
+        logger.error(f"Failed to fetch CV for {candidate_id}: {e}")
         return None, None, None, "error"
-
-def get_total_cv_storage_usage() -> int:
-    conn = get_conn()
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(SUM(OCTET_LENGTH(cv_file)),0) FROM candidates")
-            return cur.fetchone()[0] or 0
-    finally:
-        conn.close()
-
 
 # -----------------------------
 # Receptionist assessments

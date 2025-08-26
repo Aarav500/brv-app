@@ -884,6 +884,94 @@ def _delete_candidate_with_feedback(candidate_id: str, user_id: int) -> bool:
         return False
 
 
+def _render_candidate_delete_section(candidate_id: str, user_id: int, perms: Dict[str, Any]):
+    """Render delete section with proper confirmation flow."""
+
+    if not perms.get("can_delete_records"):
+        return
+
+    st.markdown("---")
+    st.markdown("### 🗑️ Danger Zone")
+
+    # Check if this candidate is in confirmation state
+    confirm_key = f"confirm_delete_{candidate_id}"
+
+    if st.session_state.get(confirm_key, False):
+        # Show confirmation UI
+        st.warning(f"⚠️ Are you sure you want to delete candidate {candidate_id}?")
+        st.write("This action cannot be undone.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("✅ Yes, Delete", key=f"confirm_yes_{candidate_id}", type="primary"):
+                with st.spinner("Deleting candidate..."):
+                    if _delete_candidate_with_feedback(candidate_id, user_id):
+                        # Clear confirmation state and refresh
+                        st.session_state[confirm_key] = False
+                        _clear_candidate_cache()
+                        st.rerun()
+
+        with col2:
+            if st.button("❌ Cancel", key=f"confirm_no_{candidate_id}"):
+                st.session_state[confirm_key] = False
+                st.rerun()
+
+    else:
+        # Show initial delete button
+        if st.button(f"🗑️ Delete Candidate", key=f"delete_init_{candidate_id}", type="secondary"):
+            st.session_state[confirm_key] = True
+            st.rerun()
+
+
+def _render_bulk_delete_section(selected: set, user_id: int, perms: Dict[str, Any]):
+    """Render bulk delete section with proper state management."""
+
+    if not perms.get("can_delete_records") or not selected:
+        return
+
+    st.markdown("### 🗑️ Bulk Actions")
+
+    # Check bulk confirmation state
+    if st.session_state.get('bulk_delete_confirmed', False):
+        # Show final confirmation
+        st.error(f"⚠️ FINAL WARNING: Delete {len(selected)} candidates?")
+        st.write("This action cannot be undone!")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button(f"🗑️ DELETE {len(selected)} CANDIDATES", key="final_bulk_delete", type="primary"):
+                with st.spinner(f"Deleting {len(selected)} candidates..."):
+                    success_count, failed_count = _bulk_delete_candidates(list(selected), user_id)
+
+                if success_count > 0:
+                    st.success(f"✅ Deleted {success_count} candidates successfully")
+                    selected.clear()
+                    _clear_candidate_cache()
+                    st.session_state.bulk_delete_confirmed = False
+                    st.rerun()
+
+                if failed_count > 0:
+                    st.error(f"❌ Failed to delete {failed_count} candidates")
+
+        with col2:
+            if st.button("❌ Cancel Bulk Delete", key="cancel_bulk_delete"):
+                st.session_state.bulk_delete_confirmed = False
+                st.rerun()
+
+    else:
+        # Show initial bulk delete UI
+        bulk_col1, bulk_col2 = st.columns([2, 1])
+
+        with bulk_col1:
+            st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
+
+        with bulk_col2:
+            if st.button(f"🗑️ Delete Selected ({len(selected)})", key="bulk_delete_init", type="primary"):
+                st.session_state.bulk_delete_confirmed = True
+                st.rerun()
+
 def _bulk_delete_candidates(candidate_ids: List[str], user_id: int) -> Tuple[int, int]:
     """Bulk delete candidates with proper error handling."""
     try:
@@ -1015,38 +1103,11 @@ def show_ceo_panel():
     elif 'select_all' in st.session_state and not select_all:
         selected.clear()
 
-    # Bulk actions - FIXED with proper delete functionality
-    if perms.get("can_delete_records") and selected:
-        st.markdown("### 🗑️ Bulk Actions")
+        # FIXED: Bulk actions with proper state management
+        _render_bulk_delete_section(selected, user_id, perms)
 
-        bulk_col1, bulk_col2, bulk_col3 = st.columns([2, 1, 1])
-
-        with bulk_col1:
-            st.warning(f"⚠️ {len(selected)} candidates selected for deletion")
-
-        with bulk_col2:
-            if st.button(f"🗑️ Delete Selected ({len(selected)})", type="primary", key="bulk_delete"):
-                # Confirmation step
-                st.session_state.confirm_bulk_delete = True
-
-        with bulk_col3:
-            if st.session_state.get('confirm_bulk_delete', False):
-                if st.button("⚠️ CONFIRM DELETE", type="secondary", key="confirm_bulk"):
-                    with st.spinner(f"Deleting {len(selected)} candidates..."):
-                        success_count, failed_count = _bulk_delete_candidates(list(selected), user_id)
-
-                    if success_count > 0:
-                        st.success(f"✅ Deleted {success_count} candidates successfully")
-                        selected.clear()
-                        _clear_candidate_cache()
-                        st.session_state.confirm_bulk_delete = False
-                        st.rerun()
-
-                    if failed_count > 0:
-                        st.error(f"❌ Failed to delete {failed_count} candidates")
-
-    elif not perms.get("can_delete_records") and selected:
-        st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
+        if not perms.get("can_delete_records") and selected:
+            st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
 
     # Pagination
     items_per_page = 10
@@ -1133,16 +1194,8 @@ def show_ceo_panel():
                         else:
                             st.info("🔒 Cannot edit application")
 
-                        # Delete single candidate - only show if user has permission
-                        if perms.get("can_delete_records"):
-                            st.markdown("---")
-                            if st.button("🗑️ Delete This Candidate", key=f"del_{candidate_id}", type="primary"):
-                                # Confirmation for single delete
-                                if st.button("⚠️ Confirm Delete", key=f"confirm_del_{candidate_id}"):
-                                    if _delete_candidate_with_feedback(candidate_id, user_id):
-                                        selected.discard(candidate_id)
-                                        _clear_candidate_cache()
-                                        st.rerun()
+                            # FIXED: Single candidate delete with proper state management
+                            _render_candidate_delete_section(candidate_id, user_id, perms)
 
                         # Additional metadata
                         st.markdown("---")
