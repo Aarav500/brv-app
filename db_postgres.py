@@ -1060,6 +1060,15 @@ def get_candidate_statistics() -> Dict[str, Any]:
     finally:
         conn.close()
 
+def get_total_cv_storage_usage() -> int:
+    """Get total storage usage of all CV files in bytes."""
+    conn = get_conn()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(SUM(OCTET_LENGTH(cv_file)),0) FROM candidates")
+            return cur.fetchone()[0] or 0
+    finally:
+        conn.close()
 
 # -----------------------------
 # Seeding (optional)
