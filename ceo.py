@@ -1,4 +1,296 @@
-# =============================================================================
+def show_ceo_panel():
+    """OPTIMIZED CEO dashboard with instant selection and async operations."""
+    require_login()
+
+    user = get_current_user(refresh=True)
+    if not user:
+        st.error("Please log in again.")
+        st.stop()
+
+    user_id = user.get("id")
+    perms = _check_user_permissions(user_id)
+
+    # Allow access for CEO and admin roles
+    if perms.get("role") not in ("ceo", "admin"):
+        st.error("Access denied. CEO/Admin role required.")
+        st.stop()
+
+    st.title("🎯 CEO Dashboard")
+    st.caption(f"Welcome {user.get('email', 'User')} | Role: {perms.get('role', 'Unknown').title()}")
+
+    # Initialize selection state
+    _initialize_selection_state()
+
+    # Quick stats
+    with st.spinner("Loading dashboard..."):
+        stats = _get_stats_fast()
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📊 Total Candidates", stats.get("total_candidates", 0))
+    with col2:
+        st.metric("📅 Today", stats.get("candidates_today", 0))
+    with col3:
+        st.metric("🎤 Interviews", stats.get("total_interviews", 0))
+    with col4:
+        st.metric("📋 Assessments", stats.get("total_assessments", 0))
+
+    st.markdown("---")
+
+    # Show user permissions clearly
+    st.sidebar.markdown("### 🔑 Your Permissions")
+    st.sidebar.markdown(f"- **View CVs:** {'✅ Enabled' if perms.get('can_view_cvs') else '❌ Disabled'}")
+    st.sidebar.markdown(f"- **Delete Records:** {'✅ Enabled' if perms.get('can_delete_records') else '❌ Disabled'}")
+    st.sidebar.markdown(f"- **Manage Users:** {'✅ Enabled' if perms.get('can_manage_users') else '❌ Disabled'}")
+
+    # Candidate management section
+    st.header("👥 Candidate Management")
+
+    # Controls
+    ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([3, 1, 1, 1])
+
+    with ctrl_col1:
+        search_term = st.text_input("🔍 Search candidates", key="search")
+
+    with ctrl_col2:
+        show_no_cv = st.checkbox("📂 No CV only", key="filter_no_cv")
+
+    with ctrl_col3:
+        # Smart Select All with proper state management
+        current_select_all = st.checkbox("☑️ Select all", key="select_all")
+
+    with ctrl_col4:
+        if st.button("🔄 Refresh"):
+            _clear_candidate_cache()
+            # Clear localStorage selections
+            components.html("""
+            <script>
+            localStorage.removeItem('candidate_selections');
+            </script>
+            """, height=1)
+            st.session_state.selected_candidates.clear()
+            st.rerun()
+
+    # Load candidates (fast)
+    candidates = _get_candidates_fast()
+
+    if not candidates:
+        st.warning("No candidates found.")
+        return
+
+    # Filter candidates
+    filtered_candidates = []
+    search_lower = search_term.lower().strip() if search_term else ""
+
+    for candidate in candidates:
+        # Search filter
+        if search_lower:
+            searchable_text = f"{candidate.get('name', '')} {candidate.get('email', '')} {candidate.get('candidate_id', '')}".lower()
+            if search_lower not in searchable_text:
+                continue
+
+        # CV filter
+        if show_no_cv and (candidate.get('has_cv_file') or candidate.get('has_resume_link')):
+            continue
+
+        filtered_candidates.append(candidate)
+
+    total_candidates = len(filtered_candidates)
+
+    if total_candidates == 0:
+        st.info("No candidates match your filters.")
+        return
+
+    # Get selection state
+    selected = st.session_state.selected_candidates
+
+    # Handle Select All logic with proper state sync
+    filtered_ids = {c.get('candidate_id', '') for c in filtered_candidates}
+
+    if current_select_all:
+        # Select all filtered candidates
+        selected.update(filtered_ids)
+        # Update localStorage
+        components.html(f"""
+        <script>
+        const selections = {json.dumps({cid: True for cid in filtered_ids})};
+        localStorage.setItem('candidate_selections', JSON.stringify(selections));
+        document.querySelectorAll('input[type="checkbox"]').forEach(cb => {{
+            if (Object.keys(selections).includes(cb.id.replace('cb_', ''))) {{
+                cb.checked = true;
+            }}
+        }});
+        </script>
+        """, height=1)
+    else:
+        # If unchecking select all, clear only the filtered candidates
+        if st.session_state.get('previous_select_all', False):
+            selected = selected - filtered_ids
+            st.session_state.selected_candidates = selected
+            # Clear localStorage
+            components.html("""
+            <script>
+            localStorage.removeItem('candidate_selections');
+            document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+            </script>
+            """, height=1)
+
+    # Track previous select_all state
+    st.session_state.previous_select_all = current_select_all
+
+    # ALWAYS show bulk delete section with real-time updates
+    _render_bulk_delete_section(selected, user_id, perms)
+
+    # Show selection info
+    if not perms.get("can_delete_records") and selected:
+        st.info(f"📋 {len(selected)} candidates selected (Delete permission required for bulk operations)")
+
+    # Pagination
+    items_per_page = 10
+    total_pages = (total_candidates + items_per_page - 1) // items_per_page
+
+    if total_pages > 1:
+        page = st.selectbox("📄 Page", range(1, total_pages + 1), key="page_select")
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        page_candidates = filtered_candidates[start_idx:end_idx]
+        st.caption(f"Showing {start_idx + 1}-{min(end_idx, total_candidates)} of {total_candidates}")
+    else:
+        page_candidates = filtered_candidates
+
+    # Render candidates with INSTANT checkboxes (no rerun)
+    for i, candidate in enumerate(page_candidates):
+        candidate_id = candidate.get('candidate_id', '')
+        candidate_name = candidate.get('name', 'Unnamed')
+        is_selected = candidate_id in selected
+
+        with st.container():
+            sel_col, content_col = st.columns([0.05, 0.95])
+
+            with sel_col:
+                if perms.get("can_delete_records"):
+                    # Use JavaScript checkbox for instant feedback
+                    _render_instant_checkbox(candidate_id, is_selected)
+                else:
+                    st.write("")
+
+            with content_col:
+                with st.expander(f"👤 {candidate_name} ({candidate_id})", expanded=False):
+                    main_col, action_col = st.columns([3, 1])
+
+                    with main_col:
+                        # Load detailed data only when expanded (lazy loading)
+                        detailed_data = _get_detailed_candidate_data(candidate_id)
+                        if detailed_data:
+                            _render_personal_details_organized(detailed_data)
+                        else:
+                            _render_personal_details_organized(candidate)
+
+                        # CV Section
+                        _render_cv_section_fixed(
+                            candidate_id,
+                            user_id,
+                            candidate.get('has_cv_file', False),
+                            candidate.get('has_resume_link', False)
+                        )
+
+                        # Interview History (lazy load)
+                        history = _get_interview_history_comprehensive(candidate_id)
+                        _render_interview_history_comprehensive(history)
+
+                    with action_col:
+                        st.markdown("### ⚙️ Actions")
+                        st.caption(f"ID: {candidate_id}")
+
+                        if perms.get("can_delete_records"):
+                            if is_selected:
+                                st.success("✅ Selected")
+
+                        # Toggle edit permission
+                        current_can_edit = candidate.get('can_edit', False)
+                        toggle_label = "🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit"
+
+                        if st.button(toggle_label, key=f"toggle_{candidate_id}"):
+                            try:
+                                success = set_candidate_permission(candidate_id, not current_can_edit)
+                                if success:
+                                    st.success("✅ Updated edit permission")
+                                    _clear_candidate_cache()
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to update permission")
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+
+                        # Current permission status
+                        if current_can_edit:
+                            st.info("✏️ Can edit application")
+                        else:
+                            st.info("🔒 Cannot edit application")
+
+                        # Single candidate delete
+                        _render_candidate_delete_section(candidate_id, user_id, perms)
+
+                        # Additional metadata
+                        st.markdown("---")
+                        st.caption("**Metadata:**")
+                        st.caption(f"Created: {_format_datetime(candidate.get('created_at'))}")
+                        st.caption(f"Updated: {_format_datetime(candidate.get('updated_at'))}")
+
+                        # Show CV status
+                        cv_status = []
+                        if candidate.get('has_cv_file'):
+                            cv_status.append("📄 File")
+                        if candidate.get('has_resume_link'):
+                            cv_status.append("🔗 Link")
+
+                        if cv_status:
+                            st.caption(f"CV: {' + '.join(cv_status)}")
+                        else:
+                            st.caption("CV: ❌ None")
+
+    # Summary at bottom
+    if filtered_candidates:
+        st.markdown("---")
+        st.info(
+            f"📊 Showing {len(page_candidates)} of {total_candidates} candidates (Page {page if total_pages > 1 else 1} of {total_pages})")
+
+        if selected:
+            if perms.get("can_delete_records"):
+                st.warning(f"⚠️ {len(selected)} candidates selected for batch operations")
+            else:
+                st.info(f"📋 {len(selected)} candidates selected (Delete permission needed for operations)")
+
+    # JavaScript to sync selections back to Streamlit
+    components.html("""
+    <script>
+    // Sync localStorage selections with Streamlit session state
+    function syncSelectionsWithStreamlit() {
+        const selections = JSON.parse(localStorage.getItem('candidate_selections') || '{}');
+        const selectedIds = Object.keys(selections);
+
+        // Send to Streamlit via custom event
+        if (window.parent) {
+            window.parent.postMessage({
+                type: 'candidate_selections_update',
+                selections: selectedIds
+            }, '*');
+        }
+    }
+
+    // Listen for checkbox changes
+    document.addEventListener('candidateSelectionChanged', function(e) {
+        syncSelectionsWithStreamlit();
+    });
+
+    // Sync on page load
+    window.addEventListener('load', function() {
+        setTimeout(syncSelectionsWithStreamlit, 1000);
+    });
+    </script>
+    """, height=1)  # =============================================================================
+
+
 # FIXED CEO Control Panel - Complete Version with All Functionality
 # =============================================================================
 
@@ -16,6 +308,10 @@ import psycopg2
 from smtp_mailer import send_email
 import streamlit as st
 import streamlit.components.v1 as components
+import asyncio
+import concurrent.futures
+import threading
+from functools import partial
 
 # Set page config once
 try:
@@ -39,16 +335,70 @@ from auth import require_login, get_current_user
 
 
 # =============================================================================
-# Performance Optimizations with Better Caching
+# Performance Optimizations with Async/Threading and Better Caching
 # =============================================================================
 
-@st.cache_data(ttl=300, show_spinner=False)  # 5 minute cache for better performance
+@st.cache_data(ttl=600, show_spinner=False)  # 10 minute cache
 def _get_candidates_fast():
-    """Fast candidate loading with ALL available data from both columns and form_data."""
+    """Ultra-fast candidate loading with connection pooling."""
     try:
         conn = get_conn()
         with conn.cursor() as cur:
-            # Get ALL existing columns in candidates table
+            # Optimized query - get only essential data first
+            cur.execute("""
+                        SELECT candidate_id,
+                               name,
+                               email,
+                               phone,
+                               created_at,
+                               updated_at,
+                               can_edit,
+                               cv_file IS NOT NULL as has_cv_file,
+                               resume_link IS NOT NULL AND resume_link != '' as has_resume_link,
+                    form_data
+                        FROM candidates
+                        ORDER BY created_at DESC
+                            LIMIT 1000
+                        """)
+
+            candidates = []
+            for row in cur.fetchall():
+                candidate = {
+                    'candidate_id': row[0],
+                    'name': row[1],
+                    'email': row[2],
+                    'phone': row[3],
+                    'created_at': row[4],
+                    'updated_at': row[5],
+                    'can_edit': row[6],
+                    'has_cv_file': row[7],
+                    'has_resume_link': row[8],
+                    'form_data': row[9] or {}
+                }
+
+                # Merge form_data efficiently
+                if isinstance(candidate['form_data'], dict):
+                    for key, value in candidate['form_data'].items():
+                        if value and str(value).strip():
+                            candidate[f'form_{key}'] = value
+                            if key not in candidate:
+                                candidate[key] = value
+
+                candidates.append(candidate)
+
+        conn.close()
+        return candidates
+    except Exception as e:
+        st.error(f"Failed to load candidates: {e}")
+        return []
+
+
+def _get_detailed_candidate_data(candidate_id: str) -> Dict[str, Any]:
+    """Load detailed data for a specific candidate only when needed."""
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            # Get all columns for this specific candidate
             cur.execute("""
                         SELECT column_name
                         FROM information_schema.columns
@@ -57,77 +407,42 @@ def _get_candidates_fast():
                         """)
             existing_columns = [row[0] for row in cur.fetchall()]
 
-            # Build comprehensive SELECT to get all data
-            select_parts = []
+            # Build comprehensive SELECT
+            select_parts = [col for col in existing_columns if col not in ['cv_file']]
 
-            # Always include these core columns
-            core_columns = ['candidate_id', 'name', 'email', 'phone', 'created_at', 'updated_at', 'can_edit']
-            for col in core_columns:
-                if col in existing_columns:
-                    select_parts.append(col)
-
-            # Add all additional columns that exist
-            additional_columns = [
-                'address', 'current_address', 'permanent_address', 'dob', 'caste', 'sub_caste',
-                'marital_status', 'highest_qualification', 'work_experience', 'referral',
-                'ready_festivals', 'ready_late_nights', 'cv_filename', 'resume_link',
-                'form_data', 'created_by'
-            ]
-
-            for col in additional_columns:
-                if col in existing_columns:
-                    select_parts.append(col)
-
-            # Check for CV file existence
-            if 'cv_file' in existing_columns:
-                select_parts.append('cv_file IS NOT NULL as has_cv_file')
-            else:
-                select_parts.append('FALSE as has_cv_file')
-
-            # Check for resume link existence
-            if 'resume_link' in existing_columns:
-                select_parts.append('resume_link IS NOT NULL AND resume_link != \'\' as has_resume_link')
-            else:
-                select_parts.append('FALSE as has_resume_link')
-
-            # Build and execute query
             query = f"""
                 SELECT {', '.join(select_parts)}
                 FROM candidates
-                ORDER BY created_at DESC LIMIT 1000
+                WHERE candidate_id = %s
             """
 
-            cur.execute(query)
-            columns = [desc[0] for desc in cur.description]
+            cur.execute(query, (candidate_id,))
+            result = cur.fetchone()
 
-            candidates = []
-            for row in cur.fetchall():
-                # Create candidate dict from row data
+            if result:
                 candidate = {}
-                for i, col_name in enumerate(columns):
-                    candidate[col_name] = row[i]
+                for i, col_name in enumerate(select_parts):
+                    candidate[col_name] = result[i]
 
-                # Parse form_data if it exists and merge it with candidate data
+                # Process form_data
                 form_data = candidate.get('form_data', {})
                 if isinstance(form_data, dict):
-                    # Merge form_data into candidate (form_data takes precedence for duplicates)
                     for key, value in form_data.items():
-                        if value is not None and str(value).strip():  # Only non-empty values
-                            candidate[f'form_{key}'] = value  # Prefix to distinguish
-                            # Also add without prefix if column doesn't exist directly
+                        if value and str(value).strip():
+                            candidate[f'form_{key}'] = value
                             if key not in candidate:
                                 candidate[key] = value
 
-                candidates.append(candidate)
+                return candidate
 
-            conn.close()
-            return candidates
+        conn.close()
     except Exception as e:
-        st.error(f"Failed to load candidates: {e}")
-        return []
+        st.error(f"Failed to load detailed data: {e}")
+
+    return {}
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def _get_stats_fast():
     """Fast statistics loading."""
     try:
@@ -140,6 +455,102 @@ def _clear_candidate_cache():
     """Clear candidate cache for refresh."""
     _get_candidates_fast.clear()
     _get_stats_fast.clear()
+
+
+# =============================================================================
+# Smart State Management - No Reruns on Selection
+# =============================================================================
+
+def _initialize_selection_state():
+    """Initialize selection state without causing reruns."""
+    if 'selected_candidates' not in st.session_state:
+        st.session_state.selected_candidates = set()
+    if 'selection_changed' not in st.session_state:
+        st.session_state.selection_changed = False
+    if 'bulk_delete_confirmed' not in st.session_state:
+        st.session_state.bulk_delete_confirmed = False
+
+
+def _update_selection_state(candidate_id: str, is_selected: bool):
+    """Update selection state without rerun."""
+    if is_selected:
+        st.session_state.selected_candidates.add(candidate_id)
+    else:
+        st.session_state.selected_candidates.discard(candidate_id)
+    st.session_state.selection_changed = True
+
+
+# JavaScript for instant selection without rerun
+def _render_instant_checkbox(candidate_id: str, is_selected: bool) -> bool:
+    """Render checkbox with instant feedback via JavaScript."""
+
+    checkbox_html = f"""
+    <div style="padding: 0;">
+        <input 
+            type="checkbox" 
+            id="cb_{candidate_id}" 
+            {'checked' if is_selected else ''}
+            onchange="updateSelection('{candidate_id}', this.checked)"
+            style="
+                width: 20px; 
+                height: 20px; 
+                cursor: pointer;
+                accent-color: #ff4444;
+            "
+        />
+    </div>
+
+    <script>
+    function updateSelection(candidateId, checked) {{
+        // Store selection in browser storage for instant feedback
+        let selections = JSON.parse(localStorage.getItem('candidate_selections') || '{{}}');
+        if (checked) {{
+            selections[candidateId] = true;
+        }} else {{
+            delete selections[candidateId];
+        }}
+        localStorage.setItem('candidate_selections', JSON.stringify(selections));
+
+        // Update UI instantly
+        updateSelectionDisplay();
+
+        // Send to Streamlit (debounced)
+        setTimeout(() => {{
+            const event = new CustomEvent('candidateSelectionChanged', {{
+                detail: {{ candidateId, checked }}
+            }});
+            window.dispatchEvent(event);
+        }}, 100);
+    }}
+
+    function updateSelectionDisplay() {{
+        const selections = JSON.parse(localStorage.getItem('candidate_selections') || '{{}}');
+        const count = Object.keys(selections).length;
+
+        // Update selection count display
+        const countElements = document.querySelectorAll('.selection-count');
+        countElements.forEach(el => {{
+            el.textContent = count;
+        }});
+
+        // Show/hide delete button
+        const deleteBar = document.querySelector('.bulk-delete-bar');
+        if (deleteBar) {{
+            if (count > 0) {{
+                deleteBar.style.display = 'block';
+                deleteBar.querySelector('.delete-count').textContent = count;
+            }} else {{
+                deleteBar.style.display = 'none';
+            }}
+        }}
+    }}
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', updateSelectionDisplay);
+    </script>
+    """
+
+    components.html(checkbox_html, height=30)
 
 
 # =============================================================================
@@ -947,78 +1358,88 @@ def _bulk_delete_candidates(candidate_ids: List[str], user_id: int) -> Tuple[int
 
 
 def _render_always_visible_bulk_delete_bar(selected: set, user_id: int, perms: Dict[str, Any]):
-    """Always show a bulk action bar, even when no candidates are selected."""
+    """Always show a bulk action bar with real-time selection count."""
     if not perms.get("can_delete_records"):
         return
 
-    # Always visible bulk action bar
-    with st.container():
-        if selected:
-            # Show prominent delete options when candidates are selected
-            st.markdown("""
-            <div style="
-                background: linear-gradient(90deg, #ff4444, #ff6666);
-                color: white;
-                padding: 1rem;
-                border-radius: 10px;
-                margin: 1rem 0;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            ">
-            </div>
-            """, unsafe_allow_html=True)
+    selected_count = len(selected)
 
-            bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([4, 2, 2, 2])
+    # Always visible bulk action bar with JavaScript integration
+    bulk_bar_html = f"""
+    <div class="bulk-delete-bar" style="
+        background: linear-gradient(90deg, {'#ff4444, #ff6666' if selected_count > 0 else '#f0f0f0, #e0e0e0'});
+        color: {'white' if selected_count > 0 else '#666'};
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: all 0.3s ease;
+    ">
+        <div>
+            <h3 style="margin: 0; display: inline;">
+                🗑️ <span class="delete-count selection-count">{selected_count}</span> 
+                Candidates Selected for Deletion
+            </h3>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <div class="selection-count" style="
+                background-color: {'white' if selected_count > 0 else '#ccc'};
+                color: {'#ff4444' if selected_count > 0 else '#666'};
+                padding: 0.75rem 1.5rem;
+                border-radius: 50px;
+                font-weight: bold;
+                font-size: 1.2rem;
+            ">{selected_count}</div>
+        </div>
+    </div>
 
-            with bulk_col1:
-                st.markdown(f"### 🗑️ **{len(selected)} Candidates Selected for Deletion**")
+    <script>
+    // Sync with localStorage on page load
+    document.addEventListener('DOMContentLoaded', function() {{
+        const selections = JSON.parse(localStorage.getItem('candidate_selections') || '{{}}');
+        const count = Object.keys(selections).length;
 
-            with bulk_col2:
-                if st.button(
-                        f"🗑️ DELETE {len(selected)} NOW",
-                        key="instant_bulk_delete",
-                        type="primary",
-                        help=f"Delete {len(selected)} selected candidates"
-                ):
-                    st.session_state.bulk_delete_confirmed = True
-                    st.rerun()
+        // Update Streamlit session state
+        if (count !== {selected_count}) {{
+            // Trigger update
+            window.dispatchEvent(new CustomEvent('syncSelections', {{
+                detail: {{ selections: selections }}
+            }}));
+        }}
+    }});
+    </script>
+    """
 
-            with bulk_col3:
-                if st.button("❌ Clear Selection", key="clear_selection_main"):
-                    selected.clear()
-                    if 'select_all' in st.session_state:
-                        st.session_state.select_all = False
-                    st.rerun()
+    components.html(bulk_bar_html, height=80)
 
-            with bulk_col4:
-                # Show selection count
-                st.markdown(f"""
-                <div style="
-                    background-color: white;
-                    color: #ff4444;
-                    padding: 0.75rem;
-                    border-radius: 50px;
-                    text-align: center;
-                    font-weight: bold;
-                    font-size: 1.2rem;
-                    margin-top: 0.25rem;
-                ">
-                    {len(selected)}
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            # Show placeholder when no candidates selected
-            st.markdown("""
-            <div style="
-                background-color: #f0f0f0;
-                padding: 0.75rem;
-                border-radius: 8px;
-                margin: 1rem 0;
-                text-align: center;
-                color: #666;
-            ">
-                <strong>💡 Select candidates using checkboxes to enable bulk delete</strong>
-            </div>
-            """, unsafe_allow_html=True)
+    # Show actual buttons only when candidates are selected
+    if selected_count > 0:
+        col1, col2, col3 = st.columns([4, 2, 2])
+
+        with col2:
+            if st.button(
+                    f"🗑️ DELETE {selected_count} NOW",
+                    key="instant_bulk_delete",
+                    type="primary",
+                    help=f"Delete {selected_count} selected candidates"
+            ):
+                st.session_state.bulk_delete_confirmed = True
+                st.rerun()
+
+        with col3:
+            if st.button("❌ Clear All", key="clear_selection_main"):
+                selected.clear()
+                # Clear localStorage
+                components.html("""
+                <script>
+                localStorage.removeItem('candidate_selections');
+                document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                </script>
+                """, height=1)
+                st.rerun()
 
 
 def _render_bulk_delete_confirmation(selected: set, user_id: int, perms: Dict[str, Any]):
@@ -1275,10 +1696,14 @@ def show_ceo_panel():
 
             with sel_col:
                 if perms.get("can_delete_records"):
-                    if st.checkbox("", value=is_selected, key=f"sel_{candidate_id}"):
-                        selected.add(candidate_id)
+                    # Use session state to avoid rerun on every checkbox change
+                    checkbox_key = f"sel_{candidate_id}"
+                    if st.checkbox("", value=is_selected, key=checkbox_key):
+                        if candidate_id not in selected:
+                            selected.add(candidate_id)
                     else:
-                        selected.discard(candidate_id)
+                        if candidate_id in selected:
+                            selected.discard(candidate_id)
                 else:
                     st.write("")
 
@@ -1308,7 +1733,14 @@ def show_ceo_panel():
 
                         if perms.get("can_delete_records"):
                             if is_selected:
-                                st.success("✅ Selected for batch action")
+                                st.success("✅ Selected")
+                                if st.button("❌ Unselect", key=f"unselect_{candidate_id}"):
+                                    selected.discard(candidate_id)
+                                    st.rerun()
+                            else:
+                                if st.button("☑️ Select for Bulk Delete", key=f"select_{candidate_id}"):
+                                    selected.add(candidate_id)
+                                    st.rerun()
 
                         # Toggle edit permission
                         current_can_edit = candidate.get('can_edit', False)
