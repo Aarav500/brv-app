@@ -1,5 +1,5 @@
-# ULTRA-OPTIMIZED CEO Control Panel - Bulk Operations + Multithreading Performance
-# ===================================================================================
+# OPTIMIZED CEO Control Panel - Zero Refresh Operations + Bulk User Management
+# =============================================================================
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ import asyncio
 import concurrent.futures
 import threading
 from functools import partial
-import time
-from multiprocessing.pool import ThreadPool
 
 # Set page config once
 try:
@@ -43,184 +41,17 @@ from db_postgres import (
 from auth import require_login, get_current_user
 
 
-# ===================================================================================
-# ULTRA-FAST PERFORMANCE WITH MULTITHREADING AND CONNECTION POOLING
-# ===================================================================================
+# =============================================================================
+# Performance Optimizations with Async/Threading and Better Caching
+# =============================================================================
 
-class FastDatabaseOperations:
-    """Ultra-fast database operations with connection pooling and threading."""
-
-    @staticmethod
-    def get_connection_pool():
-        """Get database connection with optimized settings."""
-        try:
-            conn = get_conn()
-            # Optimize connection for bulk operations
-            with conn.cursor() as cur:
-                cur.execute("SET work_mem = '256MB'")
-                cur.execute("SET maintenance_work_mem = '512MB'")
-                cur.execute("SET synchronous_commit = OFF")
-            return conn
-        except Exception as e:
-            st.error(f"Connection error: {e}")
-            return None
-
-    @staticmethod
-    def bulk_delete_candidates_fast(candidate_ids: List[str]) -> Tuple[bool, str, int]:
-        """Ultra-fast bulk candidate deletion with batch processing."""
-        if not candidate_ids:
-            return False, "No candidates to delete", 0
-
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed", 0
-
-            deleted_count = 0
-            batch_size = 100  # Process in batches for performance
-
-            with conn.cursor() as cur:
-                # Batch delete for optimal performance
-                for i in range(0, len(candidate_ids), batch_size):
-                    batch = candidate_ids[i:i + batch_size]
-                    placeholders = ','.join(['%s'] * len(batch))
-
-                    # Delete related records first
-                    tables_to_clean = ['interviews', 'receptionist_assessments', 'candidate_history']
-                    for table in tables_to_clean:
-                        try:
-                            cur.execute(f"DELETE FROM {table} WHERE candidate_id IN ({placeholders})", batch)
-                        except Exception:
-                            pass  # Table might not exist
-
-                    # Delete main candidate records
-                    cur.execute(f"DELETE FROM candidates WHERE candidate_id IN ({placeholders})", batch)
-                    deleted_count += cur.rowcount
-
-                conn.commit()
-            conn.close()
-
-            return True, f"Successfully deleted {deleted_count} candidates", deleted_count
-
-        except Exception as e:
-            return False, f"Bulk delete failed: {str(e)}", 0
-
-    @staticmethod
-    def bulk_delete_users_fast(user_ids: List[str], current_user_id: int) -> Tuple[bool, str, int]:
-        """Ultra-fast bulk user deletion with safety checks."""
-        if not user_ids:
-            return False, "No users to delete", 0
-
-        # Remove current user from deletion list for safety
-        safe_user_ids = [uid for uid in user_ids if str(uid) != str(current_user_id)]
-
-        if not safe_user_ids:
-            return False, "Cannot delete your own account", 0
-
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed", 0
-
-            deleted_count = 0
-
-            with conn.cursor() as cur:
-                # Batch delete for performance
-                placeholders = ','.join(['%s'] * len(safe_user_ids))
-                cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", safe_user_ids)
-                deleted_count = cur.rowcount
-                conn.commit()
-
-            conn.close()
-
-            return True, f"Successfully deleted {deleted_count} users", deleted_count
-
-        except Exception as e:
-            return False, f"Bulk user delete failed: {str(e)}", 0
-
-    @staticmethod
-    def bulk_update_user_permissions_fast(user_ids: List[str], permission_updates: Dict[str, Any]) -> Tuple[
-        bool, str, int]:
-        """Ultra-fast bulk permission updates with batch processing."""
-        if not user_ids or not permission_updates:
-            return False, "No users or permissions specified", 0
-
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed", 0
-
-            updated_count = 0
-
-            with conn.cursor() as cur:
-                # Build dynamic update query
-                set_clauses = []
-                values = []
-
-                for perm, value in permission_updates.items():
-                    set_clauses.append(f"{perm} = %s")
-                    values.append(value)
-
-                if set_clauses:
-                    placeholders = ','.join(['%s'] * len(user_ids))
-                    query = f"""
-                        UPDATE users 
-                        SET {', '.join(set_clauses)} 
-                        WHERE id IN ({placeholders})
-                    """
-                    values.extend(user_ids)
-
-                    cur.execute(query, values)
-                    updated_count = cur.rowcount
-                    conn.commit()
-
-            conn.close()
-
-            return True, f"Successfully updated {updated_count} users", updated_count
-
-        except Exception as e:
-            return False, f"Bulk permission update failed: {str(e)}", 0
-
-    @staticmethod
-    def bulk_update_candidate_permissions_fast(candidate_ids: List[str], can_edit: bool) -> Tuple[bool, str, int]:
-        """Ultra-fast bulk candidate edit permission updates."""
-        if not candidate_ids:
-            return False, "No candidates specified", 0
-
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed", 0
-
-            updated_count = 0
-
-            with conn.cursor() as cur:
-                placeholders = ','.join(['%s'] * len(candidate_ids))
-                query = f"UPDATE candidates SET can_edit = %s WHERE candidate_id IN ({placeholders})"
-                values = [can_edit] + candidate_ids
-
-                cur.execute(query, values)
-                updated_count = cur.rowcount
-                conn.commit()
-
-            conn.close()
-
-            return True, f"Successfully updated {updated_count} candidates", updated_count
-
-        except Exception as e:
-            return False, f"Bulk candidate update failed: {str(e)}", 0
-
-
-@st.cache_data(ttl=300, show_spinner=False)  # 5 minute cache for faster loading
-def get_candidates_ultra_fast():
-    """Ultra-fast candidate loading with minimal data transfer."""
+@st.cache_data(ttl=600, show_spinner=False)  # 10 minute cache
+def _get_candidates_fast():
+    """Ultra-fast candidate loading with connection pooling."""
     try:
-        conn = FastDatabaseOperations.get_connection_pool()
-        if not conn:
-            return []
-
+        conn = get_conn()
         with conn.cursor() as cur:
-            # Optimized query - only essential fields
+            # Optimized query - get only essential data first
             cur.execute("""
                         SELECT candidate_id,
                                name,
@@ -231,362 +62,364 @@ def get_candidates_ultra_fast():
                                can_edit,
                                cv_file IS NOT NULL as has_cv_file,
                                resume_link IS NOT NULL AND resume_link != '' as has_resume_link,
-                       form_data
+                    form_data
                         FROM candidates
                         ORDER BY created_at DESC
-                            LIMIT 2000
+                            LIMIT 1000
                         """)
 
             candidates = []
             for row in cur.fetchall():
                 candidate = {
                     'candidate_id': row[0],
-                    'name': row[1] or 'Unnamed',
-                    'email': row[2] or 'No email',
-                    'phone': row[3] or 'No phone',
+                    'name': row[1],
+                    'email': row[2],
+                    'phone': row[3],
                     'created_at': row[4],
                     'updated_at': row[5],
-                    'can_edit': bool(row[6]),
-                    'has_cv_file': bool(row[7]),
-                    'has_resume_link': bool(row[8]),
+                    'can_edit': row[6],
+                    'has_cv_file': row[7],
+                    'has_resume_link': row[8],
                     'form_data': row[9] or {}
                 }
 
-                # Quick form_data merge
+                # Merge form_data efficiently
                 if isinstance(candidate['form_data'], dict):
                     for key, value in candidate['form_data'].items():
                         if value and str(value).strip():
                             candidate[f'form_{key}'] = value
+                            if key not in candidate:
+                                candidate[key] = value
 
                 candidates.append(candidate)
 
         conn.close()
         return candidates
-
     except Exception as e:
         st.error(f"Failed to load candidates: {e}")
         return []
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def get_users_ultra_fast():
-    """Ultra-fast user loading."""
+def _get_detailed_candidate_data(candidate_id: str) -> Dict[str, Any]:
+    """Load detailed data for a specific candidate only when needed."""
     try:
-        return get_all_users_with_permissions() or []
+        conn = get_conn()
+        with conn.cursor() as cur:
+            # Get all columns for this specific candidate
+            cur.execute("""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'candidates'
+                        ORDER BY ordinal_position
+                        """)
+            existing_columns = [row[0] for row in cur.fetchall()]
+
+            # Build comprehensive SELECT
+            select_parts = [col for col in existing_columns if col not in ['cv_file']]
+
+            query = f"""
+                SELECT {', '.join(select_parts)}
+                FROM candidates
+                WHERE candidate_id = %s
+            """
+
+            cur.execute(query, (candidate_id,))
+            result = cur.fetchone()
+
+            if result:
+                candidate = {}
+                for i, col_name in enumerate(select_parts):
+                    candidate[col_name] = result[i]
+
+                # Process form_data
+                form_data = candidate.get('form_data', {})
+                if isinstance(form_data, dict):
+                    for key, value in form_data.items():
+                        if value and str(value).strip():
+                            candidate[f'form_{key}'] = value
+                            if key not in candidate:
+                                candidate[key] = value
+
+                return candidate
+
+        conn.close()
     except Exception as e:
-        st.error(f"Failed to load users: {e}")
-        return []
+        st.error(f"Failed to load detailed data: {e}")
+
+    return {}
 
 
-def clear_all_caches():
-    """Clear all caches for data refresh."""
-    get_candidates_ultra_fast.clear()
-    get_users_ultra_fast.clear()
+@st.cache_data(ttl=300, show_spinner=False)
+def _get_stats_fast():
+    """Fast statistics loading."""
+    try:
+        return get_candidate_statistics() or {}
+    except Exception:
+        return {}
 
 
-# ===================================================================================
-# ULTRA-ADVANCED JAVASCRIPT UI - ZERO REFRESH BULK OPERATIONS
-# ===================================================================================
+def _clear_candidate_cache():
+    """Clear candidate cache for refresh."""
+    _get_candidates_fast.clear()
+    _get_stats_fast.clear()
 
-def render_ultra_fast_selection_system():
-    """Ultra-advanced JavaScript selection system with instant feedback."""
 
-    advanced_js = """
-    <div id="ultra-selection-system" style="display: none;"></div>
+# =============================================================================
+# ZERO REFRESH OPERATIONS - JavaScript-based UI Management
+# =============================================================================
+
+def _render_zero_refresh_selection_manager():
+    """Complete JavaScript-based selection management with zero refreshes."""
+
+    selection_js = """
+    <div id="zero-refresh-manager" style="display: none;"></div>
 
     <script>
-    // Ultra-fast global state management
-    window.ultraState = window.ultraState || {
-        candidateSelections: new Set(),
-        userSelections: new Set(),
-        bulkOperationInProgress: false,
-        lastUpdate: Date.now()
-    };
+    // Global selection state
+    window.candidateSelections = window.candidateSelections || new Set();
+    window.userSelections = window.userSelections || new Set();
+    window.bulkDeleteConfirmed = window.bulkDeleteConfirmed || false;
+    window.bulkUserDeleteConfirmed = window.bulkUserDeleteConfirmed || false;
 
-    // Performance optimization - debounced updates
-    let updateTimeout = null;
-    function debouncedUpdateUI() {
-        if (updateTimeout) clearTimeout(updateTimeout);
-        updateTimeout = setTimeout(updateSelectionUI, 50);
-    }
+    // Update selection display across all UI elements
+    function updateSelectionDisplay() {
+        const candidateCount = window.candidateSelections.size;
+        const userCount = window.userSelections.size;
 
-    // Ultra-fast UI updates
-    function updateSelectionUI() {
-        const candidateCount = window.ultraState.candidateSelections.size;
-        const userCount = window.ultraState.userSelections.size;
-
-        // Update all count displays instantly
-        document.querySelectorAll('.candidate-count').forEach(el => {
+        // Update all selection count displays
+        document.querySelectorAll('.candidate-selection-count').forEach(el => {
             el.textContent = candidateCount;
-            el.style.fontWeight = candidateCount > 0 ? 'bold' : 'normal';
         });
 
-        document.querySelectorAll('.user-count').forEach(el => {
+        document.querySelectorAll('.user-selection-count').forEach(el => {
             el.textContent = userCount;
-            el.style.fontWeight = userCount > 0 ? 'bold' : 'normal';
         });
 
-        // Show/hide bulk action panels with animations
-        const candidateBulkPanel = document.querySelector('.candidate-bulk-panel');
-        const userBulkPanel = document.querySelector('.user-bulk-panel');
+        // Show/hide bulk action bars
+        const candidateBulkBar = document.querySelector('.candidate-bulk-bar');
+        const userBulkBar = document.querySelector('.user-bulk-bar');
 
-        if (candidateBulkPanel) {
+        if (candidateBulkBar) {
             if (candidateCount > 0) {
-                candidateBulkPanel.style.display = 'block';
-                candidateBulkPanel.style.opacity = '1';
-                candidateBulkPanel.style.transform = 'translateY(0)';
+                candidateBulkBar.style.display = 'flex';
+                candidateBulkBar.style.background = 'linear-gradient(90deg, #ff4444, #ff6666)';
+                candidateBulkBar.style.color = 'white';
             } else {
-                candidateBulkPanel.style.opacity = '0';
-                candidateBulkPanel.style.transform = 'translateY(-20px)';
-                setTimeout(() => {
-                    if (window.ultraState.candidateSelections.size === 0) {
-                        candidateBulkPanel.style.display = 'none';
-                    }
-                }, 300);
+                candidateBulkBar.style.display = 'none';
             }
         }
 
-        if (userBulkPanel) {
+        if (userBulkBar) {
             if (userCount > 0) {
-                userBulkPanel.style.display = 'block';
-                userBulkPanel.style.opacity = '1';
-                userBulkPanel.style.transform = 'translateY(0)';
+                userBulkBar.style.display = 'flex';
+                userBulkBar.style.background = 'linear-gradient(90deg, #4444ff, #6666ff)';
+                userBulkBar.style.color = 'white';
             } else {
-                userBulkPanel.style.opacity = '0';
-                userBulkPanel.style.transform = 'translateY(-20px)';
-                setTimeout(() => {
-                    if (window.ultraState.userSelections.size === 0) {
-                        userBulkPanel.style.display = 'none';
-                    }
-                }, 300);
+                userBulkBar.style.display = 'none';
             }
         }
 
-        // Update progress indicators
-        updateProgressIndicators();
-
-        // Save state
-        saveUltraState();
+        // Update confirmation dialogs
+        updateConfirmationDialogs();
     }
 
     // Candidate selection functions
     function toggleCandidateSelection(candidateId, forceValue = null) {
-        if (window.ultraState.bulkOperationInProgress) return;
-
         if (forceValue !== null) {
             if (forceValue) {
-                window.ultraState.candidateSelections.add(candidateId);
+                window.candidateSelections.add(candidateId);
             } else {
-                window.ultraState.candidateSelections.delete(candidateId);
+                window.candidateSelections.delete(candidateId);
             }
         } else {
-            if (window.ultraState.candidateSelections.has(candidateId)) {
-                window.ultraState.candidateSelections.delete(candidateId);
+            if (window.candidateSelections.has(candidateId)) {
+                window.candidateSelections.delete(candidateId);
             } else {
-                window.ultraState.candidateSelections.add(candidateId);
+                window.candidateSelections.add(candidateId);
             }
         }
 
-        // Update checkbox instantly
+        // Update checkbox state
         const checkbox = document.getElementById('cb_candidate_' + candidateId);
         if (checkbox) {
-            checkbox.checked = window.ultraState.candidateSelections.has(candidateId);
-
-            // Visual feedback
-            const container = checkbox.closest('.candidate-item');
-            if (container) {
-                if (window.ultraState.candidateSelections.has(candidateId)) {
-                    container.style.background = 'linear-gradient(90deg, #fff3cd, #ffeaa7)';
-                    container.style.borderLeft = '4px solid #f39c12';
-                } else {
-                    container.style.background = '';
-                    container.style.borderLeft = '';
-                }
-            }
+            checkbox.checked = window.candidateSelections.has(candidateId);
         }
 
-        debouncedUpdateUI();
+        updateSelectionDisplay();
+        saveSelectionState();
     }
 
-    // User selection functions  
+    // User selection functions
     function toggleUserSelection(userId, forceValue = null) {
-        if (window.ultraState.bulkOperationInProgress) return;
-
         if (forceValue !== null) {
             if (forceValue) {
-                window.ultraState.userSelections.add(userId);
+                window.userSelections.add(userId);
             } else {
-                window.ultraState.userSelections.delete(userId);
+                window.userSelections.delete(userId);
             }
         } else {
-            if (window.ultraState.userSelections.has(userId)) {
-                window.ultraState.userSelections.delete(userId);
+            if (window.userSelections.has(userId)) {
+                window.userSelections.delete(userId);
             } else {
-                window.ultraState.userSelections.add(userId);
+                window.userSelections.add(userId);
             }
         }
 
-        // Update checkbox instantly
+        // Update checkbox state
         const checkbox = document.getElementById('cb_user_' + userId);
         if (checkbox) {
-            checkbox.checked = window.ultraState.userSelections.has(userId);
-
-            // Visual feedback
-            const container = checkbox.closest('.user-item');
-            if (container) {
-                if (window.ultraState.userSelections.has(userId)) {
-                    container.style.background = 'linear-gradient(90deg, #d4edda, #c3e6cb)';
-                    container.style.borderLeft = '4px solid #28a745';
-                } else {
-                    container.style.background = '';
-                    container.style.borderLeft = '';
-                }
-            }
+            checkbox.checked = window.userSelections.has(userId);
         }
 
-        debouncedUpdateUI();
+        updateSelectionDisplay();
+        saveSelectionState();
     }
 
-    // Bulk selection functions
-    function selectAllCandidates(candidateIds) {
-        candidateIds.forEach(id => {
-            window.ultraState.candidateSelections.add(id);
-            const checkbox = document.getElementById('cb_candidate_' + id);
-            if (checkbox) checkbox.checked = true;
+    // Select all functions
+    function selectAllCandidates(candidates) {
+        candidates.forEach(id => window.candidateSelections.add(id));
+        document.querySelectorAll('[id^="cb_candidate_"]').forEach(cb => {
+            cb.checked = true;
         });
-        debouncedUpdateUI();
-        showToast(`Selected ${candidateIds.length} candidates`, 'success');
+        updateSelectionDisplay();
+        saveSelectionState();
     }
 
     function clearAllCandidates() {
-        const count = window.ultraState.candidateSelections.size;
-        window.ultraState.candidateSelections.clear();
+        window.candidateSelections.clear();
         document.querySelectorAll('[id^="cb_candidate_"]').forEach(cb => {
             cb.checked = false;
-            const container = cb.closest('.candidate-item');
-            if (container) {
-                container.style.background = '';
-                container.style.borderLeft = '';
-            }
         });
-        debouncedUpdateUI();
-        showToast(`Cleared ${count} candidate selections`, 'info');
+        updateSelectionDisplay();
+        saveSelectionState();
     }
 
-    function selectAllUsers(userIds) {
-        userIds.forEach(id => {
-            window.ultraState.userSelections.add(id);
-            const checkbox = document.getElementById('cb_user_' + id);
-            if (checkbox) checkbox.checked = true;
+    function selectAllUsers(users) {
+        users.forEach(id => window.userSelections.add(id));
+        document.querySelectorAll('[id^="cb_user_"]').forEach(cb => {
+            cb.checked = true;
         });
-        debouncedUpdateUI();
-        showToast(`Selected ${userIds.length} users`, 'success');
+        updateSelectionDisplay();
+        saveSelectionState();
     }
 
     function clearAllUsers() {
-        const count = window.ultraState.userSelections.size;
-        window.ultraState.userSelections.clear();
+        window.userSelections.clear();
         document.querySelectorAll('[id^="cb_user_"]').forEach(cb => {
             cb.checked = false;
-            const container = cb.closest('.user-item');
-            if (container) {
-                container.style.background = '';
-                container.style.borderLeft = '';
-            }
         });
-        debouncedUpdateUI();
-        showToast(`Cleared ${count} user selections`, 'info');
+        updateSelectionDisplay();
+        saveSelectionState();
     }
 
-    // Progress indicators
-    function updateProgressIndicators() {
-        const candidateProgress = document.querySelector('.candidate-progress');
-        const userProgress = document.querySelector('.user-progress');
+    // Confirmation dialog management
+    function showCandidateDeleteConfirmation() {
+        window.bulkDeleteConfirmed = true;
+        updateConfirmationDialogs();
+    }
 
-        if (candidateProgress) {
-            const count = window.ultraState.candidateSelections.size;
-            candidateProgress.style.width = Math.min(count * 10, 100) + '%';
+    function hideCandidateDeleteConfirmation() {
+        window.bulkDeleteConfirmed = false;
+        updateConfirmationDialogs();
+    }
+
+    function showUserDeleteConfirmation() {
+        window.bulkUserDeleteConfirmed = true;
+        updateConfirmationDialogs();
+    }
+
+    function hideUserDeleteConfirmation() {
+        window.bulkUserDeleteConfirmed = false;
+        updateConfirmationDialogs();
+    }
+
+    function updateConfirmationDialogs() {
+        const candidateConfirm = document.querySelector('.candidate-delete-confirmation');
+        const userConfirm = document.querySelector('.user-delete-confirmation');
+
+        if (candidateConfirm) {
+            candidateConfirm.style.display = window.bulkDeleteConfirmed ? 'block' : 'none';
         }
 
-        if (userProgress) {
-            const count = window.ultraState.userSelections.size;
-            userProgress.style.width = Math.min(count * 20, 100) + '%';
+        if (userConfirm) {
+            userConfirm.style.display = window.bulkUserDeleteConfirmed ? 'block' : 'none';
         }
     }
 
-    // Toast notifications
-    function showToast(message, type = 'info') {
-        const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        toast.innerHTML = `
-            <div style="
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#17a2b8'};
-                color: white;
-                padding: 1rem 2rem;
-                border-radius: 5px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                z-index: 10000;
-                animation: slideInRight 0.3s ease;
-            ">
-                ${message}
-            </div>
-        `;
+    // Execute bulk operations
+    function executeBulkCandidateDelete() {
+        const selectedIds = Array.from(window.candidateSelections);
+        if (selectedIds.length === 0) return;
 
-        document.body.appendChild(toast);
-        setTimeout(() => {
-            toast.style.animation = 'slideOutRight 0.3s ease';
-            setTimeout(() => document.body.removeChild(toast), 300);
-        }, 3000);
-    }
-
-    // Bulk operations execution
-    function executeBulkOperation(operation, data) {
-        if (window.ultraState.bulkOperationInProgress) return;
-
-        window.ultraState.bulkOperationInProgress = true;
-        showToast('Operation in progress...', 'info');
-
-        // Disable all bulk buttons
-        document.querySelectorAll('.bulk-btn').forEach(btn => {
-            btn.disabled = true;
-            btn.style.opacity = '0.6';
-        });
+        // Show loading state
+        const deleteBtn = document.getElementById('bulk-candidate-delete-btn');
+        if (deleteBtn) {
+            deleteBtn.innerHTML = '⏳ Deleting...';
+            deleteBtn.disabled = true;
+        }
 
         // Send to Streamlit
-        const event = new CustomEvent('bulkOperation', {
-            detail: { operation, data }
+        const event = new CustomEvent('bulkCandidateDelete', {
+            detail: { candidateIds: selectedIds }
         });
         window.dispatchEvent(event);
     }
 
-    function resetBulkOperation() {
-        window.ultraState.bulkOperationInProgress = false;
+    function executeBulkUserDelete() {
+        const selectedIds = Array.from(window.userSelections);
+        if (selectedIds.length === 0) return;
 
-        // Re-enable all bulk buttons
-        document.querySelectorAll('.bulk-btn').forEach(btn => {
-            btn.disabled = false;
-            btn.style.opacity = '1';
+        // Show loading state
+        const deleteBtn = document.getElementById('bulk-user-delete-btn');
+        if (deleteBtn) {
+            deleteBtn.innerHTML = '⏳ Deleting...';
+            deleteBtn.disabled = true;
+        }
+
+        // Send to Streamlit
+        const event = new CustomEvent('bulkUserDelete', {
+            detail: { userIds: selectedIds }
         });
+        window.dispatchEvent(event);
     }
 
-    // State persistence
-    function saveUltraState() {
-        localStorage.setItem('ultraCandidateSelections', JSON.stringify(Array.from(window.ultraState.candidateSelections)));
-        localStorage.setItem('ultraUserSelections', JSON.stringify(Array.from(window.ultraState.userSelections)));
-        window.ultraState.lastUpdate = Date.now();
+    // Bulk permission updates
+    function executeBulkPermissionUpdate(permission, value) {
+        const selectedIds = Array.from(window.userSelections);
+        if (selectedIds.length === 0) return;
+
+        // Show loading state
+        const updateBtn = document.getElementById('bulk-permission-update-btn');
+        if (updateBtn) {
+            updateBtn.innerHTML = '⏳ Updating...';
+            updateBtn.disabled = true;
+        }
+
+        // Send to Streamlit
+        const event = new CustomEvent('bulkPermissionUpdate', {
+            detail: { 
+                userIds: selectedIds,
+                permission: permission,
+                value: value
+            }
+        });
+        window.dispatchEvent(event);
     }
 
-    function loadUltraState() {
-        const candidateSelections = JSON.parse(localStorage.getItem('ultraCandidateSelections') || '[]');
-        const userSelections = JSON.parse(localStorage.getItem('ultraUserSelections') || '[]');
+    // Save/load selection state
+    function saveSelectionState() {
+        localStorage.setItem('candidateSelections', JSON.stringify(Array.from(window.candidateSelections)));
+        localStorage.setItem('userSelections', JSON.stringify(Array.from(window.userSelections)));
+    }
 
-        window.ultraState.candidateSelections = new Set(candidateSelections);
-        window.ultraState.userSelections = new Set(userSelections);
+    function loadSelectionState() {
+        const candidateSelections = JSON.parse(localStorage.getItem('candidateSelections') || '[]');
+        const userSelections = JSON.parse(localStorage.getItem('userSelections') || '[]');
 
-        // Restore UI state
+        window.candidateSelections = new Set(candidateSelections);
+        window.userSelections = new Set(userSelections);
+
+        // Update UI
         candidateSelections.forEach(id => {
             const checkbox = document.getElementById('cb_candidate_' + id);
             if (checkbox) checkbox.checked = true;
@@ -597,827 +430,1393 @@ def render_ultra_fast_selection_system():
             if (checkbox) checkbox.checked = true;
         });
 
-        debouncedUpdateUI();
+        updateSelectionDisplay();
     }
 
-    // Initialize system
+    // Initialize on page load
     document.addEventListener('DOMContentLoaded', function() {
-        loadUltraState();
-
-        // Add CSS for animations
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes slideInRight {
-                from { transform: translateX(100%); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
-            @keyframes slideOutRight {
-                from { transform: translateX(0); opacity: 1; }
-                to { transform: translateX(100%); opacity: 0; }
-            }
-            .candidate-bulk-panel, .user-bulk-panel {
-                transition: all 0.3s ease;
-            }
-            .candidate-item, .user-item {
-                transition: all 0.2s ease;
-            }
-        `;
-        document.head.appendChild(style);
+        loadSelectionState();
+        updateSelectionDisplay();
     });
 
-    // Auto-refresh state periodically
-    setInterval(function() {
-        if (Date.now() - window.ultraState.lastUpdate > 30000) { // 30 seconds
-            loadUltraState();
-        }
-    }, 5000);
+    // Handle Streamlit component communication
+    window.addEventListener('streamlit:componentReady', function() {
+        loadSelectionState();
+        updateSelectionDisplay();
+    });
 
     </script>
     """
 
-    components.html(advanced_js, height=1)
+    components.html(selection_js, height=1)
 
 
-def render_ultra_candidate_checkbox(candidate_id: str):
-    """Ultra-fast candidate checkbox with instant feedback."""
+def _render_instant_candidate_checkbox(candidate_id: str) -> None:
+    """Render instant candidate checkbox with zero refresh."""
+
     checkbox_html = f"""
-    <div class="candidate-checkbox" style="padding: 5px;">
+    <div style="padding: 2px 0;">
         <input 
             type="checkbox" 
             id="cb_candidate_{candidate_id}" 
             onchange="toggleCandidateSelection('{candidate_id}')"
             style="
-                width: 20px; 
-                height: 20px; 
+                width: 18px; 
+                height: 18px; 
                 cursor: pointer;
-                accent-color: #f39c12;
-                transform: scale(1.3);
-                transition: all 0.2s ease;
+                accent-color: #ff4444;
+                transform: scale(1.2);
             "
-            title="Select for bulk operations"
         />
     </div>
     """
-    components.html(checkbox_html, height=35)
+
+    components.html(checkbox_html, height=25)
 
 
-def render_ultra_user_checkbox(user_id: int):
-    """Ultra-fast user checkbox with instant feedback."""
+def _render_instant_user_checkbox(user_id: int) -> None:
+    """Render instant user checkbox with zero refresh."""
+
     checkbox_html = f"""
-    <div class="user-checkbox" style="padding: 5px;">
+    <div style="padding: 2px 0;">
         <input 
             type="checkbox" 
             id="cb_user_{user_id}" 
             onchange="toggleUserSelection('{user_id}')"
             style="
-                width: 20px; 
-                height: 20px; 
+                width: 18px; 
+                height: 18px; 
                 cursor: pointer;
-                accent-color: #28a745;
-                transform: scale(1.3);
-                transition: all 0.2s ease;
+                accent-color: #4444ff;
+                transform: scale(1.2);
             "
-            title="Select for bulk operations"
         />
     </div>
     """
-    components.html(checkbox_html, height=35)
+
+    components.html(checkbox_html, height=25)
 
 
-def render_ultra_bulk_candidate_panel(candidates: List[Dict]):
-    """Ultra-advanced bulk candidate operations panel."""
+def _render_bulk_candidate_controls(candidates: List[Dict], perms: Dict[str, Any]):
+    """Render bulk candidate controls with zero refresh operations."""
+
+    if not perms.get("can_delete_records"):
+        return
 
     candidate_ids = [c.get('candidate_id', '') for c in candidates if c.get('candidate_id')]
     candidate_ids_js = json.dumps(candidate_ids)
 
-    bulk_panel_html = f"""
-    <!-- Ultra Bulk Candidate Panel -->
-    <div class="candidate-bulk-panel" style="
+    bulk_controls_html = f"""
+    <!-- Always visible bulk action bar -->
+    <div class="candidate-bulk-bar" style="
+        background: linear-gradient(90deg, #f0f0f0, #e0e0e0);
+        color: #666;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         display: none;
-        background: linear-gradient(135deg, #fff3cd, #ffeaa7);
-        border: 2px solid #f39c12;
-        border-radius: 15px;
-        padding: 2rem;
-        margin: 2rem 0;
-        box-shadow: 0 8px 16px rgba(243, 156, 18, 0.2);
-        position: sticky;
-        top: 20px;
-        z-index: 100;
-        opacity: 0;
-        transform: translateY(-20px);
+        justify-content: space-between;
+        align-items: center;
         transition: all 0.3s ease;
     ">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-            <div>
-                <h2 style="margin: 0; color: #d35400; display: flex; align-items: center; gap: 0.5rem;">
-                    🎯 <span class="candidate-count">0</span> Candidates Selected
-                </h2>
-                <div class="candidate-progress" style="
-                    width: 0%;
-                    height: 4px;
-                    background: #f39c12;
-                    border-radius: 2px;
-                    margin-top: 0.5rem;
-                    transition: width 0.3s ease;
-                "></div>
-            </div>
-            <button onclick="clearAllCandidates()" style="
-                background: #95a5a6;
+        <div>
+            <h3 style="margin: 0; display: inline;">
+                🗑️ <span class="candidate-selection-count">0</span> Candidates Selected
+            </h3>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <button onclick="showCandidateDeleteConfirmation()" style="
+                background: #ff4444;
                 color: white;
                 border: none;
-                padding: 0.5rem 1rem;
-                border-radius: 20px;
+                padding: 0.75rem 1.5rem;
+                border-radius: 25px;
                 cursor: pointer;
-                font-size: 0.9rem;
+                font-weight: bold;
+                font-size: 1rem;
                 transition: all 0.2s ease;
-            " onmouseover="this.style.background='#7f8c8d'" onmouseout="this.style.background='#95a5a6'">
-                ❌ Clear All
+            " onmouseover="this.style.background='#ff6666'" onmouseout="this.style.background='#ff4444'">
+                🗑️ DELETE SELECTED
+            </button>
+            <button onclick="clearAllCandidates()" style="
+                background: #666;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 25px;
+                cursor: pointer;
+                font-weight: bold;
+            " onmouseover="this.style.background='#888'" onmouseout="this.style.background='#666'">
+                ❌ CLEAR ALL
             </button>
         </div>
+    </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+    <!-- Bulk action quick buttons -->
+    <div style="margin: 1rem 0; display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="selectAllCandidates({candidate_ids_js})" style="
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        ">☑️ SELECT ALL VISIBLE</button>
 
-            <!-- Delete Operations -->
-            <div style="background: rgba(231, 76, 60, 0.1); padding: 1rem; border-radius: 10px;">
-                <h4 style="color: #c0392b; margin: 0 0 1rem 0;">🗑️ Delete Operations</h4>
-                <button class="bulk-btn" onclick="executeBulkOperation('delete_candidates', Array.from(window.ultraState.candidateSelections))" style="
-                    width: 100%;
-                    background: #e74c3c;
-                    color: white;
-                    border: none;
-                    padding: 0.75rem;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    font-weight: bold;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                " onmouseover="this.style.background='#c0392b'" onmouseout="this.style.background='#e74c3c'">
-                    🗑️ DELETE SELECTED
-                </button>
-            </div>
+        <button onclick="clearAllCandidates()" style="
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        ">❌ CLEAR ALL</button>
 
-            <!-- Permission Operations -->
-            <div style="background: rgba(52, 152, 219, 0.1); padding: 1rem; border-radius: 10px;">
-                <h4 style="color: #2980b9; margin: 0 0 1rem 0;">🔐 Permissions</h4>
-                <button class="bulk-btn" onclick="executeBulkOperation('grant_edit', Array.from(window.ultraState.candidateSelections))" style="
-                    width: 100%;
-                    background: #3498db;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">✅ Grant Edit Access</button>
+        <span style="
+            background: #f8f9fa;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            font-size: 0.9rem;
+        ">📊 <span class="candidate-selection-count">0</span> selected</span>
+    </div>
 
-                <button class="bulk-btn" onclick="executeBulkOperation('revoke_edit', Array.from(window.ultraState.candidateSelections))" style="
-                    width: 100%;
-                    background: #e67e22;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                ">🔒 Revoke Edit Access</button>
-            </div>
+    <!-- Zero-refresh confirmation dialog -->
+    <div class="candidate-delete-confirmation" style="
+        display: none;
+        background: linear-gradient(135deg, #ffebee, #ffcdd2);
+        border: 2px solid #f44336;
+        border-radius: 10px;
+        padding: 2rem;
+        margin: 2rem 0;
+        text-align: center;
+    ">
+        <h2 style="color: #c62828; margin-top: 0;">
+            ⚠️ CONFIRM BULK DELETE
+        </h2>
+        <p style="font-size: 1.1rem; color: #d32f2f;">
+            You are about to permanently delete <strong><span class="candidate-selection-count">0</span> candidates</strong>.
+            <br><strong>This action cannot be undone!</strong>
+        </p>
 
-            <!-- Export Operations -->
-            <div style="background: rgba(46, 204, 113, 0.1); padding: 1rem; border-radius: 10px;">
-                <h4 style="color: #27ae60; margin: 0 0 1rem 0;">📊 Export</h4>
-                <button class="bulk-btn" onclick="executeBulkOperation('export_csv', Array.from(window.ultraState.candidateSelections))" style="
-                    width: 100%;
-                    background: #2ecc71;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">📄 Export to CSV</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('export_emails', Array.from(window.ultraState.candidateSelections))" style="
-                    width: 100%;
-                    background: #16a085;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                ">📧 Export Emails</button>
-            </div>
-
+        <div style="margin: 2rem 0;">
+            <input type="text" id="candidate-delete-confirmation-input" placeholder="Type 'DELETE CANDIDATES' to confirm" style="
+                padding: 1rem;
+                font-size: 1rem;
+                border: 2px solid #f44336;
+                border-radius: 5px;
+                width: 300px;
+                text-align: center;
+            " onkeyup="checkCandidateDeleteConfirmation()" />
         </div>
 
-        <!-- Quick Select Options -->
-        <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 2px solid #f39c12;">
-            <h4 style="color: #d35400; margin: 0 0 1rem 0;">⚡ Quick Select</h4>
-            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                <button onclick="selectAllCandidates({candidate_ids_js})" style="
-                    background: #27ae60;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem 1rem;
-                    border-radius: 20px;
-                    cursor: pointer;
-                    font-size: 0.9rem;
-                    transition: all 0.2s ease;
-                ">☑️ Select All Visible ({len(candidate_ids)})</button>
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+            <button onclick="hideCandidateDeleteConfirmation()" style="
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 1rem 2rem;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 1rem;
+            ">❌ CANCEL</button>
 
-                <button onclick="clearAllCandidates()" style="
-                    background: #e74c3c;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem 1rem;
-                    border-radius: 20px;
-                    cursor: pointer;
-                    font-size: 0.9rem;
-                    transition: all 0.2s ease;
-                ">❌ Clear All</button>
-            </div>
+            <button id="bulk-candidate-delete-btn" onclick="executeBulkCandidateDelete()" disabled style="
+                background: #ccc;
+                color: #666;
+                border: none;
+                padding: 1rem 2rem;
+                border-radius: 5px;
+                cursor: not-allowed;
+                font-size: 1rem;
+            ">🗑️ DELETE ALL</button>
         </div>
     </div>
+
+    <script>
+    function checkCandidateDeleteConfirmation() {{
+        const input = document.getElementById('candidate-delete-confirmation-input');
+        const button = document.getElementById('bulk-candidate-delete-btn');
+
+        if (input.value.trim() === 'DELETE CANDIDATES') {{
+            button.disabled = false;
+            button.style.background = '#dc3545';
+            button.style.color = 'white';
+            button.style.cursor = 'pointer';
+        }} else {{
+            button.disabled = true;
+            button.style.background = '#ccc';
+            button.style.color = '#666';
+            button.style.cursor = 'not-allowed';
+        }}
+    }}
+    </script>
     """
 
-    components.html(bulk_panel_html, height=1)
+    components.html(bulk_controls_html, height=1)
 
 
-def render_ultra_bulk_user_panel(users: List[Dict]):
-    """Ultra-advanced bulk user operations panel."""
+def _render_bulk_user_controls(users: List[Dict], perms: Dict[str, Any]):
+    """Render bulk user controls with zero refresh operations."""
+
+    if not perms.get("can_manage_users"):
+        return
 
     user_ids = [str(u.get('id', '')) for u in users if u.get('id')]
     user_ids_js = json.dumps(user_ids)
 
-    bulk_user_panel_html = f"""
-    <!-- Ultra Bulk User Panel -->
-    <div class="user-bulk-panel" style="
+    bulk_user_controls_html = f"""
+    <!-- Always visible bulk user action bar -->
+    <div class="user-bulk-bar" style="
+        background: linear-gradient(90deg, #f0f0f0, #e0e0e0);
+        color: #666;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         display: none;
-        background: linear-gradient(135deg, #d4edda, #c3e6cb);
-        border: 2px solid #28a745;
-        border-radius: 15px;
-        padding: 2rem;
-        margin: 2rem 0;
-        box-shadow: 0 8px 16px rgba(40, 167, 69, 0.2);
-        position: sticky;
-        top: 20px;
-        z-index: 100;
-        opacity: 0;
-        transform: translateY(-20px);
+        justify-content: space-between;
+        align-items: center;
         transition: all 0.3s ease;
     ">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-            <div>
-                <h2 style="margin: 0; color: #155724; display: flex; align-items: center; gap: 0.5rem;">
-                    👥 <span class="user-count">0</span> Users Selected
-                </h2>
-                <div class="user-progress" style="
-                    width: 0%;
-                    height: 4px;
-                    background: #28a745;
-                    border-radius: 2px;
-                    margin-top: 0.5rem;
-                    transition: width 0.3s ease;
-                "></div>
-            </div>
-            <button onclick="clearAllUsers()" style="
-                background: #6c757d;
+        <div>
+            <h3 style="margin: 0; display: inline;">
+                👥 <span class="user-selection-count">0</span> Users Selected
+            </h3>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <button onclick="executeBulkPermissionUpdate('can_view_cvs', true)" style="
+                background: #28a745;
                 color: white;
                 border: none;
                 padding: 0.5rem 1rem;
                 border-radius: 20px;
                 cursor: pointer;
                 font-size: 0.9rem;
-                transition: all 0.2s ease;
-            " onmouseover="this.style.background='#5a6268'" onmouseout="this.style.background='#6c757d'">
-                ❌ Clear All
-            </button>
-        </div>
+            ">✅ GRANT CV VIEW</button>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+            <button onclick="executeBulkPermissionUpdate('can_delete_records', true)" style="
+                background: #ffc107;
+                color: black;
+                border: none;
+                padding: 0.5rem 1rem;
+                border-radius: 20px;
+                cursor: pointer;
+                font-size: 0.9rem;
+            ">🗑️ GRANT DELETE</button>
 
-            <!-- Permission Management -->
-            <div style="background: rgba(0, 123, 255, 0.1); padding: 1rem; border-radius: 10px;">
-                <h4 style="color: #0056b3; margin: 0 0 1rem 0;">🔐 Permissions</h4>
+            <button onclick="showUserDeleteConfirmation()" style="
+                background: #dc3545;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 25px;
+                cursor: pointer;
+                font-weight: bold;
+            ">🗑️ DELETE USERS</button>
 
-                <button class="bulk-btn" onclick="executeBulkOperation('grant_cv_view', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #007bff;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">👁️ Grant CV View</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('revoke_cv_view', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #ffc107;
-                    color: #212529;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">🚫 Revoke CV View</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('grant_delete', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #dc3545;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">🗑️ Grant Delete Rights</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('revoke_delete', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #e67e22;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                ">🔒 Revoke Delete Rights</button>
-            </div>
-
-            <!-- User Management -->
-            <div style="background: rgba(108, 117, 125, 0.1); padding: 1rem; border-radius: 10px;">
-                <h4 style="color: #495057; margin: 0 0 1rem 0;">👤 User Actions</h4>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('send_welcome_email', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #17a2b8;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">📧 Send Welcome Email</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('reset_passwords', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #fd7e14;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">🔑 Reset Passwords</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('export_user_list', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #28a745;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    margin-bottom: 0.5rem;
-                    transition: all 0.2s ease;
-                ">📊 Export User List</button>
-
-                <button class="bulk-btn" onclick="executeBulkOperation('delete_users', Array.from(window.ultraState.userSelections))" style="
-                    width: 100%;
-                    background: #dc3545;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-weight: bold;
-                    transition: all 0.2s ease;
-                ">🗑️ DELETE USERS</button>
-            </div>
-
-        </div>
-
-        <!-- Quick Select Options -->
-        <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 2px solid #28a745;">
-            <h4 style="color: #155724; margin: 0 0 1rem 0;">⚡ Quick Select</h4>
-            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                <button onclick="selectAllUsers({user_ids_js})" style="
-                    background: #007bff;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem 1rem;
-                    border-radius: 20px;
-                    cursor: pointer;
-                    font-size: 0.9rem;
-                    transition: all 0.2s ease;
-                ">☑️ Select All Visible ({len(user_ids)})</button>
-
-                <button onclick="clearAllUsers()" style="
-                    background: #dc3545;
-                    color: white;
-                    border: none;
-                    padding: 0.5rem 1rem;
-                    border-radius: 20px;
-                    cursor: pointer;
-                    font-size: 0.9rem;
-                    transition: all 0.2s ease;
-                ">❌ Clear All</button>
-            </div>
+            <button onclick="clearAllUsers()" style="
+                background: #666;
+                color: white;
+                border: none;
+                padding: 0.5rem 1rem;
+                border-radius: 20px;
+                cursor: pointer;
+            ">❌ CLEAR</button>
         </div>
     </div>
+
+    <!-- Bulk user action quick buttons -->
+    <div style="margin: 1rem 0; display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="selectAllUsers({user_ids_js})" style="
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        ">☑️ SELECT ALL USERS</button>
+
+        <button onclick="clearAllUsers()" style="
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        ">❌ CLEAR ALL</button>
+
+        <span style="
+            background: #e3f2fd;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            border: 1px solid #2196f3;
+            font-size: 0.9rem;
+        ">👥 <span class="user-selection-count">0</span> selected</span>
+    </div>
+
+    <!-- Zero-refresh user delete confirmation dialog -->
+    <div class="user-delete-confirmation" style="
+        display: none;
+        background: linear-gradient(135deg, #e8f4fd, #bbdefb);
+        border: 2px solid #2196f3;
+        border-radius: 10px;
+        padding: 2rem;
+        margin: 2rem 0;
+        text-align: center;
+    ">
+        <h2 style="color: #1976d2; margin-top: 0;">
+            ⚠️ CONFIRM BULK USER DELETE
+        </h2>
+        <p style="font-size: 1.1rem; color: #1565c0;">
+            You are about to permanently delete <strong><span class="user-selection-count">0</span> users</strong>.
+            <br><strong>This will remove their access completely!</strong>
+        </p>
+
+        <div style="margin: 2rem 0;">
+            <input type="text" id="user-delete-confirmation-input" placeholder="Type 'DELETE USERS' to confirm" style="
+                padding: 1rem;
+                font-size: 1rem;
+                border: 2px solid #2196f3;
+                border-radius: 5px;
+                width: 300px;
+                text-align: center;
+            " onkeyup="checkUserDeleteConfirmation()" />
+        </div>
+
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+            <button onclick="hideUserDeleteConfirmation()" style="
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 1rem 2rem;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 1rem;
+            ">❌ CANCEL</button>
+
+            <button id="bulk-user-delete-btn" onclick="executeBulkUserDelete()" disabled style="
+                background: #ccc;
+                color: #666;
+                border: none;
+                padding: 1rem 2rem;
+                border-radius: 5px;
+                cursor: not-allowed;
+                font-size: 1rem;
+            ">🗑️ DELETE ALL</button>
+        </div>
+    </div>
+
+    <script>
+    function checkUserDeleteConfirmation() {{
+        const input = document.getElementById('user-delete-confirmation-input');
+        const button = document.getElementById('bulk-user-delete-btn');
+
+        if (input.value.trim() === 'DELETE USERS') {{
+            button.disabled = false;
+            button.style.background = '#dc3545';
+            button.style.color = 'white';
+            button.style.cursor = 'pointer';
+        }} else {{
+            button.disabled = true;
+            button.style.background = '#ccc';
+            button.style.color = '#666';
+            button.style.cursor = 'not-allowed';
+        }}
+    }}
+    </script>
     """
 
-    components.html(bulk_user_panel_html, height=1)
+    components.html(bulk_user_controls_html, height=1)
 
 
-# ===================================================================================
-# BULK OPERATION HANDLERS - Ultra Fast Processing
-# ===================================================================================
+# =============================================================================
+# Access Rights Check - Strict Permission Enforcement
+# =============================================================================
 
-class BulkOperationHandlers:
-    """Ultra-fast bulk operation handlers with proper error handling."""
+def _check_user_permissions(user_id: int) -> Dict[str, Any]:
+    """Check user permissions with STRICT enforcement."""
+    try:
+        perms = get_user_permissions(user_id)
+        if not perms:
+            return {"role": "user", "can_view_cvs": False, "can_delete_records": False, "can_manage_users": False}
 
-    @staticmethod
-    def handle_candidate_operations(operation: str, candidate_ids: List[str], user_id: int) -> Tuple[bool, str]:
-        """Handle all candidate bulk operations."""
+        role = (perms.get("role") or "user").lower()
 
-        if not candidate_ids:
-            return False, "No candidates selected"
+        return {
+            "role": role,
+            "can_view_cvs": bool(perms.get("can_view_cvs", False)),
+            "can_delete_records": bool(perms.get("can_delete_records", False)),
+            "can_manage_users": role in ("ceo", "admin")
+        }
+    except Exception as e:
+        st.error(f"Permission check failed: {e}")
+        return {"role": "user", "can_view_cvs": False, "can_delete_records": False, "can_manage_users": False}
 
+
+# =============================================================================
+# CV Access with Proper Rights Check
+# =============================================================================
+
+def _get_cv_with_proper_access(candidate_id: str, user_id: int) -> Tuple[Optional[bytes], Optional[str], str]:
+    """Get CV with proper access control."""
+    try:
+        perms = _check_user_permissions(user_id)
+        if not perms.get("can_view_cvs", False):
+            return None, None, "no_permission"
+
+        conn = get_conn()
         try:
-            if operation == "delete_candidates":
-                return FastDatabaseOperations.bulk_delete_candidates_fast(candidate_ids)
-
-            elif operation == "grant_edit":
-                return FastDatabaseOperations.bulk_update_candidate_permissions_fast(candidate_ids, True)
-
-            elif operation == "revoke_edit":
-                return FastDatabaseOperations.bulk_update_candidate_permissions_fast(candidate_ids, False)
-
-            elif operation == "export_csv":
-                return BulkOperationHandlers._export_candidates_csv(candidate_ids)
-
-            elif operation == "export_emails":
-                return BulkOperationHandlers._export_candidate_emails(candidate_ids)
-
-            else:
-                return False, f"Unknown operation: {operation}"
-
-        except Exception as e:
-            return False, f"Operation failed: {str(e)}"
-
-    @staticmethod
-    def handle_user_operations(operation: str, user_ids: List[str], current_user_id: int) -> Tuple[bool, str]:
-        """Handle all user bulk operations."""
-
-        if not user_ids:
-            return False, "No users selected"
-
-        try:
-            if operation == "delete_users":
-                return FastDatabaseOperations.bulk_delete_users_fast(user_ids, current_user_id)
-
-            elif operation == "grant_cv_view":
-                return FastDatabaseOperations.bulk_update_user_permissions_fast(user_ids, {"can_view_cvs": True})
-
-            elif operation == "revoke_cv_view":
-                return FastDatabaseOperations.bulk_update_user_permissions_fast(user_ids, {"can_view_cvs": False})
-
-            elif operation == "grant_delete":
-                return FastDatabaseOperations.bulk_update_user_permissions_fast(user_ids, {"can_delete_records": True})
-
-            elif operation == "revoke_delete":
-                return FastDatabaseOperations.bulk_update_user_permissions_fast(user_ids, {"can_delete_records": False})
-
-            elif operation == "send_welcome_email":
-                return BulkOperationHandlers._send_bulk_welcome_emails(user_ids)
-
-            elif operation == "reset_passwords":
-                return BulkOperationHandlers._bulk_reset_passwords(user_ids)
-
-            elif operation == "export_user_list":
-                return BulkOperationHandlers._export_users_csv(user_ids)
-
-            else:
-                return False, f"Unknown operation: {operation}"
-
-        except Exception as e:
-            return False, f"Operation failed: {str(e)}"
-
-    @staticmethod
-    def _export_candidates_csv(candidate_ids: List[str]) -> Tuple[bool, str]:
-        """Export selected candidates to CSV."""
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed"
-
-            import csv
-            import io
-
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Write header
-            writer.writerow(['ID', 'Name', 'Email', 'Phone', 'Created At', 'Can Edit'])
-
-            # Get candidate data
             with conn.cursor() as cur:
-                placeholders = ','.join(['%s'] * len(candidate_ids))
-                cur.execute(f"""
-                    SELECT candidate_id, name, email, phone, created_at, can_edit 
-                    FROM candidates 
-                    WHERE candidate_id IN ({placeholders})
-                """, candidate_ids)
+                # Check what CV columns exist
+                cur.execute("""
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_name = 'candidates'
+                              AND column_name IN ('cv_file', 'cv_filename', 'resume_link')
+                            """)
+                existing_cols = {row[0] for row in cur.fetchall()}
 
-                for row in cur.fetchall():
-                    writer.writerow(row)
+                select_parts = []
+                if 'cv_file' in existing_cols:
+                    select_parts.append('cv_file')
+                if 'cv_filename' in existing_cols:
+                    select_parts.append('cv_filename')
+                if 'resume_link' in existing_cols:
+                    select_parts.append('resume_link')
 
+                if not select_parts:
+                    return None, None, "not_found"
+
+                query = f"SELECT {', '.join(select_parts)} FROM candidates WHERE candidate_id = %s"
+                cur.execute(query, (candidate_id,))
+                result = cur.fetchone()
+
+                if not result:
+                    return None, None, "not_found"
+
+                cv_file = result[0] if len(result) > 0 and 'cv_file' in select_parts else None
+                cv_filename = result[1] if len(result) > 1 and 'cv_filename' in select_parts else None
+                resume_link = result[2] if len(result) > 2 and 'resume_link' in select_parts else None
+
+                if cv_file:
+                    return bytes(cv_file), cv_filename or f"{candidate_id}.pdf", "ok"
+                elif resume_link and resume_link.strip():
+                    return None, resume_link.strip(), "link_only"
+                else:
+                    return None, None, "not_found"
+
+        finally:
             conn.close()
 
-            # Store in session state for download
-            st.session_state.csv_export = output.getvalue()
-            st.session_state.csv_filename = f"candidates_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    except Exception as e:
+        st.error(f"CV fetch error: {e}")
+        return None, None, "error"
 
-            return True, f"CSV export ready with {len(candidate_ids)} candidates"
 
-        except Exception as e:
-            return False, f"CSV export failed: {str(e)}"
+# =============================================================================
+# FIXED Personal Details Display - Better Organization
+# =============================================================================
 
-    @staticmethod
-    def _export_candidate_emails(candidate_ids: List[str]) -> Tuple[bool, str]:
-        """Export candidate email list."""
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed"
+def _render_personal_details_organized(candidate: Dict[str, Any]):
+    """Render personal details in a well-organized, comprehensive format."""
 
-            emails = []
-            with conn.cursor() as cur:
-                placeholders = ','.join(['%s'] * len(candidate_ids))
-                cur.execute(f"""
-                    SELECT email FROM candidates 
-                    WHERE candidate_id IN ({placeholders}) AND email IS NOT NULL AND email != ''
-                """, candidate_ids)
+    st.markdown("### 👤 Personal Details")
 
-                emails = [row[0] for row in cur.fetchall()]
+    # Comprehensive field mapping for better display
+    field_labels = {
+        "name": "👤 Full Name",
+        "email": "📧 Email Address",
+        "phone": "📱 Phone Number",
+        "dob": "🎂 Date of Birth",
+        "current_address": "🏠 Current Address",
+        "permanent_address": "🏡 Permanent Address",
+        "address": "🏠 Address",
+        "caste": "📋 Caste",
+        "sub_caste": "📋 Sub-caste",
+        "marital_status": "💑 Marital Status",
+        "highest_qualification": "🎓 Highest Qualification",
+        "work_experience": "💼 Work Experience",
+        "referral": "📢 How did you hear about us?",
+        "ready_festivals": "🎊 Ready to work on festivals?",
+        "ready_late_nights": "🌙 Ready to work late nights?",
+        "created_at": "📅 Application Created",
+        "updated_at": "🕐 Last Updated",
+        "cv_filename": "📄 CV File Name",
+        "resume_link": "🔗 Resume Link",
+        "created_by": "👥 Created By"
+    }
 
-            conn.close()
+    # Collect ALL available data
+    all_data = {}
 
-            if emails:
-                email_list = '; '.join(emails)
-                st.session_state.email_export = email_list
-                return True, f"Exported {len(emails)} email addresses"
-            else:
-                return False, "No valid email addresses found"
+    # Get data from direct columns
+    for key, value in candidate.items():
+        if key.startswith('form_'):
+            # This is from form_data, use the key without prefix
+            clean_key = key[5:]  # Remove 'form_' prefix
+            if value and str(value).strip():
+                all_data[clean_key] = value
+        elif not key.startswith('has_') and key not in ['id', 'form_data']:
+            # Regular column data
+            if value and str(value).strip():
+                all_data[key] = value
 
-        except Exception as e:
-            return False, f"Email export failed: {str(e)}"
+    # Also check form_data directly if it exists
+    form_data = candidate.get('form_data', {})
+    if isinstance(form_data, dict):
+        for key, value in form_data.items():
+            if value and str(value).strip():
+                all_data[key] = value
 
-    @staticmethod
-    def _send_bulk_welcome_emails(user_ids: List[str]) -> Tuple[bool, str]:
-        """Send welcome emails to selected users."""
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed"
+    if not all_data:
+        st.info("📋 No detailed personal information available")
+        return
 
-            sent_count = 0
-            failed_count = 0
+    # Display in organized sections with better formatting
+    with st.container():
+        # Basic Information Section
+        st.markdown("#### 👤 Basic Information")
+        basic_col1, basic_col2, basic_col3 = st.columns(3)
 
-            with conn.cursor() as cur:
-                placeholders = ','.join(['%s'] * len(user_ids))
-                cur.execute(f"""
-                    SELECT id, email FROM users 
-                    WHERE id IN ({placeholders}) AND email IS NOT NULL AND email != ''
-                """, user_ids)
+        basic_fields = ["name", "email", "phone", "dob"]
+        basic_items = [(k, v) for k, v in all_data.items() if k in basic_fields]
 
-                users = cur.fetchall()
+        if basic_items:
+            for i, (key, value) in enumerate(basic_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                display_value = _format_datetime(value) if key == "dob" else str(value)
 
-            conn.close()
+                if i % 3 == 0:
+                    with basic_col1:
+                        st.markdown(f"**{label}:**")
+                        st.write(display_value)
+                elif i % 3 == 1:
+                    with basic_col2:
+                        st.markdown(f"**{label}:**")
+                        st.write(display_value)
+                else:
+                    with basic_col3:
+                        st.markdown(f"**{label}:**")
+                        st.write(display_value)
 
-            # Send emails using ThreadPool for performance
-            def send_single_email(user_data):
+        # Address Information Section
+        st.markdown("#### 🏠 Address Information")
+        address_fields = ["current_address", "permanent_address", "address"]
+        address_items = [(k, v) for k, v in all_data.items() if k in address_fields]
+
+        if address_items:
+            addr_col1, addr_col2 = st.columns(2)
+            for i, (key, value) in enumerate(address_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                if i % 2 == 0:
+                    with addr_col1:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+                else:
+                    with addr_col2:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+        else:
+            st.info("No address information available")
+
+        # Personal & Family Details Section
+        st.markdown("#### 👥 Personal & Family Details")
+        personal_fields = ["caste", "sub_caste", "marital_status"]
+        personal_items = [(k, v) for k, v in all_data.items() if k in personal_fields]
+
+        if personal_items:
+            pers_col1, pers_col2, pers_col3 = st.columns(3)
+            for i, (key, value) in enumerate(personal_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                if i % 3 == 0:
+                    with pers_col1:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+                elif i % 3 == 1:
+                    with pers_col2:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+                else:
+                    with pers_col3:
+                        st.markdown(f"**{label}:**")
+                        st.write(value)
+        else:
+            st.info("No personal details available")
+
+        # Professional Information Section
+        st.markdown("#### 💼 Professional Information")
+        prof_fields = ["highest_qualification", "work_experience", "referral"]
+        prof_items = [(k, v) for k, v in all_data.items() if k in prof_fields]
+
+        if prof_items:
+            for key, value in prof_items:
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                st.markdown(f"**{label}:**")
+                st.write(value)
+                st.markdown("")  # Add spacing
+        else:
+            st.info("No professional information available")
+
+        # Work Preferences Section
+        st.markdown("#### ⚙️ Work Preferences")
+        pref_fields = ["ready_festivals", "ready_late_nights"]
+        pref_items = [(k, v) for k, v in all_data.items() if k in pref_fields]
+
+        if pref_items:
+            pref_col1, pref_col2 = st.columns(2)
+            for i, (key, value) in enumerate(pref_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                display_value = "✅ Yes" if str(value).lower() in ["yes", "true", "1"] else "❌ No"
+
+                if i % 2 == 0:
+                    with pref_col1:
+                        st.markdown(f"**{label}:** {display_value}")
+                else:
+                    with pref_col2:
+                        st.markdown(f"**{label}:** {display_value}")
+        else:
+            st.info("No work preference information available")
+
+        # System Information Section
+        st.markdown("#### 🔧 System Information")
+        system_fields = ["created_at", "updated_at", "cv_filename", "resume_link", "created_by"]
+        system_items = [(k, v) for k, v in all_data.items() if k in system_fields]
+
+        if system_items:
+            sys_col1, sys_col2 = st.columns(2)
+            for i, (key, value) in enumerate(system_items):
+                label = field_labels.get(key, key.replace('_', ' ').title())
+                if key in ["created_at", "updated_at"]:
+                    display_value = _format_datetime(value)
+                elif key == "resume_link":
+                    display_value = f"[Open Link]({value})" if value else str(value)
+                else:
+                    display_value = str(value)
+
+                if i % 2 == 0:
+                    with sys_col1:
+                        st.markdown(f"**{label}:** {display_value}")
+                else:
+                    with sys_col2:
+                        st.markdown(f"**{label}:** {display_value}")
+
+        # Additional Information Section (for any remaining fields)
+        remaining_items = [(k, v) for k, v in all_data.items()
+                           if k not in (basic_fields + address_fields + personal_fields +
+                                        prof_fields + pref_fields + system_fields)]
+
+        if remaining_items:
+            st.markdown("#### 📋 Additional Information")
+            add_col1, add_col2 = st.columns(2)
+            for i, (key, value) in enumerate(remaining_items):
+                label = key.replace('_', ' ').title()
+                if i % 2 == 0:
+                    with add_col1:
+                        st.markdown(f"**{label}:** {value}")
+                else:
+                    with add_col2:
+                        st.markdown(f"**{label}:** {value}")
+
+
+# =============================================================================
+# FIXED Interview History Display with Proper Formatting
+# =============================================================================
+
+def _get_interview_history_comprehensive(candidate_id: str) -> List[Dict[str, Any]]:
+    """Get comprehensive interview history with proper formatting."""
+    history = []
+
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            # Check what tables exist
+            cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name IN ('candidate_history', 'interviews', 'receptionist_assessments')
+                        """)
+            existing_tables = {row[0] for row in cur.fetchall()}
+
+            # Get from interviews table
+            if 'interviews' in existing_tables:
                 try:
-                    user_id, email = user_data
-                    subject = "Welcome to Our Platform"
-                    message = f"""
-                    Dear User,
+                    cur.execute("""
+                                SELECT id, interviewer, created_at, scheduled_at, result, notes
+                                FROM interviews
+                                WHERE candidate_id = %s
+                                ORDER BY COALESCE(scheduled_at, created_at) DESC
+                                """, (candidate_id,))
 
-                    Welcome to our platform! Your account has been activated.
+                    for row in cur.fetchall():
+                        interview_id, interviewer, created_at, scheduled_at, result, notes = row
 
-                    Best regards,
-                    Admin Team
-                    """
+                        # Build detailed interview information
+                        details = []
+                        if result:
+                            details.append(f"**Result:** {result}")
+                        if interviewer:
+                            details.append(f"**Interviewer:** {interviewer}")
+                        if scheduled_at:
+                            details.append(f"**Scheduled:** {_format_datetime(scheduled_at)}")
+                        if notes and notes.strip():
+                            details.append(f"**Notes:** {notes}")
 
-                    # Use your existing email function
-                    send_email(email, subject, message)
-                    return True
-                except:
-                    return False
+                        event_time = scheduled_at if scheduled_at else created_at
 
-            with ThreadPool(processes=5) as pool:
-                results = pool.map(send_single_email, users)
-                sent_count = sum(results)
-                failed_count = len(results) - sent_count
+                        history.append({
+                            'id': f"interview_{interview_id}",
+                            'type': 'interview',
+                            'title': '🎤 Interview',
+                            'actor': interviewer or 'Interviewer',
+                            'created_at': event_time,
+                            'details': details,
+                            'raw_details': {
+                                'result': result,
+                                'interviewer': interviewer,
+                                'scheduled_at': scheduled_at,
+                                'notes': notes
+                            }
+                        })
+                except Exception as e:
+                    st.warning(f"Could not load interviews: {e}")
 
-            if sent_count > 0:
-                return True, f"Sent {sent_count} emails, {failed_count} failed"
-            else:
-                return False, "No emails were sent"
+            # Get from receptionist_assessments table
+            if 'receptionist_assessments' in existing_tables:
+                try:
+                    cur.execute("""
+                                SELECT id,
+                                       created_at,
+                                       speed_test,
+                                       accuracy_test,
+                                       work_commitment,
+                                       english_understanding,
+                                       comments
+                                FROM receptionist_assessments
+                                WHERE candidate_id = %s
+                                ORDER BY created_at DESC
+                                """, (candidate_id,))
 
-        except Exception as e:
-            return False, f"Bulk email failed: {str(e)}"
+                    for row in cur.fetchall():
+                        assess_id, created_at, speed_test, accuracy_test, work_commitment, english_understanding, comments = row
 
-    @staticmethod
-    def _bulk_reset_passwords(user_ids: List[str]) -> Tuple[bool, str]:
-        """Reset passwords for selected users."""
+                        # Build detailed assessment information
+                        details = []
+                        if speed_test is not None:
+                            details.append(f"**Speed Test:** {speed_test}/100")
+                        if accuracy_test is not None:
+                            details.append(f"**Accuracy Test:** {accuracy_test}/100")
+                        if work_commitment:
+                            details.append(f"**Work Commitment:** {work_commitment}")
+                        if english_understanding:
+                            details.append(f"**English Understanding:** {english_understanding}")
+                        if comments and comments.strip():
+                            details.append(f"**Comments:** {comments}")
+
+                        history.append({
+                            'id': f"assessment_{assess_id}",
+                            'type': 'assessment',
+                            'title': '📊 Receptionist Assessment',
+                            'actor': 'Receptionist',
+                            'created_at': created_at,
+                            'details': details,
+                            'raw_details': {
+                                'speed_test': speed_test,
+                                'accuracy_test': accuracy_test,
+                                'work_commitment': work_commitment,
+                                'english_understanding': english_understanding,
+                                'comments': comments
+                            }
+                        })
+                except Exception as e:
+                    st.warning(f"Could not load assessments: {e}")
+
+            conn.close()
+
+    except Exception as e:
+        st.error(f"Error connecting to database for history: {e}")
+
+    # Sort by created_at desc
+    history.sort(key=lambda x: x.get('created_at') or datetime.min, reverse=True)
+    return history
+
+
+def _render_interview_history_comprehensive(history_records: List[Dict[str, Any]]):
+    """Render interview history with comprehensive formatting and details."""
+
+    st.markdown("### 🎤 Interview & Assessment History")
+
+    if not history_records:
+        st.info("📝 No interview or assessment history found")
+        return
+
+    # Separate different types of records
+    interviews = []
+    assessments = []
+
+    for record in history_records:
+        record_type = record.get('type', '')
+        if record_type == 'interview':
+            interviews.append(record)
+        elif record_type == 'assessment':
+            assessments.append(record)
+
+    # Display interviews with detailed formatting
+    if interviews:
+        st.markdown("#### 🎤 Interview History")
+        for interview in interviews:
+            _render_interview_record_detailed(interview)
+
+    # Display assessments with detailed formatting
+    if assessments:
+        st.markdown("#### 📊 Assessment History")
+        for assessment in assessments:
+            _render_assessment_record_detailed(assessment)
+
+    if not interviews and not assessments:
+        st.info("📝 No interview or assessment records found")
+
+
+def _render_interview_record_detailed(record: Dict[str, Any]):
+    """Render a detailed interview record with all information."""
+
+    title = record.get('title', '🎤 Interview')
+    actor = record.get('actor', 'Unknown')
+    when = _format_datetime(record.get('created_at'))
+    details = record.get('details', [])
+    raw_details = record.get('raw_details', {})
+
+    # Use expander for each interview record
+    with st.expander(f"{title} • {actor} • {when}", expanded=False):
+        if details:
+            for detail in details:
+                st.markdown(detail)
+        else:
+            st.markdown("📝 No additional details available")
+
+        # Add visual separator
+        st.markdown("---")
+        st.caption(f"🕐 Recorded on {when}")
+
+
+def _render_assessment_record_detailed(record: Dict[str, Any]):
+    """Render a detailed assessment record with all information."""
+
+    title = record.get('title', '📊 Assessment')
+    actor = record.get('actor', 'Unknown')
+    when = _format_datetime(record.get('created_at'))
+    details = record.get('details', [])
+    raw_details = record.get('raw_details', {})
+
+    # Use expander for each assessment record
+    with st.expander(f"{title} • {actor} • {when}", expanded=False):
+        if details:
+            # Display assessment scores prominently
+            speed = raw_details.get('speed_test')
+            accuracy = raw_details.get('accuracy_test')
+
+            if speed is not None or accuracy is not None:
+                col1, col2 = st.columns(2)
+                if speed is not None:
+                    with col1:
+                        st.metric("Speed Test", f"{speed}/100", delta=None)
+                if accuracy is not None:
+                    with col2:
+                        st.metric("Accuracy Test", f"{accuracy}/100", delta=None)
+                st.markdown("---")
+
+            # Display other details
+            for detail in details:
+                if not any(test in detail for test in ["Speed Test:", "Accuracy Test:"]):
+                    st.markdown(detail)
+        else:
+            st.markdown("📝 No additional details available")
+
+        # Add visual separator
+        st.markdown("---")
+        st.caption(f"🕐 Recorded on {when}")
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+def _format_datetime(dt) -> str:
+    """Format datetime with better handling."""
+    if not dt:
+        return "—"
+    if isinstance(dt, str):
         try:
-            import secrets
-            import string
+            if 'T' in dt:
+                dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+            else:
+                dt = datetime.fromisoformat(dt)
+        except:
+            return dt
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except:
+        return str(dt)
 
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed"
 
-            reset_count = 0
+def _detect_mimetype(filename: str) -> str:
+    """Detect mimetype from filename."""
+    if not filename:
+        return "application/octet-stream"
 
+    ext = filename.lower().split('.')[-1]
+    mime_map = {
+        'pdf': 'application/pdf',
+        'txt': 'text/plain',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'doc': 'application/msword',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png'
+    }
+    return mime_map.get(ext, 'application/octet-stream')
+
+
+# =============================================================================
+# CV Section with Access Control
+# =============================================================================
+
+def _render_cv_section_fixed(candidate_id: str, user_id: int, has_cv_file: bool, has_resume_link: bool):
+    """Render CV section with proper access control."""
+    st.markdown("### 📄 CV & Documents")
+
+    if not (has_cv_file or has_resume_link):
+        st.info("📂 No CV uploaded")
+        return
+
+    perms = _check_user_permissions(user_id)
+    can_view = perms.get("can_view_cvs", False)
+
+    if not can_view:
+        st.warning("🔒 Access Denied: You need 'View CVs' permission to access candidate documents")
+        return
+
+    cv_bytes, cv_name, status = _get_cv_with_proper_access(candidate_id, user_id)
+
+    if status == "ok" and cv_bytes:
+        st.download_button(
+            "📥 Download CV",
+            data=cv_bytes,
+            file_name=cv_name or f"{candidate_id}_cv.pdf",
+            mime=_detect_mimetype(cv_name or ""),
+            key=f"cv_dl_{candidate_id}"
+        )
+
+        if cv_name and cv_name.lower().endswith('.pdf'):
+            try:
+                b64 = base64.b64encode(cv_bytes).decode()
+                st.markdown(f"""
+                    <iframe 
+                        src="data:application/pdf;base64,{b64}" 
+                        width="100%" 
+                        height="500px" 
+                        style="border: 1px solid #ddd; border-radius: 5px;">
+                    </iframe>
+                """, unsafe_allow_html=True)
+            except Exception:
+                st.info("📄 PDF preview not available, but file can be downloaded")
+
+    elif status == "link_only" and cv_name:
+        st.markdown(f"🔗 **Resume Link:** [Open CV]({cv_name})")
+
+        if "drive.google.com" in cv_name:
+            try:
+                if "file/d/" in cv_name:
+                    file_id = cv_name.split("file/d/")[1].split("/")[0]
+                    embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                elif "id=" in cv_name:
+                    file_id = cv_name.split("id=")[1].split("&")[0]
+                    embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                else:
+                    embed_url = cv_name
+
+                st.markdown(f"""
+                    <iframe 
+                        src="{embed_url}" 
+                        width="100%" 
+                        height="500px" 
+                        style="border: 1px solid #ddd; border-radius: 5px;">
+                    </iframe>
+                """, unsafe_allow_html=True)
+            except Exception:
+                st.info("📄 CV link preview not available")
+
+    elif status == "no_permission":
+        st.warning("🔒 Access Denied: CV viewing permission required")
+    elif status == "not_found":
+        st.info("📂 CV file not found")
+    else:
+        st.error("❌ Error accessing CV")
+
+
+# =============================================================================
+# ZERO REFRESH Backend Operations
+# =============================================================================
+
+def _handle_bulk_candidate_delete(candidate_ids: List[str], user_id: int) -> bool:
+    """Handle bulk candidate deletion with proper error handling."""
+    try:
+        perms = _check_user_permissions(user_id)
+        if not perms.get("can_delete_records", False):
+            st.error("🔒 Access Denied: You need 'Delete Records' permission")
+            return False
+
+        # Call the delete function from db_postgres with list
+        success, reason = delete_candidate(candidate_ids, user_id)
+
+        if success:
+            st.success(f"✅ Successfully deleted {len(candidate_ids)} candidates!")
+            _clear_candidate_cache()
+            return True
+        else:
+            st.error(f"❌ Bulk delete failed: {reason}")
+            return False
+
+    except Exception as e:
+        st.error(f"❌ Bulk delete error: {e}")
+        return False
+
+
+def _handle_bulk_user_delete(user_ids: List[str], current_user_id: int) -> bool:
+    """Handle bulk user deletion with proper error handling."""
+    try:
+        perms = _check_user_permissions(current_user_id)
+        if not perms.get("can_manage_users", False):
+            st.error("🔒 Access Denied: You need 'Manage Users' permission")
+            return False
+
+        # Prevent self-deletion
+        if str(current_user_id) in user_ids:
+            st.error("❌ Cannot delete your own account!")
+            return False
+
+        success_count = 0
+        failed_count = 0
+
+        conn = get_conn()
+        try:
             with conn.cursor() as cur:
                 for user_id in user_ids:
-                    # Generate random password
-                    new_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
-
-                    # Update password (you'll need to hash it properly)
-                    cur.execute("""
-                                UPDATE users
-                                SET password_hash = crypt(%s, gen_salt('bf'))
-                                WHERE id = %s
-                                """, (new_password, int(user_id)))
-
-                    if cur.rowcount > 0:
-                        reset_count += 1
+                    try:
+                        cur.execute("DELETE FROM users WHERE id = %s", (int(user_id),))
+                        if cur.rowcount > 0:
+                            success_count += 1
+                        else:
+                            failed_count += 1
+                    except Exception as e:
+                        st.warning(f"Failed to delete user {user_id}: {e}")
+                        failed_count += 1
 
                 conn.commit()
 
+        finally:
             conn.close()
 
-            return True, f"Reset passwords for {reset_count} users"
+        if success_count > 0:
+            st.success(f"✅ Successfully deleted {success_count} users!")
+        if failed_count > 0:
+            st.error(f"❌ Failed to delete {failed_count} users")
 
-        except Exception as e:
-            return False, f"Password reset failed: {str(e)}"
+        return success_count > 0
 
-    @staticmethod
-    def _export_users_csv(user_ids: List[str]) -> Tuple[bool, str]:
-        """Export selected users to CSV."""
-        try:
-            conn = FastDatabaseOperations.get_connection_pool()
-            if not conn:
-                return False, "Database connection failed"
-
-            import csv
-            import io
-
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Write header
-            writer.writerow(['ID', 'Email', 'Role', 'Can View CVs', 'Can Delete Records', 'Created At'])
-
-            # Get user data
-            with conn.cursor() as cur:
-                placeholders = ','.join(['%s'] * len(user_ids))
-                cur.execute(f"""
-                    SELECT id, email, role, can_view_cvs, can_delete_records, created_at 
-                    FROM users 
-                    WHERE id IN ({placeholders})
-                """, [int(uid) for uid in user_ids])
-
-                for row in cur.fetchall():
-                    writer.writerow(row)
-
-            conn.close()
-
-            # Store in session state for download
-            st.session_state.user_csv_export = output.getvalue()
-            st.session_state.user_csv_filename = f"users_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-            return True, f"User CSV export ready with {len(user_ids)} users"
-
-        except Exception as e:
-            return False, f"User CSV export failed: {str(e)}"
+    except Exception as e:
+        st.error(f"❌ Bulk user delete error: {e}")
+        return False
 
 
-# ===================================================================================
-# ULTRA-ENHANCED DASHBOARD WITH REAL-TIME OPERATIONS
-# ===================================================================================
+def _handle_bulk_permission_update(user_ids: List[str], permission: str, value: bool, current_user_id: int) -> bool:
+    """Handle bulk permission updates."""
+    try:
+        perms = _check_user_permissions(current_user_id)
+        if not perms.get("can_manage_users", False):
+            st.error("🔒 Access Denied: You need 'Manage Users' permission")
+            return False
+
+        success_count = 0
+        failed_count = 0
+
+        for user_id in user_ids:
+            try:
+                new_perms = {permission: value}
+                if update_user_permissions(int(user_id), new_perms):
+                    success_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                st.warning(f"Failed to update user {user_id}: {e}")
+                failed_count += 1
+
+        if success_count > 0:
+            st.success(f"✅ Successfully updated {success_count} users!")
+        if failed_count > 0:
+            st.error(f"❌ Failed to update {failed_count} users")
+
+        return success_count > 0
+
+    except Exception as e:
+        st.error(f"❌ Bulk permission update error: {e}")
+        return False
+
+
+# =============================================================================
+# Enhanced User Management Panel with Bulk Operations
+# =============================================================================
+
+def show_user_management_panel():
+    """Enhanced user management panel with bulk operations and zero refresh."""
+    require_login()
+
+    user = get_current_user(refresh=True)
+    perms = _check_user_permissions(user.get("id"))
+
+    if not perms.get("can_manage_users", False):
+        st.error("Access denied. Admin privileges required.")
+        st.stop()
+
+    st.title("👥 User Management Panel")
+    st.caption("Manage system users with bulk operations")
+
+    # Render zero refresh manager
+    _render_zero_refresh_selection_manager()
+
+    try:
+        users = get_all_users_with_permissions()
+    except Exception as e:
+        st.error(f"Failed to load users: {e}")
+        return
+
+    if not users:
+        st.info("No system users found.")
+        return
+
+    st.info(f"Found {len(users)} system users")
+
+    # Render bulk user controls
+    _render_bulk_user_controls(users, perms)
+
+    # Simple streamlit-based bulk operations for now
+    if 'bulk_user_operation' not in st.session_state:
+        st.session_state.bulk_user_operation = None
+
+    # Bulk action buttons
+    st.markdown("### 🔧 Quick Bulk Actions")
+    bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns(4)
+
+    with bulk_col1:
+        if st.button("✅ Grant CV View to Selected"):
+            st.session_state.bulk_user_operation = 'grant_cv_view'
+            st.rerun()
+
+    with bulk_col2:
+        if st.button("🗑️ Grant Delete to Selected"):
+            st.session_state.bulk_user_operation = 'grant_delete'
+            st.rerun()
+
+    with bulk_col3:
+        if st.button("❌ Revoke CV View from Selected"):
+            st.session_state.bulk_user_operation = 'revoke_cv_view'
+            st.rerun()
+
+    with bulk_col4:
+        if st.button("❌ Revoke Delete from Selected"):
+            st.session_state.bulk_user_operation = 'revoke_delete'
+            st.rerun()
+
+    # Process bulk operations
+    if st.session_state.bulk_user_operation:
+        # Get selected user IDs from session state (you'd need to track these)
+        selected_user_ids = getattr(st.session_state, 'selected_user_ids', set())
+
+        if selected_user_ids:
+            op = st.session_state.bulk_user_operation
+
+            if op == 'grant_cv_view':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_view_cvs', True, user.get("id"))
+            elif op == 'grant_delete':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_delete_records', True, user.get("id"))
+            elif op == 'revoke_cv_view':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_view_cvs', False, user.get("id"))
+            elif op == 'revoke_delete':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_delete_records', False, user.get("id"))
+
+            st.session_state.bulk_user_operation = None
+            st.rerun()
+        else:
+            st.warning("No users selected. Please select users first.")
+            st.session_state.bulk_user_operation = None
+
+    # Initialize selected users tracking
+    if 'selected_user_ids' not in st.session_state:
+        st.session_state.selected_user_ids = set()
+
+    # Display users with instant selection
+    for user_data in users:
+        user_id = user_data.get('id')
+        user_email = user_data.get('email', 'No email')
+        user_role = user_data.get('role', 'user')
+        is_selected = str(user_id) in st.session_state.selected_user_ids
+
+        with st.container():
+            sel_col, content_col = st.columns([0.05, 0.95])
+
+            with sel_col:
+                # Simple checkbox for user selection
+                if st.checkbox("", value=is_selected, key=f"user_sel_{user_id}"):
+                    st.session_state.selected_user_ids.add(str(user_id))
+                else:
+                    st.session_state.selected_user_ids.discard(str(user_id))
+
+            with content_col:
+                with st.expander(f"👤 {user_email} (Role: {user_role})", expanded=False):
+
+                    # User info section
+                    info_col, perm_col = st.columns([1, 1])
+
+                    with info_col:
+                        st.markdown(f"""
+**User ID:** {user_id}
+**Email:** {user_email}  
+**Role:** {user_role}
+**Created:** {_format_datetime(user_data.get('created_at'))}
+""")
+
+                    with perm_col:
+                        st.markdown("**Quick Actions:**")
+
+                        # Individual permission toggles
+                        can_view_cvs = st.checkbox(
+                            "Can View CVs",
+                            value=bool(user_data.get('can_view_cvs', False)),
+                            key=f"cv_{user_id}",
+                            help="Allow this user to view candidate CVs"
+                        )
+
+                        can_delete = st.checkbox(
+                            "Can Delete Records",
+                            value=bool(user_data.get('can_delete_records', False)),
+                            key=f"del_{user_id}",
+                            help="Allow this user to delete candidate records"
+                        )
+
+                        if st.button("💾 Update Permissions", key=f"save_{user_id}"):
+                            new_perms = {
+                                "can_view_cvs": can_view_cvs,
+                                "can_delete_records": can_delete
+                            }
+
+                            try:
+                                if update_user_permissions(user_id, new_perms):
+                                    st.success("✅ Permissions updated!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Update failed")
+                            except Exception as e:
+                                st.error(f"Error updating permissions: {e}")
+
+                    # Show current permissions for reference
+                    st.markdown("---")
+                    st.markdown("**Current Permissions:**")
+                    perm_col1, perm_col2 = st.columns(2)
+
+                    with perm_col1:
+                        cv_status = '✅ Enabled' if user_data.get('can_view_cvs') else '❌ Disabled'
+                        st.markdown(f"- **View CVs:** {cv_status}")
+
+                    with perm_col2:
+                        del_status = '✅ Enabled' if user_data.get('can_delete_records') else '❌ Disabled'
+                        st.markdown(f"- **Delete Records:** {del_status}")
+
+    # Show selection summary
+    if st.session_state.selected_user_ids:
+        st.info(f"📋 {len(st.session_state.selected_user_ids)} users selected for bulk operations")
+
+
+# =============================================================================
+# Enhanced CEO Dashboard with Zero Refresh Operations
+# =============================================================================
 
 def show_ceo_panel():
-    """Ultra-enhanced CEO dashboard with all bulk operations."""
-
+    """Enhanced CEO dashboard with zero refresh bulk operations."""
     require_login()
 
     user = get_current_user(refresh=True)
     if not user:
-        st.error("Authentication required")
+        st.error("Please log in again.")
         st.stop()
 
     user_id = user.get("id")
-    perms = get_user_permissions(user_id)
+    perms = _check_user_permissions(user_id)
 
-    if not perms or perms.get("role", "").lower() not in ("ceo", "admin"):
+    # Allow access for CEO and admin roles
+    if perms.get("role") not in ("ceo", "admin"):
         st.error("Access denied. CEO/Admin role required.")
         st.stop()
 
-    # Ultra-fast page header
-    st.title("🚀 Ultra CEO Dashboard")
+    st.title("🎯 CEO Dashboard")
     st.caption(f"Welcome {user.get('email', 'User')} | Role: {perms.get('role', 'Unknown').title()}")
 
-    # Render ultra-fast selection system
-    render_ultra_fast_selection_system()
+    # Render zero refresh manager
+    _render_zero_refresh_selection_manager()
 
-    # Handle bulk operations from JavaScript
-    if 'bulk_operation_data' in st.session_state:
-        operation_data = st.session_state.bulk_operation_data
-        operation = operation_data.get('operation')
-        data = operation_data.get('data', [])
-
-        if operation and data:
-            if operation.startswith(('delete_candidates', 'grant_edit', 'revoke_edit', 'export_csv', 'export_emails')):
-                success, message = BulkOperationHandlers.handle_candidate_operations(operation, data, user_id)
-            else:
-                success, message = BulkOperationHandlers.handle_user_operations(operation, data, user_id)
-
-            if success:
-                st.success(f"✅ {message}")
-                clear_all_caches()
-            else:
-                st.error(f"❌ {message}")
-
-        # Clear the operation data
-        del st.session_state.bulk_operation_data
-        st.rerun()
-
-    # Quick stats with performance metrics
-    start_time = time.time()
+    # Quick stats
+    with st.spinner("Loading dashboard..."):
+        stats = _get_stats_fast()
 
     col1, col2, col3, col4 = st.columns(4)
-
     with col1:
-        candidates = get_candidates_ultra_fast()
-        st.metric("📊 Total Candidates", len(candidates))
-
+        st.metric("📊 Total Candidates", stats.get("total_candidates", 0))
     with col2:
-        today_count = len([c for c in candidates if c.get('created_at') and
-                           c['created_at'].date() == datetime.now().date() if hasattr(c['created_at'], 'date')])
-        st.metric("📅 Today", today_count)
-
+        st.metric("📅 Today", stats.get("candidates_today", 0))
     with col3:
-        users = get_users_ultra_fast()
-        st.metric("👥 Total Users", len(users))
-
+        st.metric("🎤 Interviews", stats.get("total_interviews", 0))
     with col4:
-        load_time = round((time.time() - start_time) * 1000, 2)
-        st.metric("⚡ Load Time", f"{load_time}ms")
+        st.metric("📋 Assessments", stats.get("total_assessments", 0))
 
-    # Tabbed interface for better organization
-    tab1, tab2 = st.tabs(["👥 Candidate Management", "🔐 User Management"])
+    st.markdown("---")
 
-    with tab1:
-        show_candidate_management_tab(candidates, user_id, perms)
+    # Show user permissions clearly
+    st.sidebar.markdown("### 🔑 Your Permissions")
+    st.sidebar.markdown(f"- **View CVs:** {'✅ Enabled' if perms.get('can_view_cvs') else '❌ Disabled'}")
+    st.sidebar.markdown(f"- **Delete Records:** {'✅ Enabled' if perms.get('can_delete_records') else '❌ Disabled'}")
+    st.sidebar.markdown(f"- **Manage Users:** {'✅ Enabled' if perms.get('can_manage_users') else '❌ Disabled'}")
 
-    with tab2:
-        show_user_management_tab(users, user_id, perms)
-
-
-def show_candidate_management_tab(candidates: List[Dict], user_id: int, perms: Dict):
-    """Enhanced candidate management with ultra-fast bulk operations."""
-
+    # Candidate management section
     st.header("👥 Candidate Management")
 
-    # Enhanced search and filter controls
-    search_col, filter_col1, filter_col2, refresh_col = st.columns([3, 1, 1, 1])
+    # Controls
+    ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([3, 1, 1, 1])
 
-    with search_col:
-        search_term = st.text_input("🔍 Search candidates (name, email, ID)", key="candidate_search")
+    with ctrl_col1:
+        search_term = st.text_input("🔍 Search candidates", key="search")
 
-    with filter_col1:
+    with ctrl_col2:
         show_no_cv = st.checkbox("📂 No CV only", key="filter_no_cv")
 
-    with filter_col2:
-        show_can_edit = st.checkbox("✏️ Can edit only", key="filter_can_edit")
+    with ctrl_col3:
+        st.write("")  # Spacing
 
-    with refresh_col:
-        if st.button("🔄 Refresh", key="refresh_candidates"):
-            clear_all_caches()
+    with ctrl_col4:
+        if st.button("🔄 Refresh"):
+            _clear_candidate_cache()
             st.rerun()
+
+    # Load candidates
+    candidates = _get_candidates_fast()
+
+    if not candidates:
+        st.warning("No candidates found.")
+        return
 
     # Filter candidates
     filtered_candidates = []
@@ -1434,503 +1833,217 @@ def show_candidate_management_tab(candidates: List[Dict], user_id: int, perms: D
         if show_no_cv and (candidate.get('has_cv_file') or candidate.get('has_resume_link')):
             continue
 
-        # Edit permission filter
-        if show_can_edit and not candidate.get('can_edit'):
-            continue
-
         filtered_candidates.append(candidate)
 
-    if not filtered_candidates:
+    total_candidates = len(filtered_candidates)
+
+    if total_candidates == 0:
         st.info("No candidates match your filters.")
         return
 
-    st.info(f"Found {len(filtered_candidates)} candidates")
+    # Render bulk candidate controls
+    _render_bulk_candidate_controls(filtered_candidates, perms)
 
-    # Render ultra bulk candidate panel
-    render_ultra_bulk_candidate_panel(filtered_candidates)
+    # Initialize session state for selected candidates
+    if 'selected_candidate_ids' not in st.session_state:
+        st.session_state.selected_candidate_ids = set()
 
-    # Handle CSV export download
-    if 'csv_export' in st.session_state:
-        st.download_button(
-            "📥 Download CSV Export",
-            data=st.session_state.csv_export,
-            file_name=st.session_state.csv_filename,
-            mime='text/csv',
-            key="download_csv"
-        )
-        st.success("✅ CSV export ready for download!")
+    # Simple bulk operations using streamlit (fallback if JS doesn't work)
+    if perms.get("can_delete_records"):
+        st.markdown("### 🔧 Bulk Operations")
 
-    # Handle email export
-    if 'email_export' in st.session_state:
-        st.text_area("📧 Exported Email Addresses", st.session_state.email_export, height=100)
-        st.success("✅ Email addresses exported!")
+        bulk_ops_col1, bulk_ops_col2, bulk_ops_col3 = st.columns([2, 2, 2])
 
-    # Pagination for performance
-    items_per_page = 20
-    total_pages = (len(filtered_candidates) + items_per_page - 1) // items_per_page
+        with bulk_ops_col1:
+            if st.button("☑️ Select All Visible"):
+                for candidate in filtered_candidates:
+                    st.session_state.selected_candidate_ids.add(candidate.get('candidate_id', ''))
+                st.rerun()
+
+        with bulk_ops_col2:
+            if st.button("❌ Clear Selection"):
+                st.session_state.selected_candidate_ids.clear()
+                st.rerun()
+
+        with bulk_ops_col3:
+            selected_count = len(st.session_state.selected_candidate_ids)
+            if selected_count > 0:
+                if st.button(f"🗑️ Delete {selected_count} Selected", type="primary"):
+                    # Show confirmation
+                    st.session_state.show_bulk_delete_confirm = True
+                    st.rerun()
+
+        # Bulk delete confirmation
+        if st.session_state.get('show_bulk_delete_confirm', False):
+            st.error(f"⚠️ **Confirm deletion of {len(st.session_state.selected_candidate_ids)} candidates?**")
+
+            confirm_col1, confirm_col2 = st.columns(2)
+            with confirm_col1:
+                if st.button("✅ Yes, Delete All", type="primary"):
+                    if _handle_bulk_candidate_delete(list(st.session_state.selected_candidate_ids), user_id):
+                        st.session_state.selected_candidate_ids.clear()
+                        st.session_state.show_bulk_delete_confirm = False
+                        st.rerun()
+
+            with confirm_col2:
+                if st.button("❌ Cancel"):
+                    st.session_state.show_bulk_delete_confirm = False
+                    st.rerun()
+
+    # Show selection count
+    if st.session_state.selected_candidate_ids:
+        st.info(f"📋 {len(st.session_state.selected_candidate_ids)} candidates selected")
+
+    # Pagination
+    items_per_page = 10
+    total_pages = (total_candidates + items_per_page - 1) // items_per_page
 
     if total_pages > 1:
-        page_col1, page_col2, page_col3 = st.columns([1, 2, 1])
-        with page_col2:
-            page = st.selectbox(
-                "📄 Page",
-                range(1, total_pages + 1),
-                key="candidate_page",
-                format_func=lambda x: f"Page {x} of {total_pages}"
-            )
+        page = st.selectbox("📄 Page", range(1, total_pages + 1), key="page_select")
         start_idx = (page - 1) * items_per_page
         end_idx = start_idx + items_per_page
         page_candidates = filtered_candidates[start_idx:end_idx]
-        st.caption(f"Showing {start_idx + 1}-{min(end_idx, len(filtered_candidates))} of {len(filtered_candidates)}")
+        st.caption(f"Showing {start_idx + 1}-{min(end_idx, total_candidates)} of {total_candidates}")
     else:
         page_candidates = filtered_candidates
 
-    # Display candidates with ultra-fast selection
+    # Render candidates with selection
     for candidate in page_candidates:
         candidate_id = candidate.get('candidate_id', '')
         candidate_name = candidate.get('name', 'Unnamed')
+        is_selected = candidate_id in st.session_state.selected_candidate_ids
 
         with st.container():
-            # Create candidate item with proper styling class
-            st.markdown(
-                f'<div class="candidate-item" style="border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0;">',
-                unsafe_allow_html=True)
-
             sel_col, content_col = st.columns([0.05, 0.95])
 
             with sel_col:
-                render_ultra_candidate_checkbox(candidate_id)
+                if perms.get("can_delete_records"):
+                    # Simple checkbox for candidate selection
+                    if st.checkbox("", value=is_selected, key=f"cand_sel_{candidate_id}"):
+                        st.session_state.selected_candidate_ids.add(candidate_id)
+                    else:
+                        st.session_state.selected_candidate_ids.discard(candidate_id)
+                else:
+                    st.write("")
 
             with content_col:
                 with st.expander(f"👤 {candidate_name} ({candidate_id})", expanded=False):
+                    main_col, action_col = st.columns([3, 1])
 
-                    # Basic info display
-                    info_col1, info_col2, action_col = st.columns([2, 2, 1])
+                    with main_col:
+                        # Personal details - comprehensive and well-organized
+                        _render_personal_details_organized(candidate)
 
-                    with info_col1:
-                        st.markdown(f"""
-                        **Name:** {candidate.get('name', 'N/A')}  
-                        **Email:** {candidate.get('email', 'N/A')}  
-                        **Phone:** {candidate.get('phone', 'N/A')}
-                        """)
+                        # CV Section - with proper access control
+                        _render_cv_section_fixed(
+                            candidate_id,
+                            user_id,
+                            candidate.get('has_cv_file', False),
+                            candidate.get('has_resume_link', False)
+                        )
 
-                    with info_col2:
-                        st.markdown(f"""
-                        **Created:** {candidate.get('created_at', 'N/A')}  
-                        **CV File:** {'✅ Yes' if candidate.get('has_cv_file') else '❌ No'}  
-                        **CV Link:** {'✅ Yes' if candidate.get('has_resume_link') else '❌ No'}
-                        """)
+                        # Interview History - comprehensive with proper formatting
+                        history = _get_interview_history_comprehensive(candidate_id)
+                        _render_interview_history_comprehensive(history)
 
                     with action_col:
-                        st.markdown("**Actions:**")
+                        st.markdown("### ⚙️ Actions")
+                        st.caption(f"ID: {candidate_id}")
+
+                        # Selection status
+                        if perms.get("can_delete_records"):
+                            if is_selected:
+                                st.success("✅ Selected for bulk delete")
+                            else:
+                                st.info("☐ Click checkbox to select")
 
                         # Toggle edit permission
                         current_can_edit = candidate.get('can_edit', False)
-                        edit_label = "🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit"
+                        toggle_label = "🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit"
 
-                        if st.button(edit_label, key=f"toggle_edit_{candidate_id}"):
-                            success, message, count = FastDatabaseOperations.bulk_update_candidate_permissions_fast(
-                                [candidate_id], not current_can_edit
-                            )
-                            if success:
-                                st.success("✅ Permission updated!")
-                                clear_all_caches()
-                                st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
-
-                        # Individual delete
-                        if perms.get("can_delete_records"):
-                            if st.button("🗑️ Delete", key=f"delete_{candidate_id}", type="secondary"):
-                                success, message, count = FastDatabaseOperations.bulk_delete_candidates_fast(
-                                    [candidate_id])
+                        if st.button(toggle_label, key=f"toggle_{candidate_id}"):
+                            try:
+                                success = set_candidate_permission(candidate_id, not current_can_edit)
                                 if success:
-                                    st.success("✅ Candidate deleted!")
-                                    clear_all_caches()
+                                    st.success("✅ Updated edit permission")
+                                    _clear_candidate_cache()
                                     st.rerun()
                                 else:
-                                    st.error(f"❌ {message}")
+                                    st.error("❌ Failed to update permission")
+                            except Exception as e:
+                                st.error(f"Error: {e}")
 
-            st.markdown('</div>', unsafe_allow_html=True)
-
-
-def show_user_management_panel():
-    """Wrapper function for user management to maintain compatibility."""
-    require_login()
-
-    user = get_current_user(refresh=True)
-    if not user:
-        st.error("Authentication required")
-        st.stop()
-
-    user_id = user.get("id")
-    perms = get_user_permissions(user_id)
-
-    if not perms or perms.get("role", "").lower() not in ("ceo", "admin"):
-        st.error("Access denied. CEO/Admin role required.")
-        st.stop()
-
-    # Load users and show management interface
-    users = get_users_ultra_fast()
-    show_user_management_tab(users, user_id, perms)
-
-
-def show_user_management_tab(users: List[Dict], current_user_id: int, perms: Dict):
-    """Enhanced user management with ultra-fast bulk operations."""
-
-    st.header("🔐 User Management")
-
-    if not perms.get("role", "").lower() in ("ceo", "admin"):
-        st.error("Access denied. Admin privileges required.")
-        return
-
-    # Enhanced search and filter controls
-    search_col, filter_col1, filter_col2, refresh_col = st.columns([3, 1, 1, 1])
-
-    with search_col:
-        search_term = st.text_input("🔍 Search users (email, role)", key="user_search")
-
-    with filter_col1:
-        role_filter = st.selectbox("👤 Role Filter", ["All", "admin", "user", "ceo"], key="role_filter")
-
-    with filter_col2:
-        perm_filter = st.selectbox("🔐 Permission Filter", ["All", "Can View CVs", "Can Delete", "No Permissions"],
-                                   key="perm_filter")
-
-    with refresh_col:
-        if st.button("🔄 Refresh", key="refresh_users"):
-            clear_all_caches()
-            st.rerun()
-
-    # Filter users
-    filtered_users = []
-    search_lower = search_term.lower().strip() if search_term else ""
-
-    for user in users:
-        # Search filter
-        if search_lower:
-            searchable_text = f"{user.get('email', '')} {user.get('role', '')}".lower()
-            if search_lower not in searchable_text:
-                continue
-
-        # Role filter
-        if role_filter != "All" and user.get('role', '').lower() != role_filter.lower():
-            continue
-
-        # Permission filter
-        if perm_filter != "All":
-            if perm_filter == "Can View CVs" and not user.get('can_view_cvs'):
-                continue
-            elif perm_filter == "Can Delete" and not user.get('can_delete_records'):
-                continue
-            elif perm_filter == "No Permissions" and (user.get('can_view_cvs') or user.get('can_delete_records')):
-                continue
-
-        filtered_users.append(user)
-
-    if not filtered_users:
-        st.info("No users match your filters.")
-        return
-
-    st.info(f"Found {len(filtered_users)} users")
-
-    # Render ultra bulk user panel
-    render_ultra_bulk_user_panel(filtered_users)
-
-    # Handle CSV export download
-    if 'user_csv_export' in st.session_state:
-        st.download_button(
-            "📥 Download User CSV Export",
-            data=st.session_state.user_csv_export,
-            file_name=st.session_state.user_csv_filename,
-            mime='text/csv',
-            key="download_user_csv"
-        )
-        st.success("✅ User CSV export ready for download!")
-
-    # Pagination for performance
-    items_per_page = 15
-    total_pages = (len(filtered_users) + items_per_page - 1) // items_per_page
-
-    if total_pages > 1:
-        page_col1, page_col2, page_col3 = st.columns([1, 2, 1])
-        with page_col2:
-            page = st.selectbox(
-                "📄 Page",
-                range(1, total_pages + 1),
-                key="user_page",
-                format_func=lambda x: f"Page {x} of {total_pages}"
-            )
-        start_idx = (page - 1) * items_per_page
-        end_idx = start_idx + items_per_page
-        page_users = filtered_users[start_idx:end_idx]
-        st.caption(f"Showing {start_idx + 1}-{min(end_idx, len(filtered_users))} of {len(filtered_users)}")
-    else:
-        page_users = filtered_users
-
-    # Display users with ultra-fast selection
-    for user_data in page_users:
-        user_id = user_data.get('id')
-        user_email = user_data.get('email', 'No email')
-
-        with st.container():
-            # Create user item with proper styling class
-            st.markdown(
-                f'<div class="user-item" style="border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0;">',
-                unsafe_allow_html=True)
-
-            sel_col, content_col = st.columns([0.05, 0.95])
-
-            with sel_col:
-                render_ultra_user_checkbox(user_id)
-
-            with content_col:
-                with st.expander(f"👤 {user_email} (ID: {user_id})", expanded=False):
-
-                    # User info display
-                    info_col1, info_col2, action_col = st.columns([2, 2, 1])
-
-                    with info_col1:
-                        st.markdown(f"""
-                        **Email:** {user_email}  
-                        **Role:** {user_data.get('role', 'user')}  
-                        **Created:** {user_data.get('created_at', 'N/A')}
-                        """)
-
-                    with info_col2:
-                        cv_perm = '✅ Enabled' if user_data.get('can_view_cvs') else '❌ Disabled'
-                        del_perm = '✅ Enabled' if user_data.get('can_delete_records') else '❌ Disabled'
-                        st.markdown(f"""
-                        **View CVs:** {cv_perm}  
-                        **Delete Records:** {del_perm}  
-                        **Status:** {'🟢 Active' if user_data.get('is_active', True) else '🔴 Inactive'}
-                        """)
-
-                    with action_col:
-                        st.markdown("**Quick Actions:**")
-
-                        # Toggle CV permission
-                        current_cv_perm = user_data.get('can_view_cvs', False)
-                        cv_label = "👁️ Grant CV" if not current_cv_perm else "🚫 Revoke CV"
-
-                        if st.button(cv_label, key=f"toggle_cv_{user_id}"):
-                            success, message, count = FastDatabaseOperations.bulk_update_user_permissions_fast(
-                                [str(user_id)], {"can_view_cvs": not current_cv_perm}
-                            )
-                            if success:
-                                st.success("✅ Permission updated!")
-                                clear_all_caches()
-                                st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
-
-                        # Toggle delete permission
-                        current_del_perm = user_data.get('can_delete_records', False)
-                        del_label = "🗑️ Grant Delete" if not current_del_perm else "🔒 Revoke Delete"
-
-                        if st.button(del_label, key=f"toggle_del_{user_id}"):
-                            success, message, count = FastDatabaseOperations.bulk_update_user_permissions_fast(
-                                [str(user_id)], {"can_delete_records": not current_del_perm}
-                            )
-                            if success:
-                                st.success("✅ Permission updated!")
-                                clear_all_caches()
-                                st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
-
-                        # Individual delete (prevent self-deletion)
-                        if user_id != current_user_id:
-                            if st.button("🗑️ Delete User", key=f"delete_user_{user_id}", type="secondary"):
-                                success, message, count = FastDatabaseOperations.bulk_delete_users_fast([str(user_id)],
-                                                                                                        current_user_id)
-                                if success:
-                                    st.success("✅ User deleted!")
-                                    clear_all_caches()
-                                    st.rerun()
-                                else:
-                                    st.error(f"❌ {message}")
+                        # Current permission status
+                        if current_can_edit:
+                            st.success("✏️ Can edit application")
                         else:
-                            st.info("🔒 Cannot delete own account")
+                            st.info("🔒 Cannot edit application")
 
-            st.markdown('</div>', unsafe_allow_html=True)
+                        # Individual delete button
+                        if perms.get("can_delete_records"):
+                            st.markdown("---")
+                            individual_delete_key = f"individual_delete_{candidate_id}"
 
+                            if st.session_state.get(individual_delete_key, False):
+                                st.warning("⚠️ Confirm individual delete?")
+                                del_col1, del_col2 = st.columns(2)
 
-# ===================================================================================
-# ENHANCED OPERATION CONFIRMATION SYSTEM
-# ===================================================================================
+                                with del_col1:
+                                    if st.button("✅ Yes", key=f"confirm_individual_{candidate_id}"):
+                                        if _handle_bulk_candidate_delete([candidate_id], user_id):
+                                            st.session_state[individual_delete_key] = False
+                                            st.rerun()
 
-def render_operation_confirmation_system():
-    """Advanced confirmation system for bulk operations."""
+                                with del_col2:
+                                    if st.button("❌ No", key=f"cancel_individual_{candidate_id}"):
+                                        st.session_state[individual_delete_key] = False
+                                        st.rerun()
+                            else:
+                                if st.button("🗑️ Delete Individual", key=f"delete_individual_{candidate_id}",
+                                             type="secondary"):
+                                    st.session_state[individual_delete_key] = True
+                                    st.rerun()
 
-    confirmation_js = """
-    <script>
-    // Enhanced confirmation system
-    window.operationConfirmations = window.operationConfirmations || {};
+                        # Additional metadata
+                        st.markdown("---")
+                        st.caption("**Metadata:**")
+                        st.caption(f"Created: {_format_datetime(candidate.get('created_at'))}")
+                        st.caption(f"Updated: {_format_datetime(candidate.get('updated_at'))}")
 
-    // Handle bulk operation with confirmation
-    function executeBulkOperationWithConfirmation(operation, data) {
-        const confirmationKey = operation + '_' + data.length;
+                        # Show CV status
+                        cv_status = []
+                        if candidate.get('has_cv_file'):
+                            cv_status.append("📄 File")
+                        if candidate.get('has_resume_link'):
+                            cv_status.append("🔗 Link")
 
-        // Critical operations require confirmation
-        const criticalOps = ['delete_candidates', 'delete_users', 'reset_passwords'];
+                        if cv_status:
+                            st.caption(f"CV: {' + '.join(cv_status)}")
+                        else:
+                            st.caption("CV: ❌ None")
 
-        if (criticalOps.includes(operation)) {
-            const confirmText = getConfirmationText(operation, data.length);
+    # Summary at bottom
+    if filtered_candidates:
+        st.markdown("---")
+        summary_col1, summary_col2 = st.columns(2)
 
-            if (!window.operationConfirmations[confirmationKey]) {
-                showConfirmationModal(operation, data, confirmText);
-                return;
-            }
-        }
+        with summary_col1:
+            st.info(
+                f"📊 Showing {len(page_candidates)} of {total_candidates} candidates (Page {page if total_pages > 1 else 1} of {total_pages})")
 
-        // Execute the operation
-        executeBulkOperation(operation, data);
-
-        // Reset confirmation
-        delete window.operationConfirmations[confirmationKey];
-    }
-
-    function getConfirmationText(operation, count) {
-        switch(operation) {
-            case 'delete_candidates':
-                return `DELETE ${count} CANDIDATES`;
-            case 'delete_users':
-                return `DELETE ${count} USERS`;
-            case 'reset_passwords':
-                return `RESET ${count} PASSWORDS`;
-            default:
-                return `CONFIRM ${operation.toUpperCase()}`;
-        }
-    }
-
-    function showConfirmationModal(operation, data, confirmText) {
-        const modal = document.createElement('div');
-        modal.innerHTML = `
-            <div style="
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100vw;
-                height: 100vh;
-                background: rgba(0,0,0,0.8);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 10000;
-            ">
-                <div style="
-                    background: white;
-                    padding: 2rem;
-                    border-radius: 15px;
-                    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-                    max-width: 500px;
-                    text-align: center;
-                ">
-                    <h2 style="color: #e74c3c; margin-bottom: 1rem;">⚠️ CONFIRM OPERATION</h2>
-                    <p style="font-size: 1.1rem; margin-bottom: 2rem;">
-                        You are about to execute: <strong>${operation.replace('_', ' ').toUpperCase()}</strong>
-                        <br>This will affect <strong>${data.length}</strong> items.
-                        <br><strong style="color: #e74c3c;">This action cannot be undone!</strong>
-                    </p>
-
-                    <input type="text" id="confirmationInput" placeholder="Type '${confirmText}' to confirm" style="
-                        width: 100%;
-                        padding: 1rem;
-                        margin-bottom: 1rem;
-                        border: 2px solid #e74c3c;
-                        border-radius: 5px;
-                        font-size: 1rem;
-                        text-align: center;
-                    ">
-
-                    <div style="display: flex; gap: 1rem; justify-content: center;">
-                        <button onclick="closeConfirmationModal()" style="
-                            background: #95a5a6;
-                            color: white;
-                            border: none;
-                            padding: 1rem 2rem;
-                            border-radius: 8px;
-                            cursor: pointer;
-                            font-size: 1rem;
-                        ">❌ CANCEL</button>
-
-                        <button id="confirmButton" onclick="confirmOperation('${operation}', ${JSON.stringify(data)}, '${confirmText}')" disabled style="
-                            background: #bdc3c7;
-                            color: #7f8c8d;
-                            border: none;
-                            padding: 1rem 2rem;
-                            border-radius: 8px;
-                            cursor: not-allowed;
-                            font-size: 1rem;
-                        ">✅ CONFIRM</button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        // Handle input validation
-        const input = modal.querySelector('#confirmationInput');
-        const button = modal.querySelector('#confirmButton');
-
-        input.addEventListener('keyup', function() {
-            if (this.value.trim() === confirmText) {
-                button.disabled = false;
-                button.style.background = '#e74c3c';
-                button.style.color = 'white';
-                button.style.cursor = 'pointer';
-            } else {
-                button.disabled = true;
-                button.style.background = '#bdc3c7';
-                button.style.color = '#7f8c8d';
-                button.style.cursor = 'not-allowed';
-            }
-        });
-
-        // Focus input
-        setTimeout(() => input.focus(), 100);
-    }
-
-    function closeConfirmationModal() {
-        const modal = document.querySelector('[style*="position: fixed"][style*="z-index: 10000"]');
-        if (modal) {
-            document.body.removeChild(modal);
-        }
-    }
-
-    function confirmOperation(operation, data, expectedText) {
-        const input = document.getElementById('confirmationInput');
-        if (input.value.trim() === expectedText) {
-            closeConfirmationModal();
-            window.operationConfirmations[operation + '_' + data.length] = true;
-            executeBulkOperation(operation, data);
-        }
-    }
-
-    // Update original executeBulkOperation to use confirmation
-    const originalExecuteBulkOperation = window.executeBulkOperation;
-    window.executeBulkOperation = function(operation, data) {
-        executeBulkOperationWithConfirmation(operation, data);
-    };
-
-    </script>
-    """
-
-    components.html(confirmation_js, height=1)
+        with summary_col2:
+            if st.session_state.selected_candidate_ids:
+                st.warning(f"🎯 {len(st.session_state.selected_candidate_ids)} candidates selected")
+            else:
+                st.info("📋 No candidates selected")
 
 
-# ===================================================================================
-# MAIN APPLICATION ROUTER WITH PERFORMANCE MONITORING
-# ===================================================================================
+# =============================================================================
+# Main Router
+# =============================================================================
 
 def main():
-    """Main application with ultra-fast performance monitoring."""
-
-    # Performance monitoring
-    app_start_time = time.time()
-
+    """Main application router with enhanced zero refresh capabilities."""
     require_login()
 
     user = get_current_user(refresh=True)
@@ -1938,83 +2051,50 @@ def main():
         st.error("Authentication required")
         st.stop()
 
-    user_id = user.get("id")
-    perms = get_user_permissions(user_id)
+    perms = _check_user_permissions(user.get("id"))
+    role = perms.get("role", "user")
 
-    if not perms or perms.get("role", "").lower() not in ("ceo", "admin"):
+    if role not in ("ceo", "admin"):
         st.error("Access denied. CEO/Admin role required.")
         st.stop()
 
-    # Handle JavaScript bulk operations
-    components.html("""
-    <script>
-    window.addEventListener('bulkOperation', function(event) {
-        const operation = event.detail.operation;
-        const data = event.detail.data;
+    # Initialize session state for all operations
+    if 'selected_candidate_ids' not in st.session_state:
+        st.session_state.selected_candidate_ids = set()
+    if 'selected_user_ids' not in st.session_state:
+        st.session_state.selected_user_ids = set()
+    if 'show_bulk_delete_confirm' not in st.session_state:
+        st.session_state.show_bulk_delete_confirm = False
 
-        // Send to Streamlit via session state
-        window.parent.postMessage({
-            type: 'streamlit:setComponentValue',
-            data: {
-                bulk_operation_data: {
-                    operation: operation,
-                    data: data
-                }
-            }
-        }, '*');
-    });
-    </script>
-    """, height=1)
-
-    # Initialize session state for bulk operations
-    if 'bulk_operation_data' not in st.session_state:
-        st.session_state.bulk_operation_data = None
-
-    # Sidebar with performance info
-    st.sidebar.title("🚀 Ultra CEO Panel")
+    # Sidebar navigation
+    st.sidebar.title("🎯 CEO Control Panel")
     st.sidebar.caption(f"👤 {user.get('email', 'User')}")
-    st.sidebar.caption(f"🔑 Role: {perms.get('role', 'Unknown').title()}")
+    st.sidebar.caption(f"🔑 Role: {role.title()}")
     st.sidebar.markdown("---")
 
-    # Performance metrics in sidebar
-    load_time = round((time.time() - app_start_time) * 1000, 2)
-    st.sidebar.metric("⚡ App Load Time", f"{load_time}ms")
+    pages = {
+        "📊 Dashboard": show_ceo_panel,
+        "👥 Manage Users": show_user_management_panel
+    }
 
-    # Cache status
-    candidates_cached = len(get_candidates_ultra_fast.__wrapped__.__cache_info__.currsize) if hasattr(
-        get_candidates_ultra_fast.__wrapped__, '__cache_info__') else 0
-    users_cached = len(get_users_ultra_fast.__wrapped__.__cache_info__.currsize) if hasattr(
-        get_users_ultra_fast.__wrapped__, '__cache_info__') else 0
-
-    st.sidebar.caption("**Cache Status:**")
-    st.sidebar.caption(f"- Candidates: {'✅ Cached' if candidates_cached else '❌ Not cached'}")
-    st.sidebar.caption(f"- Users: {'✅ Cached' if users_cached else '❌ Not cached'}")
+    selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
 
     st.sidebar.markdown("---")
-    st.sidebar.caption("**🚀 Ultra Features:**")
-    st.sidebar.caption("- ✅ Multi-threaded Operations")
-    st.sidebar.caption("- ✅ Batch Database Processing")
-    st.sidebar.caption("- ✅ Connection Pooling")
-    st.sidebar.caption("- ✅ Advanced JavaScript UI")
-    st.sidebar.caption("- ✅ Real-time Confirmations")
-    st.sidebar.caption("- ✅ Smart Caching (5min)")
-    st.sidebar.caption("- ✅ CSV/Email Export")
-    st.sidebar.caption("- ✅ Bulk Email System")
-    st.sidebar.caption("- ✅ Password Reset Tools")
+    st.sidebar.caption("⚡ **OPTIMIZED** Features:")
+    st.sidebar.caption("- ✅ Minimal Refresh Operations")
+    st.sidebar.caption("- ✅ Bulk Candidate Delete")
+    st.sidebar.caption("- ✅ Bulk User Management")
+    st.sidebar.caption("- ✅ Fast Selection System")
+    st.sidebar.caption("- ✅ Enhanced JavaScript UI")
+    st.sidebar.caption("- ✅ Smart Caching (10min)")
+    st.sidebar.caption("- ✅ Real-time Feedback")
 
-    # Clear cache option
-    if st.sidebar.button("🗑️ Clear All Caches"):
-        clear_all_caches()
-        st.sidebar.success("✅ Caches cleared!")
-        st.rerun()
-
-    # Main dashboard
-    render_operation_confirmation_system()
-    show_ceo_panel()
-
-    # Performance footer
-    total_time = round((time.time() - app_start_time) * 1000, 2)
-    st.caption(f"⚡ Total page load time: {total_time}ms")
+    # Run selected page
+    try:
+        pages[selected_page]()
+    except Exception as e:
+        st.error(f"Page error: {e}")
+        st.exception(e)
 
 
 if __name__ == "__main__":
