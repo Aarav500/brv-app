@@ -1319,7 +1319,7 @@ class BulkOperationHandlers:
 # ULTRA-ENHANCED DASHBOARD WITH REAL-TIME OPERATIONS
 # ===================================================================================
 
-def show_ultra_enhanced_ceo_dashboard():
+def show_ceo_panel():
     """Ultra-enhanced CEO dashboard with all bulk operations."""
 
     require_login()
@@ -1552,6 +1552,27 @@ def show_candidate_management_tab(candidates: List[Dict], user_id: int, perms: D
                                     st.error(f"❌ {message}")
 
             st.markdown('</div>', unsafe_allow_html=True)
+
+
+def show_user_management_panel():
+    """Wrapper function for user management to maintain compatibility."""
+    require_login()
+
+    user = get_current_user(refresh=True)
+    if not user:
+        st.error("Authentication required")
+        st.stop()
+
+    user_id = user.get("id")
+    perms = get_user_permissions(user_id)
+
+    if not perms or perms.get("role", "").lower() not in ("ceo", "admin"):
+        st.error("Access denied. CEO/Admin role required.")
+        st.stop()
+
+    # Load users and show management interface
+    users = get_users_ultra_fast()
+    show_user_management_tab(users, user_id, perms)
 
 
 def show_user_management_tab(users: List[Dict], current_user_id: int, perms: Dict):
@@ -1989,7 +2010,7 @@ def main():
 
     # Main dashboard
     render_operation_confirmation_system()
-    show_ultra_enhanced_ceo_dashboard()
+    show_ceo_panel()
 
     # Performance footer
     total_time = round((time.time() - app_start_time) * 1000, 2)
