@@ -1129,10 +1129,8 @@ def _render_enhanced_bulk_candidate_controls(candidates: List[Dict], perms: Dict
 
     <script>
     function checkCandidateDeleteConfirmation() {
-        const input =
-    document.getElementById('candidate-delete-confirmation-input');
-    const
-    button = document.getElementById('bulk-candidate-delete-btn');
+        const input = document.getElementById('candidate-delete-confirmation-input');
+        const button = document.getElementById('bulk-candidate-delete-btn');
 
     if (input.value.trim() === 'DELETE CANDIDATES') {
     button.disabled = false;
