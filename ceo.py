@@ -846,6 +846,18 @@ def _check_user_permissions(user_id: int) -> Dict[str, Any]:
         if not perms:
             return {"role": "user", "can_view_cvs": False, "can_delete_records": False, "can_manage_users": False}
 
+        role = (perms.get("role") or "user").lower()
+
+        return {
+            "role": role,
+            "can_view_cvs": bool(perms.get("can_view_cvs", False)),
+            "can_delete_records": bool(perms.get("can_delete_records", False)),
+            "can_manage_users": role in ("ceo", "admin")
+        }
+    except Exception as e:
+        st.error(f"Permission check failed: {e}")
+        return {"role": "user", "can_view_cvs": False, "can_delete_records": False, "can_manage_users": False}
+
 
 # =============================================================================
 # CV Access with Proper Rights Check
@@ -1593,73 +1605,77 @@ def show_user_management_panel():
     # Render bulk user controls
     _render_bulk_user_controls(users, perms)
 
-    # Handle JavaScript events
-    if 'js_events' not in st.session_state:
-        st.session_state.js_events = {}
+    # Simple streamlit-based bulk operations for now
+    if 'bulk_user_operation' not in st.session_state:
+        st.session_state.bulk_user_operation = None
 
-    # Listen for JavaScript events via query params or session state
-    js_event_listener = """
-    <script>
-    window.addEventListener('bulkUserDelete', function(e) {
-        // Send to Streamlit via form submission or session state
-        const userIds = e.detail.userIds;
-        console.log('Bulk user delete requested:', userIds);
+    # Bulk action buttons
+    st.markdown("### 🔧 Quick Bulk Actions")
+    bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns(4)
 
-        // Use Streamlit's communication method
-        window.parent.postMessage({
-            type: 'bulk_user_delete',
-            userIds: userIds
-        }, '*');
-    });
+    with bulk_col1:
+        if st.button("✅ Grant CV View to Selected"):
+            st.session_state.bulk_user_operation = 'grant_cv_view'
+            st.rerun()
 
-    window.addEventListener('bulkPermissionUpdate', function(e) {
-        const {userIds, permission, value} = e.detail;
-        console.log('Bulk permission update:', userIds, permission, value);
+    with bulk_col2:
+        if st.button("🗑️ Grant Delete to Selected"):
+            st.session_state.bulk_user_operation = 'grant_delete'
+            st.rerun()
 
-        window.parent.postMessage({
-            type: 'bulk_permission_update',
-            userIds: userIds,
-            permission: permission,
-            value: value
-        }, '*');
-    });
-    </script>
-    """
-    components.html(js_event_listener, height=1)
+    with bulk_col3:
+        if st.button("❌ Revoke CV View from Selected"):
+            st.session_state.bulk_user_operation = 'revoke_cv_view'
+            st.rerun()
 
-    # Process bulk operations if requested
-    if st.session_state.get('bulk_user_delete_requested'):
-        user_ids = st.session_state.get('bulk_user_delete_ids', [])
-        if user_ids:
-            if _handle_bulk_user_delete(user_ids, user.get("id")):
-                st.session_state.bulk_user_delete_requested = False
-                st.session_state.bulk_user_delete_ids = []
-                st.rerun()
+    with bulk_col4:
+        if st.button("❌ Revoke Delete from Selected"):
+            st.session_state.bulk_user_operation = 'revoke_delete'
+            st.rerun()
 
-    if st.session_state.get('bulk_permission_update_requested'):
-        user_ids = st.session_state.get('bulk_permission_update_ids', [])
-        permission = st.session_state.get('bulk_permission_update_permission', '')
-        value = st.session_state.get('bulk_permission_update_value', False)
+    # Process bulk operations
+    if st.session_state.bulk_user_operation:
+        # Get selected user IDs from session state (you'd need to track these)
+        selected_user_ids = getattr(st.session_state, 'selected_user_ids', set())
 
-        if user_ids and permission:
-            if _handle_bulk_permission_update(user_ids, permission, value, user.get("id")):
-                st.session_state.bulk_permission_update_requested = False
-                st.session_state.bulk_permission_update_ids = []
-                st.session_state.bulk_permission_update_permission = ''
-                st.session_state.bulk_permission_update_value = False
-                st.rerun()
+        if selected_user_ids:
+            op = st.session_state.bulk_user_operation
+
+            if op == 'grant_cv_view':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_view_cvs', True, user.get("id"))
+            elif op == 'grant_delete':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_delete_records', True, user.get("id"))
+            elif op == 'revoke_cv_view':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_view_cvs', False, user.get("id"))
+            elif op == 'revoke_delete':
+                _handle_bulk_permission_update(list(selected_user_ids), 'can_delete_records', False, user.get("id"))
+
+            st.session_state.bulk_user_operation = None
+            st.rerun()
+        else:
+            st.warning("No users selected. Please select users first.")
+            st.session_state.bulk_user_operation = None
+
+    # Initialize selected users tracking
+    if 'selected_user_ids' not in st.session_state:
+        st.session_state.selected_user_ids = set()
 
     # Display users with instant selection
     for user_data in users:
         user_id = user_data.get('id')
         user_email = user_data.get('email', 'No email')
         user_role = user_data.get('role', 'user')
+        is_selected = str(user_id) in st.session_state.selected_user_ids
 
         with st.container():
             sel_col, content_col = st.columns([0.05, 0.95])
 
             with sel_col:
-                _render_instant_user_checkbox(user_id)
+                # Simple checkbox for user selection
+                if st.checkbox("", value=is_selected, key=f"user_sel_{user_id}"):
+                    st.session_state.selected_user_ids.add(str(user_id))
+                else:
+                    st.session_state.selected_user_ids.discard(str(user_id))
 
             with content_col:
                 with st.expander(f"👤 {user_email} (Role: {user_role})", expanded=False):
@@ -1678,7 +1694,7 @@ def show_user_management_panel():
                     with perm_col:
                         st.markdown("**Quick Actions:**")
 
-                        # Individual permission toggles (still with refresh, but faster)
+                        # Individual permission toggles
                         can_view_cvs = st.checkbox(
                             "Can View CVs",
                             value=bool(user_data.get('can_view_cvs', False)),
@@ -1720,6 +1736,10 @@ def show_user_management_panel():
                     with perm_col2:
                         del_status = '✅ Enabled' if user_data.get('can_delete_records') else '❌ Disabled'
                         st.markdown(f"- **Delete Records:** {del_status}")
+
+    # Show selection summary
+    if st.session_state.selected_user_ids:
+        st.info(f"📋 {len(st.session_state.selected_user_ids)} users selected for bulk operations")
 
 
 # =============================================================================
@@ -1824,64 +1844,55 @@ def show_ceo_panel():
     # Render bulk candidate controls
     _render_bulk_candidate_controls(filtered_candidates, perms)
 
-    # Handle JavaScript events for bulk operations
-    js_event_handler = """
-    <script>
-    window.addEventListener('bulkCandidateDelete', function(e) {
-        const candidateIds = e.detail.candidateIds;
-        console.log('Bulk candidate delete requested:', candidateIds);
+    # Initialize session state for selected candidates
+    if 'selected_candidate_ids' not in st.session_state:
+        st.session_state.selected_candidate_ids = set()
 
-        // Trigger Streamlit rerun with bulk delete flag
-        window.parent.postMessage({
-            type: 'bulk_candidate_delete',
-            candidateIds: candidateIds
-        }, '*');
-    });
-    </script>
-    """
-    components.html(js_event_handler, height=1)
+    # Simple bulk operations using streamlit (fallback if JS doesn't work)
+    if perms.get("can_delete_records"):
+        st.markdown("### 🔧 Bulk Operations")
 
-    # Process bulk operations if requested
-    if st.session_state.get('bulk_candidate_delete_requested'):
-        candidate_ids = st.session_state.get('bulk_candidate_delete_ids', [])
-        if candidate_ids:
-            if _handle_bulk_candidate_delete(candidate_ids, user_id):
-                st.session_state.bulk_candidate_delete_requested = False
-                st.session_state.bulk_candidate_delete_ids = []
+        bulk_ops_col1, bulk_ops_col2, bulk_ops_col3 = st.columns([2, 2, 2])
+
+        with bulk_ops_col1:
+            if st.button("☑️ Select All Visible"):
+                for candidate in filtered_candidates:
+                    st.session_state.selected_candidate_ids.add(candidate.get('candidate_id', ''))
                 st.rerun()
 
-    # Alternative method: Use buttons with session state for immediate operations
-    bulk_ops_col1, bulk_ops_col2, bulk_ops_col3 = st.columns([2, 1, 1])
-
-    with bulk_ops_col1:
-        st.write("")  # Spacing
-
-    with bulk_ops_col2:
-        if st.button("🗑️ DELETE SELECTED", key="bulk_delete_btn", type="primary"):
-            # Get selected candidates from JavaScript state (would need bridge)
-            # For now, use a simple approach with session state
-            if hasattr(st.session_state, 'selected_candidate_ids') and st.session_state.selected_candidate_ids:
-                st.session_state.bulk_candidate_delete_requested = True
-                st.session_state.bulk_candidate_delete_ids = list(st.session_state.selected_candidate_ids)
+        with bulk_ops_col2:
+            if st.button("❌ Clear Selection"):
+                st.session_state.selected_candidate_ids.clear()
                 st.rerun()
-            else:
-                st.warning("No candidates selected. Please select candidates using the checkboxes.")
 
-    with bulk_ops_col3:
-        if st.button("❌ CLEAR SELECTION", key="clear_selection_btn"):
-            if hasattr(st.session_state, 'selected_candidate_ids'):
-                st.session_state.selected_candidate_ids = set()
-            # Clear JavaScript selection too
-            clear_js = """
-            <script>
-            window.candidateSelections.clear();
-            document.querySelectorAll('[id^="cb_candidate_"]').forEach(cb => cb.checked = false);
-            updateSelectionDisplay();
-            saveSelectionState();
-            </script>
-            """
-            components.html(clear_js, height=1)
-            st.rerun()
+        with bulk_ops_col3:
+            selected_count = len(st.session_state.selected_candidate_ids)
+            if selected_count > 0:
+                if st.button(f"🗑️ Delete {selected_count} Selected", type="primary"):
+                    # Show confirmation
+                    st.session_state.show_bulk_delete_confirm = True
+                    st.rerun()
+
+        # Bulk delete confirmation
+        if st.session_state.get('show_bulk_delete_confirm', False):
+            st.error(f"⚠️ **Confirm deletion of {len(st.session_state.selected_candidate_ids)} candidates?**")
+
+            confirm_col1, confirm_col2 = st.columns(2)
+            with confirm_col1:
+                if st.button("✅ Yes, Delete All", type="primary"):
+                    if _handle_bulk_candidate_delete(list(st.session_state.selected_candidate_ids), user_id):
+                        st.session_state.selected_candidate_ids.clear()
+                        st.session_state.show_bulk_delete_confirm = False
+                        st.rerun()
+
+            with confirm_col2:
+                if st.button("❌ Cancel"):
+                    st.session_state.show_bulk_delete_confirm = False
+                    st.rerun()
+
+    # Show selection count
+    if st.session_state.selected_candidate_ids:
+        st.info(f"📋 {len(st.session_state.selected_candidate_ids)} candidates selected")
 
     # Pagination
     items_per_page = 10
@@ -1896,21 +1907,22 @@ def show_ceo_panel():
     else:
         page_candidates = filtered_candidates
 
-    # Initialize session state for selected candidates
-    if 'selected_candidate_ids' not in st.session_state:
-        st.session_state.selected_candidate_ids = set()
-
-    # Render candidates with zero refresh selection
+    # Render candidates with selection
     for candidate in page_candidates:
         candidate_id = candidate.get('candidate_id', '')
         candidate_name = candidate.get('name', 'Unnamed')
+        is_selected = candidate_id in st.session_state.selected_candidate_ids
 
         with st.container():
             sel_col, content_col = st.columns([0.05, 0.95])
 
             with sel_col:
                 if perms.get("can_delete_records"):
-                    _render_instant_candidate_checkbox(candidate_id)
+                    # Simple checkbox for candidate selection
+                    if st.checkbox("", value=is_selected, key=f"cand_sel_{candidate_id}"):
+                        st.session_state.selected_candidate_ids.add(candidate_id)
+                    else:
+                        st.session_state.selected_candidate_ids.discard(candidate_id)
                 else:
                     st.write("")
 
@@ -1938,47 +1950,14 @@ def show_ceo_panel():
                         st.markdown("### ⚙️ Actions")
                         st.caption(f"ID: {candidate_id}")
 
-                        # Selection status (read-only display)
+                        # Selection status
                         if perms.get("can_delete_records"):
-                            selection_status = """
-                            <div id="selection_status_{}" style="
-                                padding: 0.5rem;
-                                border-radius: 5px;
-                                text-align: center;
-                                font-weight: bold;
-                                margin: 0.5rem 0;
-                            ">
-                                <span id="status_text_{}">Click checkbox to select</span>
-                            </div>
+                            if is_selected:
+                                st.success("✅ Selected for bulk delete")
+                            else:
+                                st.info("☐ Click checkbox to select")
 
-                            <script>
-                            function updateSelectionStatus() {{
-                                const isSelected = window.candidateSelections && window.candidateSelections.has('{}');
-                                const statusDiv = document.getElementById('selection_status_{}');
-                                const statusText = document.getElementById('status_text_{}');
-
-                                if (isSelected) {{
-                                    statusDiv.style.background = '#d4edda';
-                                    statusDiv.style.color = '#155724';
-                                    statusDiv.style.border = '1px solid #c3e6cb';
-                                    statusText.textContent = '✅ Selected for bulk operations';
-                                }} else {{
-                                    statusDiv.style.background = '#f8f9fa';
-                                    statusDiv.style.color = '#6c757d';
-                                    statusDiv.style.border = '1px solid #dee2e6';
-                                    statusText.textContent = 'Click checkbox to select';
-                                }}
-                            }}
-
-                            // Update status periodically
-                            setInterval(updateSelectionStatus, 500);
-                            setTimeout(updateSelectionStatus, 100);
-                            </script>
-                            """.format(candidate_id, candidate_id, candidate_id, candidate_id, candidate_id)
-
-                            components.html(selection_status, height=60)
-
-                        # Toggle edit permission (still requires refresh but faster)
+                        # Toggle edit permission
                         current_can_edit = candidate.get('can_edit', False)
                         toggle_label = "🔓 Grant Edit" if not current_can_edit else "🔒 Revoke Edit"
 
@@ -2000,7 +1979,7 @@ def show_ceo_panel():
                         else:
                             st.info("🔒 Cannot edit application")
 
-                        # Individual delete button (with confirmation)
+                        # Individual delete button
                         if perms.get("can_delete_records"):
                             st.markdown("---")
                             individual_delete_key = f"individual_delete_{candidate_id}"
@@ -2053,19 +2032,10 @@ def show_ceo_panel():
                 f"📊 Showing {len(page_candidates)} of {total_candidates} candidates (Page {page if total_pages > 1 else 1} of {total_pages})")
 
         with summary_col2:
-            # Live selection count
-            live_count_html = """
-            <div style="
-                background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-                padding: 1rem;
-                border-radius: 8px;
-                text-align: center;
-                border: 1px solid #2196f3;
-            ">
-                <strong>🎯 <span class="candidate-selection-count">0</span> candidates selected for bulk operations</strong>
-            </div>
-            """
-            components.html(live_count_html, height=60)
+            if st.session_state.selected_candidate_ids:
+                st.warning(f"🎯 {len(st.session_state.selected_candidate_ids)} candidates selected")
+            else:
+                st.info("📋 No candidates selected")
 
 
 # =============================================================================
@@ -2091,12 +2061,10 @@ def main():
     # Initialize session state for all operations
     if 'selected_candidate_ids' not in st.session_state:
         st.session_state.selected_candidate_ids = set()
-    if 'bulk_candidate_delete_requested' not in st.session_state:
-        st.session_state.bulk_candidate_delete_requested = False
-    if 'bulk_user_delete_requested' not in st.session_state:
-        st.session_state.bulk_user_delete_requested = False
-    if 'bulk_permission_update_requested' not in st.session_state:
-        st.session_state.bulk_permission_update_requested = False
+    if 'selected_user_ids' not in st.session_state:
+        st.session_state.selected_user_ids = set()
+    if 'show_bulk_delete_confirm' not in st.session_state:
+        st.session_state.show_bulk_delete_confirm = False
 
     # Sidebar navigation
     st.sidebar.title("🎯 CEO Control Panel")
@@ -2112,13 +2080,13 @@ def main():
     selected_page = st.sidebar.radio("Navigate to:", list(pages.keys()))
 
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ **ZERO REFRESH** Features:")
-    st.sidebar.caption("- ✅ Instant Selection (No Refresh)")
-    st.sidebar.caption("- ✅ Bulk Delete (1 Confirmation)")
+    st.sidebar.caption("⚡ **OPTIMIZED** Features:")
+    st.sidebar.caption("- ✅ Minimal Refresh Operations")
+    st.sidebar.caption("- ✅ Bulk Candidate Delete")
     st.sidebar.caption("- ✅ Bulk User Management")
-    st.sidebar.caption("- ✅ Live Selection Counter")
-    st.sidebar.caption("- ✅ JavaScript-Powered UI")
-    st.sidebar.caption("- ✅ Fast Cache (10s)")
+    st.sidebar.caption("- ✅ Fast Selection System")
+    st.sidebar.caption("- ✅ Enhanced JavaScript UI")
+    st.sidebar.caption("- ✅ Smart Caching (10min)")
     st.sidebar.caption("- ✅ Real-time Feedback")
 
     # Run selected page
@@ -2131,17 +2099,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    _manage_users
-    ": False}
-
-    role = (perms.get("role") or "user").lower()
-
-    return {
-        "role": role,
-        "can_view_cvs": bool(perms.get("can_view_cvs", False)),
-        "can_delete_records": bool(perms.get("can_delete_records", False)),
-        "can_manage_users": role in ("ceo", "admin")
-    }
-except Exception as e:
-st.error(f"Permission check failed: {e}")
-return {"role": "user", "can_view_cvs": False, "can
