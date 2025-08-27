@@ -1121,10 +1121,10 @@ def _render_enhanced_bulk_candidate_controls(candidates: List[Dict], perms: Dict
     </div>
 
     <style>
-    @keyframes shimmer {
-    0 % {transform: translateX(-100 %);}
-    100 % {transform: translateX(100 % );}
-    }
+    @keyframes shimmer {{
+        0%% {{ transform: translateX(-100%%); }}
+        100%% {{ transform: translateX(100%%); }}
+    }}
     </style>
 
     <script>
